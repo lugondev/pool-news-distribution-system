@@ -2,10 +2,12 @@
 AI rewriter: tóm tắt + dịch bài sang VI/EN dùng OpenAI-compatible API.
 """
 import asyncio
+import json
 import logging
 import os
 from typing import Any
 
+import yaml
 from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -17,19 +19,39 @@ from webhook.dispatcher import dispatch_article
 logger = logging.getLogger(__name__)
 
 _client: AsyncOpenAI | None = None
+_client_fingerprint: str | None = None
 
 
-def get_openai_client() -> AsyncOpenAI:
-    global _client
-    if _client is None:
-        _client = AsyncOpenAI(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-            default_headers={
-                "HTTP-Referer": "https://github.com/news-aggregator",
-                "X-Title": "News Aggregator",
-            },
-        )
+def _load_ai_config() -> dict:
+    with open("config/settings.yaml") as f:
+        cfg = yaml.safe_load(f)
+    return cfg.get("ai", {})
+
+
+def get_openai_client(api_key: str | None = None, base_url: str | None = None) -> AsyncOpenAI:
+    """
+    Return a cached AsyncOpenAI client. Recreates if connection params changed.
+    Priority: explicit params > settings.yaml > env vars.
+    """
+    global _client, _client_fingerprint
+
+    resolved_key = api_key or os.getenv("OPENAI_API_KEY", "")
+    resolved_url = base_url or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    fingerprint = f"{resolved_key}|{resolved_url}"
+
+    if _client is not None and _client_fingerprint == fingerprint:
+        return _client
+
+    _client = AsyncOpenAI(
+        api_key=resolved_key,
+        base_url=resolved_url,
+        default_headers={
+            "HTTP-Referer": "https://github.com/news-aggregator",
+            "X-Title": "News Aggregator",
+        },
+    )
+    _client_fingerprint = fingerprint
+    logger.info(f"OpenAI client initialized: base_url={resolved_url}")
     return _client
 
 
@@ -51,11 +73,12 @@ async def rewrite_article(
     article: dict,
     model: str = "gpt-4o-mini",
     max_tokens: int = 300,
+    temperature: float = 0.3,
+    api_key: str | None = None,
+    base_url: str | None = None,
 ) -> tuple[str, str, int]:
-    """
-    Returns (vi_summary, en_summary, tokens_used).
-    """
-    client = get_openai_client()
+    """Returns (vi_summary, en_summary, tokens_used)."""
+    client = get_openai_client(api_key=api_key, base_url=base_url)
     content = article.get("content") or article.get("summary") or ""
     title = article.get("title", "")
 
@@ -66,10 +89,9 @@ async def rewrite_article(
         messages=[{"role": "user", "content": prompt}],
         max_tokens=max_tokens,
         response_format={"type": "json_object"},
-        temperature=0.3,
+        temperature=temperature,
     )
 
-    import json
     result = json.loads(response.choices[0].message.content)
     tokens = response.usage.total_tokens if response.usage else 0
     return result.get("vi", ""), result.get("en", ""), tokens
@@ -79,7 +101,11 @@ async def process_pending_articles(
     redis: aioredis.Redis,
     model: str = "gpt-4o-mini",
     batch_size: int = 5,
-    webhook_urls: list[str] | None = None,
+    max_tokens: int = 300,
+    temperature: float = 0.3,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    webhook_endpoints: list[dict] | None = None,
 ) -> int:
     """
     Lấy các bài pending, rewrite rồi dispatch webhook.
@@ -89,7 +115,13 @@ async def process_pending_articles(
     if not articles:
         return 0
 
-    tasks = [rewrite_article(a, model=model) for a in articles]
+    tasks = [
+        rewrite_article(
+            a, model=model, max_tokens=max_tokens,
+            temperature=temperature, api_key=api_key, base_url=base_url,
+        )
+        for a in articles
+    ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     processed = 0
@@ -102,11 +134,10 @@ async def process_pending_articles(
         await update_article_ai(redis, article["id"], vi, en)
         await log_ai_usage(article["id"], model, tokens)
 
-        # Enrich article với AI output rồi dispatch
         article["ai_summary_vi"] = vi
         article["ai_summary_en"] = en
-        if webhook_urls:
-            await dispatch_article(article, webhook_urls)
+        if webhook_endpoints:
+            await dispatch_article(article, webhook_endpoints)
 
         processed += 1
         logger.info(f"Processed article {article['id']}: {article['title'][:60]}...")

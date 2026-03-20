@@ -72,16 +72,24 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
         coalesce=True,
     )
 
-    # Job 2: AI rewrite pending articles (chạy sau crawl 1 phút, rồi mỗi 5 phút)
+    # Job 2: AI rewrite pending articles (hot-reload config mỗi lần chạy)
     if ai_cfg.get("enabled", True):
-        webhook_urls = webhook_cfg.get("urls", []) if webhook_cfg.get("enabled") else []
-
         async def ai_job():
+            current_cfg = _load_config()
+            ai = current_cfg.get("ai", {})
+            wh = current_cfg.get("webhook", {})
+            if not ai.get("enabled", True):
+                return
+            endpoints = wh.get("endpoints", [])
             processed = await process_pending_articles(
                 redis=redis,
-                model=ai_cfg.get("model", "gpt-4o-mini"),
-                batch_size=ai_cfg.get("batch_size", 5),
-                webhook_urls=webhook_urls,
+                model=ai.get("model", "gpt-4o-mini"),
+                batch_size=ai.get("batch_size", 5),
+                max_tokens=ai.get("max_tokens_summary", 300),
+                temperature=ai.get("temperature", 0.3),
+                api_key=ai.get("api_key") or None,
+                base_url=ai.get("base_url") or None,
+                webhook_endpoints=endpoints,
             )
             if processed:
                 logger.info(f"AI job: processed {processed} articles")

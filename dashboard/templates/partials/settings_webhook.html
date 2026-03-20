@@ -1,59 +1,136 @@
-<div class="panel">
+<div class="panel-inner">
   <h3>Webhook Delivery</h3>
   <p class="desc">
-    After AI summarization, articles are POSTed as JSON to configured URLs.
+    After AI summarization, each processed article is POSTed as JSON to all enabled webhook endpoints.
+    Each endpoint has its own URL, retry, and timeout config.
   </p>
 
   {% if success %}
   <div class="alert alert-success">{{ success }}</div>
   {% endif %}
+  {% if error %}
+  <div class="alert alert-error">{{ error }}</div>
+  {% endif %}
 
-  <form hx-post="/settings/webhook" hx-target="#webhook-panel" hx-swap="innerHTML">
-    <div class="toggle-row">
-      <input type="hidden" name="enabled" value="off">
-      <input type="checkbox" name="enabled" value="on" id="wh-enabled"
-             {% if webhook.enabled %}checked{% endif %}
-             style="accent-color:var(--accent)">
-      <label for="wh-enabled" class="toggle-label">Enable webhook dispatch</label>
-      {% if webhook.enabled %}
-        <span class="toggle-status toggle-on">ACTIVE</span>
-      {% else %}
-        <span class="toggle-status toggle-off">DISABLED</span>
-      {% endif %}
-    </div>
+  <!-- Endpoint list -->
+  <p class="section-title" style="margin-top:4px">Endpoints ({{ endpoints|length }})</p>
 
-    <div class="form-group">
-      <label>Webhook URLs <span class="hint">— one URL per line</span></label>
-      <textarea name="urls" rows="4"
-                placeholder="https://your-webhook.com/news&#10;https://another-service.com/api/ingest">{% for u in webhook.urls %}{{ u }}{% if not loop.last %}
-{% endif %}{% endfor %}</textarea>
-    </div>
-
-    <div class="form-row-3">
-      <div class="form-group">
-        <label>Retry Attempts</label>
-        <input type="number" name="retry_attempts" value="{{ webhook.retry_attempts or 3 }}" min="1" max="10">
+  {% for ep in endpoints %}
+  <div class="wh-card" id="wh-{{ ep.id }}">
+    <div class="wh-header">
+      <div class="wh-info">
+        <span class="wh-name">{{ ep.name }}</span>
+        <span class="wh-id">{{ ep.id }}</span>
+        {% if ep.enabled %}
+          <span class="toggle-status toggle-on" style="font-size:10px">ON</span>
+        {% else %}
+          <span class="toggle-status toggle-off" style="font-size:10px">OFF</span>
+        {% endif %}
       </div>
-      <div class="form-group">
-        <label>Retry Delay (s)</label>
-        <input type="number" name="retry_delay" value="{{ webhook.retry_delay_seconds or 5 }}" min="1" max="60">
-      </div>
-      <div class="form-group">
-        <label>Timeout (s)</label>
-        <input type="number" name="timeout" value="{{ webhook.timeout_seconds or 10 }}" min="1" max="60">
+      <div class="wh-actions">
+        <button class="btn btn-sm btn-toggle"
+                hx-post="/webhooks/{{ ep.id }}/toggle"
+                hx-target="#tab-panel-webhook" hx-swap="innerHTML">
+          {% if ep.enabled %}Disable{% else %}Enable{% endif %}
+        </button>
+        <button class="btn btn-sm btn-edit" onclick="toggleEdit('{{ ep.id }}')">Edit</button>
+        <button class="btn btn-sm btn-danger"
+                hx-delete="/webhooks/{{ ep.id }}"
+                hx-target="#tab-panel-webhook" hx-swap="innerHTML"
+                hx-confirm="Delete webhook '{{ ep.name }}'?">
+          Del
+        </button>
       </div>
     </div>
-
-    <div class="form-actions">
-      <button type="submit" class="btn btn-primary">Save Webhook Settings</button>
+    <div class="wh-url">{{ ep.url }}</div>
+    <div class="wh-meta">
+      Retry: {{ ep.retry_attempts or 3 }}x · Delay: {{ ep.retry_delay_seconds or 5 }}s · Timeout: {{ ep.timeout_seconds or 10 }}s
     </div>
-  </form>
 
-  <!-- Webhook payload format -->
+    <!-- Inline edit form (hidden by default) -->
+    <form class="wh-edit-form" id="edit-{{ ep.id }}" style="display:none"
+          hx-put="/webhooks/{{ ep.id }}"
+          hx-target="#tab-panel-webhook" hx-swap="innerHTML">
+      <div class="form-row-2">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" name="name" value="{{ ep.name }}" required>
+        </div>
+        <div class="form-group">
+          <label>URL</label>
+          <input type="url" name="url" value="{{ ep.url }}" required>
+        </div>
+      </div>
+      <div class="form-row-3">
+        <div class="form-group">
+          <label>Retry</label>
+          <input type="number" name="retry_attempts" value="{{ ep.retry_attempts or 3 }}" min="1" max="10">
+        </div>
+        <div class="form-group">
+          <label>Delay (s)</label>
+          <input type="number" name="retry_delay" value="{{ ep.retry_delay_seconds or 5 }}" min="1" max="60">
+        </div>
+        <div class="form-group">
+          <label>Timeout (s)</label>
+          <input type="number" name="timeout" value="{{ ep.timeout_seconds or 10 }}" min="1" max="60">
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button type="submit" class="btn btn-sm btn-save">Save</button>
+        <button type="button" class="btn btn-sm btn-cancel" onclick="toggleEdit('{{ ep.id }}')">Cancel</button>
+      </div>
+    </form>
+  </div>
+  {% endfor %}
+
+  {% if not endpoints %}
+  <div class="empty-state" style="margin-bottom:16px">No webhook endpoints configured.</div>
+  {% endif %}
+
+  <!-- Add new endpoint -->
+  <div class="wh-add">
+    <p class="section-title">Add Endpoint</p>
+    <form hx-post="/webhooks/add" hx-target="#tab-panel-webhook" hx-swap="innerHTML">
+      <div class="form-row-2">
+        <div class="form-group">
+          <label>ID <span class="hint">— unique slug</span></label>
+          <input type="text" name="id" placeholder="e.g. slack-alerts" required>
+        </div>
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" name="name" placeholder="e.g. Slack Alerts" required>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>URL</label>
+        <input type="url" name="url" placeholder="https://hooks.slack.com/services/..." required>
+      </div>
+      <div class="form-row-3">
+        <div class="form-group">
+          <label>Retry</label>
+          <input type="number" name="retry_attempts" value="3" min="1" max="10">
+        </div>
+        <div class="form-group">
+          <label>Delay (s)</label>
+          <input type="number" name="retry_delay" value="5" min="1" max="60">
+        </div>
+        <div class="form-group">
+          <label>Timeout (s)</label>
+          <input type="number" name="timeout" value="10" min="1" max="60">
+        </div>
+      </div>
+      <div class="form-actions" style="margin-top:10px">
+        <button type="submit" class="btn btn-primary">Add Webhook</button>
+      </div>
+    </form>
+  </div>
+
+  <hr class="divider">
+
+  <!-- Payload format -->
   <p class="section-title">Payload Format</p>
   <div class="payload-box">
-    <span class="comment">// POST to each configured URL</span><br>
-    <span class="comment">// Content-Type: application/json</span><br>
+    <span class="comment">// POST to each enabled endpoint | Content-Type: application/json</span><br>
     {<br>
     &nbsp;&nbsp;<span class="key">"id"</span>: <span class="str">"a1b2c3d4e5f6..."</span>,<br>
     &nbsp;&nbsp;<span class="key">"source_id"</span>: <span class="str">"techcrunch"</span>,<br>
@@ -71,39 +148,25 @@
     }
   </div>
 
-  <!-- Recent webhook logs -->
-  <p class="section-title">Recent Deliveries</p>
-  {% if logs %}
-  <table class="log-table">
-    <thead>
-      <tr>
-        <th>Time</th>
-        <th>Article</th>
-        <th>URL</th>
-        <th>Status</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for log in logs %}
-      <tr>
-        <td class="mono">{{ log.sent_at[:16].replace('T',' ') if log.sent_at else '—' }}</td>
-        <td class="truncate" title="{{ log.article_title }}">{{ log.article_title[:40] }}{% if log.article_title|length > 40 %}...{% endif %}</td>
-        <td class="url-cell" title="{{ log.webhook_url }}">{{ log.webhook_url }}</td>
-        <td>
-          {% if log.success %}
-            <span class="status-ok">{{ log.status_code }}</span>
-          {% else %}
-            <span class="status-fail">{{ log.status_code or 'ERR' }}</span>
-            {% if log.error_msg %}
-              <div style="font-size:10px;color:var(--red);margin-top:2px">{{ log.error_msg[:60] }}{% if log.error_msg|length > 60 %}...{% endif %}</div>
-            {% endif %}
-          {% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <div class="empty-state">No webhook deliveries yet.</div>
-  {% endif %}
+  <hr class="divider">
+
+  <!-- Delivery log -->
+  <p class="section-title">Delivery Log</p>
+  <div id="webhook-logs">
+    {% include "partials/webhook_logs_table.html" %}
+  </div>
 </div>
+
+<script>
+  (function() {
+    var dot = document.getElementById('tab-webhook-dot');
+    if (dot) {
+      var hasEnabled = {{ 'true' if endpoints|selectattr('enabled')|list else 'false' }};
+      dot.className = 'tab-indicator ' + (hasEnabled ? 'on' : 'off');
+    }
+  })();
+  function toggleEdit(id) {
+    var form = document.getElementById('edit-' + id);
+    form.style.display = form.style.display === 'none' ? '' : 'none';
+  }
+</script>

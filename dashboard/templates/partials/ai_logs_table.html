@@ -1,0 +1,131 @@
+{% if logs %}
+<p style="font-size:11px;color:var(--muted);margin-bottom:10px">
+  Click a row to see the article input and AI-generated summaries.
+</p>
+<table class="log-table">
+  <thead>
+    <tr>
+      <th style="width:20px"></th>
+      <th>Time</th>
+      <th>Article</th>
+      <th>Source</th>
+      <th>Model</th>
+      <th style="text-align:center">Status</th>
+      <th style="text-align:right">Tokens</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for log in logs %}
+    <tr class="log-row-toggle" onclick="toggleLogDetail('ai-detail-{{ loop.index }}', this)">
+      <td><span class="log-expand" id="arrow-ai-detail-{{ loop.index }}">&#9654;</span></td>
+      <td class="mono">{{ log.created_at[:16].replace('T',' ') if log.created_at else '—' }}</td>
+      <td class="truncate" title="{{ log.article_title }}" style="max-width:200px">
+        {{ log.article_title[:45] }}{% if log.article_title|length > 45 %}...{% endif %}
+      </td>
+      <td>
+        {% if log.source_name %}
+          <span class="log-source">{{ log.source_name }}</span>
+          <span class="log-lang">{{ log.lang or '?' }}</span>
+        {% else %}
+          <span style="color:var(--muted)">—</span>
+        {% endif %}
+      </td>
+      <td class="mono">{{ log.model or '—' }}</td>
+      <td style="text-align:center">
+        {% if log.ai_status == 'done' %}
+          <span class="log-status-done">DONE</span>
+        {% elif log.ai_status %}
+          <span class="log-status-pending">{{ log.ai_status|upper }}</span>
+        {% else %}
+          <span style="color:var(--muted);font-size:10px">—</span>
+        {% endif %}
+      </td>
+      <td class="mono" style="text-align:right">{{ log.tokens_used or 0 }}</td>
+    </tr>
+    <tr class="log-row-detail" id="ai-detail-{{ loop.index }}">
+      <td colspan="7" class="log-detail-cell">
+        <div class="log-detail-inner">
+          <div class="log-detail-block">
+            <div class="lbl">Input — Article</div>
+            <div class="val" style="margin-bottom:6px">
+              {% if log.url %}
+                <a href="{{ log.url }}" target="_blank" rel="noopener" style="font-size:12px">{{ log.article_title }}</a>
+              {% else %}
+                {{ log.article_title }}
+              {% endif %}
+            </div>
+            <div style="font-size:10px;color:var(--muted)">
+              {% if log.source_name %}{{ log.source_name }}{% endif %}
+              {% if log.category %} · {{ log.category }}{% endif %}
+              {% if log.lang %} · {{ log.lang }}{% endif %}
+            </div>
+            <div style="font-size:10px;color:var(--muted);margin-top:4px">
+              ID: <span class="mono">{{ log.article_id }}</span>
+            </div>
+          </div>
+          <div class="log-detail-block">
+            <div class="lbl">Output — AI Summaries</div>
+            {% if log.ai_summary_vi %}
+            <div class="summary-text" style="margin-bottom:8px">
+              <span style="font-size:10px;color:var(--accent);font-weight:600">VI</span><br>
+              {{ log.ai_summary_vi }}
+            </div>
+            {% endif %}
+            {% if log.ai_summary_en %}
+            <div class="summary-text">
+              <span style="font-size:10px;color:var(--accent);font-weight:600">EN</span><br>
+              {{ log.ai_summary_en }}
+            </div>
+            {% endif %}
+            {% if not log.ai_summary_vi and not log.ai_summary_en %}
+            <div style="color:var(--muted);font-size:11px;font-style:italic">No summaries available (article may have expired from Redis)</div>
+            {% endif %}
+          </div>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if log_total_pages > 1 %}
+<div class="log-pagination">
+  <span class="info">{{ log_total }} entries</span>
+  <div class="pages">
+    <button class="page-btn" {% if log_page <= 1 %}disabled{% endif %}
+            hx-get="/partials/ai-logs?page={{ log_page - 1 }}"
+            hx-target="#ai-logs" hx-swap="innerHTML">
+      &larr;
+    </button>
+    {% for p in range(1, log_total_pages + 1) %}
+      {% if p == 1 or p == log_total_pages or (p >= log_page - 1 and p <= log_page + 1) %}
+    <button class="page-btn {% if p == log_page %}active{% endif %}"
+            hx-get="/partials/ai-logs?page={{ p }}"
+            hx-target="#ai-logs" hx-swap="innerHTML">{{ p }}</button>
+      {% elif p == 2 or p == log_total_pages - 1 %}
+    <span style="color:var(--muted);font-size:11px;padding:0 2px">...</span>
+      {% endif %}
+    {% endfor %}
+    <button class="page-btn" {% if log_page >= log_total_pages %}disabled{% endif %}
+            hx-get="/partials/ai-logs?page={{ log_page + 1 }}"
+            hx-target="#ai-logs" hx-swap="innerHTML">
+      &rarr;
+    </button>
+  </div>
+</div>
+{% endif %}
+
+<script>
+function toggleLogDetail(id, row) {
+  var detail = document.getElementById(id);
+  var arrow = document.getElementById('arrow-' + id);
+  if (detail) {
+    detail.classList.toggle('open');
+    if (arrow) arrow.classList.toggle('open');
+  }
+}
+</script>
+
+{% else %}
+<div class="empty-state">No AI processing logs yet.</div>
+{% endif %}

@@ -1,12 +1,11 @@
 """
 HTTP POST webhook dispatcher.
-Push article JSON đến các configured URLs với retry.
+Push article JSON đến các configured endpoints với retry.
 """
 import logging
 from datetime import datetime, timezone
 
 import httpx
-from tenacity import retry, stop_after_attempt, wait_fixed
 
 from storage.sqlite_stats import log_webhook
 
@@ -40,15 +39,24 @@ async def _post_webhook(url: str, payload: dict, timeout: int = 10) -> tuple[int
 
 async def dispatch_article(
     article: dict,
-    webhook_urls: list[str],
-    timeout: int = 10,
-    retry_attempts: int = 3,
+    endpoints: list[dict],
 ) -> None:
-    """Dispatch 1 article đến tất cả webhook URLs."""
+    """Dispatch 1 article đến tất cả enabled webhook endpoints."""
     payload = _build_payload(article)
 
-    for url in webhook_urls:
-        await _dispatch_to_url(article["id"], url, payload, timeout, retry_attempts)
+    for ep in endpoints:
+        if not ep.get("enabled", True):
+            continue
+        url = ep.get("url", "")
+        if not url:
+            continue
+        await _dispatch_to_url(
+            article_id=article["id"],
+            url=url,
+            payload=payload,
+            timeout=ep.get("timeout_seconds", 10),
+            retry_attempts=ep.get("retry_attempts", 3),
+        )
 
 
 async def _dispatch_to_url(

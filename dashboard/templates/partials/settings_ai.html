@@ -1,14 +1,23 @@
-<div class="panel">
+<div class="panel-inner" style="padding-bottom:0">
   <h3>AI Summarization</h3>
   <p class="desc">
-    Rewrites article titles + content into bilingual summaries using an OpenAI-compatible API.
+    Rewrites article titles + content into bilingual summaries via an OpenAI-compatible API.
+    Runs every 5 minutes, processing a batch of pending articles.
   </p>
 
   {% if success %}
   <div class="alert alert-success">{{ success }}</div>
   {% endif %}
 
-  <form hx-post="/settings/ai" hx-target="#ai-panel" hx-swap="innerHTML">
+  <div class="sub-tabs">
+    <button class="sub-tab active" onclick="switchAiSubTab('settings')">Settings</button>
+    <button class="sub-tab" onclick="switchAiSubTab('logs')">AI Logs</button>
+  </div>
+</div>
+
+<!-- Sub-tab: Settings -->
+<div class="panel-inner" id="ai-sub-settings" style="padding-top:20px">
+  <form hx-post="/settings/ai" hx-target="#tab-panel-ai" hx-swap="innerHTML">
     <div class="toggle-row">
       <input type="hidden" name="enabled" value="off">
       <input type="checkbox" name="enabled" value="on" id="ai-enabled"
@@ -22,31 +31,56 @@
       {% endif %}
     </div>
 
-    <div class="form-group">
-      <label>Model <span class="hint">— OpenAI-compatible model identifier</span></label>
-      <input type="text" name="model" value="{{ ai.model or 'gpt-4o-mini' }}"
-             placeholder="google/gemini-2.5-flash">
-    </div>
-
-    <div class="form-group">
-      <label>Output Languages <span class="hint">— comma-separated codes</span></label>
-      <input type="text" name="output_languages"
-             value="{{ ai.output_languages | join(', ') if ai.output_languages else 'vi, en' }}"
-             placeholder="vi, en">
-    </div>
-
-    <div class="form-row-3">
+    <p class="section-title" style="margin-top:4px">API Connection</p>
+    <div class="form-row-2">
       <div class="form-group">
-        <label>Batch Size</label>
-        <input type="number" name="batch_size" value="{{ ai.batch_size or 5 }}" min="1" max="20">
+        <label>Base URL <span class="hint">— leave empty to use env var</span></label>
+        <input type="url" name="base_url" value="{{ ai.base_url or '' }}"
+               placeholder="https://openrouter.ai/api/v1">
       </div>
       <div class="form-group">
-        <label>Max Tokens</label>
-        <input type="number" name="max_tokens" value="{{ ai.max_tokens_summary or 300 }}" min="100" max="1000">
+        <label>API Key <span class="hint">— leave empty to use env var</span></label>
+        <input type="password" name="api_key" value="{{ ai.api_key or '' }}"
+               placeholder="sk-..." autocomplete="off">
+      </div>
+    </div>
+
+    <p class="section-title">Model</p>
+    <div class="form-row-2">
+      <div class="form-group">
+        <label>Model ID</label>
+        <input type="text" name="model" value="{{ ai.model or 'gpt-4o-mini' }}"
+               placeholder="google/gemini-2.5-flash">
       </div>
       <div class="form-group">
-        <label>Retry Attempts</label>
-        <input type="number" name="retry_attempts" value="{{ ai.retry_attempts or 3 }}" min="1" max="10">
+        <label>Output Languages <span class="hint">— comma-separated</span></label>
+        <input type="text" name="output_languages"
+               value="{{ ai.output_languages | join(', ') if ai.output_languages else 'vi, en' }}"
+               placeholder="vi, en">
+      </div>
+    </div>
+
+    <div class="form-row-2" style="margin-bottom:0">
+      <div class="form-row-2">
+        <div class="form-group">
+          <label>Temperature</label>
+          <input type="number" name="temperature" value="{{ ai.temperature if ai.temperature is not none else 0.3 }}"
+                 min="0" max="2" step="0.1">
+        </div>
+        <div class="form-group">
+          <label>Max Tokens</label>
+          <input type="number" name="max_tokens" value="{{ ai.max_tokens_summary or 300 }}" min="100" max="1000">
+        </div>
+      </div>
+      <div class="form-row-2">
+        <div class="form-group">
+          <label>Batch Size</label>
+          <input type="number" name="batch_size" value="{{ ai.batch_size or 5 }}" min="1" max="20">
+        </div>
+        <div class="form-group">
+          <label>Retry Attempts</label>
+          <input type="number" name="retry_attempts" value="{{ ai.retry_attempts or 3 }}" min="1" max="10">
+        </div>
       </div>
     </div>
 
@@ -55,47 +89,47 @@
     </div>
   </form>
 
-  <!-- AI pipeline explanation -->
+  <hr class="divider">
+
   <p class="section-title">How it works</p>
   <div class="payload-box">
     <span class="comment">// Input: article from Redis (ai_status = "pending")</span><br>
     <span class="key">"title"</span>: <span class="str">"Original article title"</span><br>
     <span class="key">"content"</span>: <span class="str">"Article body text (first 1500 chars)"</span><br>
     <br>
-    <span class="comment">// Prompt → "You are a professional news editor..."</span><br>
-    <span class="comment">// Model: {{ ai.model or 'gpt-4o-mini' }}</span><br>
-    <span class="comment">// Response format: JSON { vi, en }</span><br>
+    <span class="comment">// POST → {{ ai.base_url or 'OPENAI_BASE_URL env' }}/chat/completions</span><br>
+    <span class="comment">// Model: {{ ai.model or 'gpt-4o-mini' }} | temp: {{ ai.temperature if ai.temperature is not none else 0.3 }} | format: json_object</span><br>
+    <span class="comment">// Prompt: "You are a professional news editor..."</span><br>
     <br>
     <span class="comment">// Output: stored back to Redis article hash</span><br>
     <span class="key">"ai_summary_vi"</span>: <span class="str">"Tóm tắt tiếng Việt (2-3 câu)"</span><br>
     <span class="key">"ai_summary_en"</span>: <span class="str">"English summary (2-3 sentences)"</span><br>
     <span class="key">"ai_status"</span>: <span class="str">"done"</span>
   </div>
-
-  <!-- Recent AI logs -->
-  <p class="section-title">Recent AI Processing</p>
-  {% if logs %}
-  <table class="log-table">
-    <thead>
-      <tr>
-        <th>Time</th>
-        <th>Article</th>
-        <th>Model</th>
-        <th>Tokens</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for log in logs %}
-      <tr>
-        <td class="mono">{{ log.created_at[:16].replace('T',' ') if log.created_at else '—' }}</td>
-        <td class="truncate" title="{{ log.article_title }}">{{ log.article_title[:50] }}{% if log.article_title|length > 50 %}...{% endif %}</td>
-        <td class="mono">{{ log.model or '—' }}</td>
-        <td class="mono">{{ log.tokens_used or 0 }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <div class="empty-state">No AI processing logs yet.</div>
-  {% endif %}
 </div>
+
+<!-- Sub-tab: AI Logs -->
+<div class="panel-inner" id="ai-sub-logs" style="display:none;padding-top:20px">
+  <div id="ai-logs"
+       hx-get="/partials/ai-logs"
+       hx-trigger="revealed"
+       hx-swap="innerHTML">
+    <p style="color:var(--muted);font-size:12px">Loading logs...</p>
+  </div>
+</div>
+
+<script>
+  (function() {
+    var dot = document.getElementById('tab-ai-dot');
+    if (dot) dot.className = 'tab-indicator {{ "on" if ai.enabled else "off" }}';
+  })();
+  function switchAiSubTab(name) {
+    document.querySelectorAll('.sub-tab').forEach(function(t) { t.classList.remove('active'); });
+    event.target.classList.add('active');
+    document.getElementById('ai-sub-settings').style.display = name === 'settings' ? '' : 'none';
+    document.getElementById('ai-sub-logs').style.display = name === 'logs' ? '' : 'none';
+    if (name === 'logs') {
+      htmx.trigger(document.getElementById('ai-logs'), 'revealed');
+    }
+  }
+</script>

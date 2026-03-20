@@ -27,13 +27,32 @@
     .nav-links a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 6px; transition: all .15s; }
     .nav-links a:hover, .nav-links a.active { color: var(--text); background: var(--border); }
 
-    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
-    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-    @media (max-width: 960px) { .two-col { grid-template-columns: 1fr; } }
+    .container { max-width: 960px; margin: 0 auto; padding: 24px; }
 
-    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
-    .panel h3 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
-    .panel .desc { font-size: 12px; color: var(--muted); margin-bottom: 16px; }
+    /* Tabs */
+    .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 0; }
+    .tab {
+      padding: 10px 24px; font-size: 13px; font-weight: 600; cursor: pointer;
+      color: var(--muted); border: 1px solid transparent; border-bottom: none;
+      border-radius: 8px 8px 0 0; transition: all .15s; background: transparent;
+      position: relative; bottom: -1px;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active {
+      color: var(--text); background: var(--surface);
+      border-color: var(--border); border-bottom-color: var(--surface);
+    }
+    .tab-indicator { width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-left: 6px; }
+    .tab-indicator.on { background: var(--green); }
+    .tab-indicator.off { background: var(--red); }
+
+    .tab-content { background: var(--surface); border: 1px solid var(--border); border-top: none;
+                   border-radius: 0 0 8px 8px; min-height: 400px; }
+
+    /* Panel inner */
+    .panel-inner { padding: 24px; }
+    .panel-inner h3 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+    .panel-inner .desc { font-size: 12px; color: var(--muted); margin-bottom: 18px; }
 
     .form-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
     .form-group label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
@@ -45,7 +64,7 @@
     }
     .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--accent); }
     .form-group textarea { resize: vertical; min-height: 80px; }
-    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 
     .toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
@@ -64,10 +83,12 @@
     .alert-success { background: rgba(16,185,129,0.12); color: var(--green); border: 1px solid rgba(16,185,129,0.25); }
     .alert-error { background: rgba(239,68,68,0.12); color: var(--red); border: 1px solid rgba(239,68,68,0.25); }
 
-    .section-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase;
-                     letter-spacing: 0.05em; margin: 20px 0 12px; }
+    .divider { border: none; border-top: 1px solid var(--border); margin: 24px 0; }
 
-    .log-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    .section-title { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase;
+                     letter-spacing: 0.05em; margin: 0 0 12px; }
+
+    .log-table { width: 100%; border-collapse: collapse; }
     .log-table th { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
                     text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
     .log-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 12px; vertical-align: top; }
@@ -75,19 +96,89 @@
     .status-ok { color: var(--green); font-weight: 600; }
     .status-fail { color: var(--red); font-weight: 600; }
     .mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; }
-    .truncate { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .url-cell { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+    .truncate { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .url-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 
     .payload-box { background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
                    padding: 12px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px;
-                   line-height: 1.6; overflow-x: auto; color: var(--muted); margin-top: 12px; }
+                   line-height: 1.6; overflow-x: auto; color: var(--muted); }
     .payload-box .key { color: var(--accent); }
     .payload-box .str { color: var(--green); }
     .payload-box .comment { color: #4a5568; font-style: italic; }
 
     .empty-state { text-align: center; padding: 24px; color: var(--muted); font-size: 12px; }
 
-    .page-desc { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
+    /* Sub-tabs (inside a panel) */
+    .sub-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin: 0 -24px; padding: 0 24px; }
+    .sub-tab {
+      padding: 8px 16px; font-size: 12px; font-weight: 600; cursor: pointer;
+      color: var(--muted); border-bottom: 2px solid transparent;
+      transition: all .15s; background: transparent; border-top: none; border-left: none; border-right: none;
+    }
+    .sub-tab:hover { color: var(--text); }
+    .sub-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .sub-tab-content { padding-top: 20px; }
+
+    /* AI log detail */
+    .log-row-detail { display: none; }
+    .log-row-detail.open { display: table-row; }
+    .log-detail-cell { padding: 10px 8px !important; background: var(--bg) !important; }
+    .log-detail-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .log-detail-block { font-size: 11px; line-height: 1.5; }
+    .log-detail-block .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase;
+                              letter-spacing: .04em; font-weight: 600; margin-bottom: 3px; }
+    .log-detail-block .val { color: var(--text); }
+    .log-detail-block .summary-text { color: var(--muted); border-left: 2px solid var(--border);
+                                       padding-left: 8px; margin-top: 4px; line-height: 1.5; }
+    .log-row-toggle { cursor: pointer; }
+    .log-row-toggle:hover td { background: rgba(99,102,241,0.06) !important; }
+    .log-expand { color: var(--muted); font-size: 10px; transition: transform .15s; display: inline-block; }
+    .log-expand.open { transform: rotate(90deg); }
+    .log-source { font-size: 10px; color: var(--accent); }
+    .log-lang { font-size: 9px; background: var(--border); padding: 1px 5px; border-radius: 3px; color: var(--muted); }
+    .log-status-done { color: var(--green); font-size: 10px; font-weight: 600; }
+    .log-status-pending { color: var(--yellow); font-size: 10px; font-weight: 600; }
+
+    /* Webhook cards */
+    .wh-card { background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+               padding: 12px 14px; margin-bottom: 8px; transition: border-color .15s; }
+    .wh-card:hover { border-color: rgba(99,102,241,0.3); }
+    .wh-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .wh-info { display: flex; align-items: center; gap: 8px; }
+    .wh-name { font-size: 13px; font-weight: 600; }
+    .wh-id { font-size: 10px; color: var(--muted); }
+    .wh-actions { display: flex; gap: 4px; }
+    .wh-url { font-size: 11px; font-family: 'SF Mono', 'Fira Code', monospace; color: var(--accent);
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 4px; }
+    .wh-meta { font-size: 10px; color: var(--muted); }
+    .wh-edit-form { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+    .wh-add { background: var(--bg); border: 1px dashed var(--border); border-radius: 6px; padding: 16px; margin-top: 12px; }
+
+    .btn-sm { padding: 4px 10px; font-size: 11px; border-radius: 4px; }
+    .btn-toggle { background: transparent; border: 1px solid var(--border); color: var(--muted); cursor: pointer; transition: all .15s; }
+    .btn-toggle:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-edit { background: transparent; border: 1px solid var(--accent); color: var(--accent); cursor: pointer; transition: all .15s; }
+    .btn-edit:hover { background: var(--accent); color: white; }
+    .btn-danger { background: transparent; border: 1px solid var(--red); color: var(--red); cursor: pointer; transition: all .15s; }
+    .btn-danger:hover { background: var(--red); color: white; }
+    .btn-save { background: var(--green); border: 1px solid var(--green); color: white; cursor: pointer; transition: all .15s; }
+    .btn-save:hover { opacity: 0.85; }
+    .btn-cancel { background: transparent; border: 1px solid var(--border); color: var(--muted); cursor: pointer; transition: all .15s; }
+    .btn-cancel:hover { border-color: var(--text); color: var(--text); }
+
+    /* Log pagination */
+    .log-pagination { display: flex; align-items: center; justify-content: space-between; margin-top: 12px;
+                      padding-top: 10px; border-top: 1px solid var(--border); }
+    .log-pagination .info { font-size: 11px; color: var(--muted); }
+    .log-pagination .pages { display: flex; gap: 4px; }
+    .page-btn {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; transition: all .15s;
+    }
+    .page-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .page-btn:disabled:hover { border-color: var(--border); color: var(--text); }
+    .page-btn.active { background: var(--accent); border-color: var(--accent); color: white; }
   </style>
 </head>
 <body>
@@ -103,25 +194,45 @@
   </header>
 
   <div class="container">
-    <p class="page-desc">
-      Configure AI summarization and webhook delivery. Changes take effect on the next scheduler cycle.
-    </p>
+    <div class="tabs" id="settings-tabs">
+      <button class="tab active" id="tab-ai"
+              onclick="switchTab('ai')">
+        AI Summarization
+        <span class="tab-indicator" id="tab-ai-dot"></span>
+      </button>
+      <button class="tab" id="tab-webhook"
+              onclick="switchTab('webhook')">
+        Webhook Delivery
+        <span class="tab-indicator" id="tab-webhook-dot"></span>
+      </button>
+    </div>
 
-    <div class="two-col">
-      <div id="ai-panel"
+    <div class="tab-content">
+      <div id="tab-panel-ai"
            hx-get="/partials/settings-ai"
            hx-trigger="load"
            hx-swap="innerHTML">
-        <div class="panel"><p style="color:var(--muted);font-size:12px">Loading AI settings...</p></div>
+        <div class="panel-inner"><p style="color:var(--muted);font-size:12px">Loading AI settings...</p></div>
       </div>
 
-      <div id="webhook-panel"
+      <div id="tab-panel-webhook" style="display:none"
            hx-get="/partials/settings-webhook"
-           hx-trigger="load"
+           hx-trigger="revealed"
            hx-swap="innerHTML">
-        <div class="panel"><p style="color:var(--muted);font-size:12px">Loading webhook settings...</p></div>
+        <div class="panel-inner"><p style="color:var(--muted);font-size:12px">Loading webhook settings...</p></div>
       </div>
     </div>
   </div>
+
+  <script>
+    function switchTab(name) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.getElementById('tab-' + name).classList.add('active');
+      document.getElementById('tab-panel-ai').style.display = name === 'ai' ? '' : 'none';
+      document.getElementById('tab-panel-webhook').style.display = name === 'webhook' ? '' : 'none';
+      // trigger htmx revealed event for lazy-loaded tab
+      htmx.trigger(document.getElementById('tab-panel-' + name), 'revealed');
+    }
+  </script>
 </body>
 </html>

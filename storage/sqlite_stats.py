@@ -145,23 +145,27 @@ async def get_dashboard_stats() -> dict:
         }
 
 
-async def get_recent_webhook_logs(limit: int = 50) -> list[dict]:
+async def get_recent_webhook_logs(limit: int = 20, offset: int = 0) -> tuple[list[dict], int]:
     async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
+        total_row = await db.execute_fetchall("SELECT COUNT(*) as cnt FROM webhook_logs")
+        total = total_row[0]["cnt"] if total_row else 0
         rows = await db.execute_fetchall(
             "SELECT article_id, webhook_url, sent_at, status_code, success, error_msg "
-            "FROM webhook_logs ORDER BY sent_at DESC LIMIT ?",
-            (limit,),
+            "FROM webhook_logs ORDER BY sent_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
         )
-        return [dict(r) for r in rows]
+        return [dict(r) for r in rows], total
 
 
-async def get_recent_ai_logs(limit: int = 50) -> list[dict]:
+async def get_recent_ai_logs(limit: int = 20, offset: int = 0) -> tuple[list[dict], int]:
     async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
+        total_row = await db.execute_fetchall("SELECT COUNT(*) as cnt FROM ai_logs")
+        total = total_row[0]["cnt"] if total_row else 0
         rows = await db.execute_fetchall(
             "SELECT article_id, model, tokens_used, created_at "
-            "FROM ai_logs ORDER BY created_at DESC LIMIT ?",
-            (limit,),
+            "FROM ai_logs ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
         )
-        return [dict(r) for r in rows]
+        return [dict(r) for r in rows], total

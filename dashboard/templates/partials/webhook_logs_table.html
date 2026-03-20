@@ -1,0 +1,61 @@
+{% if logs %}
+<table class="log-table">
+  <thead>
+    <tr>
+      <th>Time</th>
+      <th>Article</th>
+      <th>Webhook URL</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for log in logs %}
+    <tr>
+      <td class="mono">{{ log.sent_at[:16].replace('T',' ') if log.sent_at else '—' }}</td>
+      <td class="truncate" title="{{ log.article_title }}">{{ log.article_title[:50] }}{% if log.article_title|length > 50 %}...{% endif %}</td>
+      <td class="url-cell" title="{{ log.webhook_url }}">{{ log.webhook_url }}</td>
+      <td>
+        {% if log.success %}
+          <span class="status-ok">{{ log.status_code }}</span>
+        {% else %}
+          <span class="status-fail">{{ log.status_code or 'ERR' }}</span>
+          {% if log.error_msg %}
+            <div style="font-size:10px;color:var(--red);margin-top:2px">{{ log.error_msg[:80] }}{% if log.error_msg|length > 80 %}...{% endif %}</div>
+          {% endif %}
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if log_total_pages > 1 %}
+<div class="log-pagination">
+  <span class="info">{{ log_total }} entries</span>
+  <div class="pages">
+    <button class="page-btn" {% if log_page <= 1 %}disabled{% endif %}
+            hx-get="/partials/settings-webhook?page={{ log_page - 1 }}"
+            hx-target="#webhook-logs" hx-swap="innerHTML">
+      &larr;
+    </button>
+    {% for p in range(1, log_total_pages + 1) %}
+      {% if p == 1 or p == log_total_pages or (p >= log_page - 1 and p <= log_page + 1) %}
+    <button class="page-btn {% if p == log_page %}active{% endif %}"
+            hx-get="/partials/settings-webhook?page={{ p }}"
+            hx-target="#webhook-logs" hx-swap="innerHTML">{{ p }}</button>
+      {% elif p == 2 or p == log_total_pages - 1 %}
+    <span style="color:var(--muted);font-size:11px;padding:0 2px">...</span>
+      {% endif %}
+    {% endfor %}
+    <button class="page-btn" {% if log_page >= log_total_pages %}disabled{% endif %}
+            hx-get="/partials/settings-webhook?page={{ log_page + 1 }}"
+            hx-target="#webhook-logs" hx-swap="innerHTML">
+      &rarr;
+    </button>
+  </div>
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">No webhook deliveries yet.</div>
+{% endif %}

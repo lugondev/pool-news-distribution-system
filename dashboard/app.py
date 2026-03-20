@@ -303,12 +303,26 @@ async def source_update(
 
 # --- Settings page ---
 
-async def _enrich_logs(logs: list[dict]) -> list[dict]:
-    """Attach article title to each log entry from Redis."""
+LOG_PAGE_SIZE = 15
+
+
+async def _enrich_logs(logs: list[dict], full: bool = False) -> list[dict]:
+    """Attach article data to each log entry from Redis."""
     redis = get_redis()
     for log in logs:
         article = await get_article(redis, log["article_id"])
-        log["article_title"] = article.get("title", "—") if article else "—"
+        if article:
+            log["article_title"] = article.get("title", "—")
+            if full:
+                log["source_name"] = article.get("source_name", "")
+                log["lang"] = article.get("lang", "")
+                log["category"] = article.get("category", "")
+                log["url"] = article.get("url", "")
+                log["ai_summary_vi"] = article.get("ai_summary_vi", "")
+                log["ai_summary_en"] = article.get("ai_summary_en", "")
+                log["ai_status"] = article.get("ai_status", "")
+        else:
+            log["article_title"] = "—"
     return logs
 
 
@@ -320,11 +334,9 @@ async def settings_page(request: Request):
 @app.get("/partials/settings-ai", response_class=HTMLResponse)
 async def settings_ai_partial(request: Request):
     cfg = _read_settings()
-    logs = await _enrich_logs(await get_recent_ai_logs(limit=30))
     return templates.TemplateResponse("partials/settings_ai.html", {
         "request": request,
         "ai": cfg.get("ai", {}),
-        "logs": logs,
     })
 
 
@@ -332,7 +344,10 @@ async def settings_ai_partial(request: Request):
 async def settings_ai_update(
     request: Request,
     enabled: str = Form("off"),
+    api_key: str = Form(""),
+    base_url: str = Form(""),
     model: str = Form("gpt-4o-mini"),
+    temperature: float = Form(0.3),
     batch_size: int = Form(5),
     max_tokens: int = Form(300),
     retry_attempts: int = Form(3),
@@ -341,7 +356,10 @@ async def settings_ai_update(
     cfg = _read_settings()
     cfg["ai"] = {
         "enabled": enabled == "on",
+        "api_key": api_key.strip(),
+        "base_url": base_url.strip(),
         "model": model.strip(),
+        "temperature": max(0.0, min(float(temperature), 2.0)),
         "batch_size": max(1, min(batch_size, 20)),
         "max_tokens_summary": max(100, min(max_tokens, 1000)),
         "retry_attempts": max(1, min(retry_attempts, 10)),
@@ -349,53 +367,135 @@ async def settings_ai_update(
     }
     _write_settings(cfg)
     logger.info(f"AI settings updated: model={cfg['ai']['model']}, enabled={cfg['ai']['enabled']}")
-    logs = await _enrich_logs(await get_recent_ai_logs(limit=30))
     return templates.TemplateResponse("partials/settings_ai.html", {
         "request": request,
         "ai": cfg["ai"],
-        "logs": logs,
         "success": "AI settings saved",
     })
 
 
-@app.get("/partials/settings-webhook", response_class=HTMLResponse)
-async def settings_webhook_partial(request: Request):
-    cfg = _read_settings()
-    logs = await _enrich_logs(await get_recent_webhook_logs(limit=30))
-    return templates.TemplateResponse("partials/settings_webhook.html", {
+@app.get("/partials/ai-logs", response_class=HTMLResponse)
+async def ai_logs_partial(request: Request, page: int = 1):
+    offset = (page - 1) * LOG_PAGE_SIZE
+    logs, total = await get_recent_ai_logs(limit=LOG_PAGE_SIZE, offset=offset)
+    logs = await _enrich_logs(logs, full=True)
+    return templates.TemplateResponse("partials/ai_logs_table.html", {
         "request": request,
-        "webhook": cfg.get("webhook", {}),
         "logs": logs,
+        "log_page": page,
+        "log_total_pages": max(1, math.ceil(total / LOG_PAGE_SIZE)),
+        "log_total": total,
     })
 
 
-@app.post("/settings/webhook", response_class=HTMLResponse)
-async def settings_webhook_update(
+def _get_webhook_endpoints() -> list[dict]:
+    return _read_settings().get("webhook", {}).get("endpoints", [])
+
+
+def _save_webhook_endpoints(endpoints: list[dict]) -> None:
+    cfg = _read_settings()
+    cfg.setdefault("webhook", {})["endpoints"] = endpoints
+    _write_settings(cfg)
+
+
+async def _webhook_ctx(request, page=1, **extra) -> dict:
+    offset = (page - 1) * LOG_PAGE_SIZE
+    logs, total = await get_recent_webhook_logs(limit=LOG_PAGE_SIZE, offset=offset)
+    logs = await _enrich_logs(logs)
+    ctx = {
+        "request": request,
+        "endpoints": _get_webhook_endpoints(),
+        "logs": logs,
+        "log_page": page,
+        "log_total_pages": max(1, math.ceil(total / LOG_PAGE_SIZE)),
+        "log_total": total,
+    }
+    ctx.update(extra)
+    return ctx
+
+
+@app.get("/partials/settings-webhook", response_class=HTMLResponse)
+async def settings_webhook_partial(request: Request, page: int = 1):
+    ctx = await _webhook_ctx(request, page=page)
+    if page > 1:
+        return templates.TemplateResponse("partials/webhook_logs_table.html", ctx)
+    return templates.TemplateResponse("partials/settings_webhook.html", ctx)
+
+
+@app.post("/webhooks/add", response_class=HTMLResponse)
+async def webhook_add(
     request: Request,
-    enabled: str = Form("off"),
-    urls: str = Form(""),
+    id: str = Form(...),
+    name: str = Form(...),
+    url: str = Form(...),
     retry_attempts: int = Form(3),
     retry_delay: int = Form(5),
     timeout: int = Form(10),
 ):
-    cfg = _read_settings()
-    parsed_urls = [u.strip() for u in urls.strip().splitlines() if u.strip()]
-    cfg["webhook"] = {
-        "enabled": enabled == "on",
-        "urls": parsed_urls,
+    endpoints = _get_webhook_endpoints()
+    if any(ep["id"] == id for ep in endpoints):
+        ctx = await _webhook_ctx(request, error=f"Webhook '{id}' already exists")
+        return templates.TemplateResponse("partials/settings_webhook.html", ctx)
+    endpoints.append({
+        "id": id.strip(),
+        "name": name.strip(),
+        "url": url.strip(),
+        "enabled": True,
         "retry_attempts": max(1, min(retry_attempts, 10)),
         "retry_delay_seconds": max(1, min(retry_delay, 60)),
         "timeout_seconds": max(1, min(timeout, 60)),
-    }
-    _write_settings(cfg)
-    logger.info(f"Webhook settings updated: {len(parsed_urls)} URL(s), enabled={cfg['webhook']['enabled']}")
-    logs = await _enrich_logs(await get_recent_webhook_logs(limit=30))
-    return templates.TemplateResponse("partials/settings_webhook.html", {
-        "request": request,
-        "webhook": cfg["webhook"],
-        "logs": logs,
-        "success": "Webhook settings saved",
     })
+    _save_webhook_endpoints(endpoints)
+    logger.info(f"Webhook added: {id}")
+    ctx = await _webhook_ctx(request, success=f"Webhook '{name}' added")
+    return templates.TemplateResponse("partials/settings_webhook.html", ctx)
+
+
+@app.post("/webhooks/{wh_id}/toggle", response_class=HTMLResponse)
+async def webhook_toggle(request: Request, wh_id: str):
+    endpoints = _get_webhook_endpoints()
+    for ep in endpoints:
+        if ep["id"] == wh_id:
+            ep["enabled"] = not ep.get("enabled", True)
+            break
+    _save_webhook_endpoints(endpoints)
+    ctx = await _webhook_ctx(request)
+    return templates.TemplateResponse("partials/settings_webhook.html", ctx)
+
+
+@app.put("/webhooks/{wh_id}", response_class=HTMLResponse)
+async def webhook_update(
+    request: Request,
+    wh_id: str,
+    name: str = Form(...),
+    url: str = Form(...),
+    retry_attempts: int = Form(3),
+    retry_delay: int = Form(5),
+    timeout: int = Form(10),
+):
+    endpoints = _get_webhook_endpoints()
+    for ep in endpoints:
+        if ep["id"] == wh_id:
+            ep["name"] = name.strip()
+            ep["url"] = url.strip()
+            ep["retry_attempts"] = max(1, min(retry_attempts, 10))
+            ep["retry_delay_seconds"] = max(1, min(retry_delay, 60))
+            ep["timeout_seconds"] = max(1, min(timeout, 60))
+            break
+    _save_webhook_endpoints(endpoints)
+    logger.info(f"Webhook updated: {wh_id}")
+    ctx = await _webhook_ctx(request, success=f"Webhook '{name}' updated")
+    return templates.TemplateResponse("partials/settings_webhook.html", ctx)
+
+
+@app.delete("/webhooks/{wh_id}", response_class=HTMLResponse)
+async def webhook_delete(request: Request, wh_id: str):
+    endpoints = _get_webhook_endpoints()
+    endpoints = [ep for ep in endpoints if ep["id"] != wh_id]
+    _save_webhook_endpoints(endpoints)
+    logger.info(f"Webhook deleted: {wh_id}")
+    ctx = await _webhook_ctx(request, success=f"Webhook '{wh_id}' deleted")
+    return templates.TemplateResponse("partials/settings_webhook.html", ctx)
 
 
 # --- API ---
