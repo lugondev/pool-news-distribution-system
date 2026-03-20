@@ -10,13 +10,8 @@
   <div class="alert alert-success">{{ success }}</div>
   {% endif %}
 
-  <div class="sub-tabs">
-    <button class="sub-tab active" onclick="switchAiSubTab('settings')">Settings</button>
-    <button class="sub-tab" onclick="switchAiSubTab('logs')">AI Logs</button>
-  </div>
 </div>
 
-<!-- Sub-tab: Settings -->
 <div class="panel-inner" id="ai-sub-settings" style="padding-top:20px">
   <form hx-post="/settings/ai" hx-target="#tab-panel-ai" hx-swap="innerHTML">
     <div class="toggle-row">
@@ -174,28 +169,9 @@
   </div>
 </div>
 
-<!-- Sub-tab: AI Logs -->
-<div class="panel-inner" id="ai-sub-logs" style="display:none;padding-top:20px">
-  <div id="ai-logs"
-       hx-get="/partials/ai-logs"
-       hx-trigger="load once"
-       hx-swap="innerHTML">
-    <p style="color:var(--muted);font-size:12px">Loading logs...</p>
-  </div>
-</div>
-
 <script>
   (function() {
     var dot = document.getElementById('tab-ai-dot');
     if (dot) dot.className = 'tab-indicator {{ "on" if ai.enabled else "off" }}';
   })();
-  function switchAiSubTab(name) {
-    document.querySelectorAll('.sub-tab').forEach(function(t) { t.classList.remove('active'); });
-    event.target.classList.add('active');
-    document.getElementById('ai-sub-settings').style.display = name === 'settings' ? '' : 'none';
-    document.getElementById('ai-sub-logs').style.display = name === 'logs' ? '' : 'none';
-    if (name === 'logs') {
-      htmx.trigger(document.getElementById('ai-logs'), 'revealed');
-    }
-  }
 </script>

@@ -51,12 +51,24 @@
           hx-target="#feed" hx-swap="innerHTML">{{ article.category }}</span>
     {% if article.ai_status == 'done' %}
       <span class="ai-badge ai-done">AI ✓</span>
+    {% elif article.ai_status == 'dedup_skipped' %}
+      <span class="ai-badge" style="background:rgba(99,102,241,0.15);color:#818cf8">AI skip</span>
+    {% elif article.ai_status == 'failed' %}
+      <span class="ai-badge" style="background:rgba(239,68,68,0.15);color:#ef4444">AI ✗</span>
     {% else %}
-      <span class="ai-badge ai-pending">AI pending</span>
+      <span class="ai-badge ai-pending">AI …</span>
     {% endif %}
     <span class="time">
       {% if article.published_at %}
-        {{ article.published_at[:16].replace('T',' ') }}
+        <span title="Published: {{ article.published_at | fmt_dt }}">
+          📰 {{ article.published_at | fmt_dt("%d/%m %H:%M") }}
+        </span>
+      {% endif %}
+      {% if article.fetched_at %}
+        {% set lag = article.fetched_at | dt_lag(article.published_at) %}
+        <span title="Fetched at: {{ article.fetched_at | fmt_dt }}" style="opacity:0.65">
+          · ⬇{{ article.fetched_at | fmt_dt("%H:%M") }}{% if lag %} <span style="opacity:0.7">({{ lag }})</span>{% endif %}
+        </span>
       {% endif %}
     </span>
   </div>

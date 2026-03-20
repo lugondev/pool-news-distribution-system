@@ -3,6 +3,7 @@ Redis storage cho articles.
 
 Key structure:
   news:{article_id}          → Hash (article fields), TTL 24h
+  news:crawl:schedule        → Sorted Set (score=next_crawl_at unix ts, member=source_id)
   news:feed                  → Sorted Set (score=timestamp, member=article_id)
   news:feed:{YYYYMMDD}       → Sorted Set daily
   news:feed:{YYYYMMDDHH}     → Sorted Set hourly
@@ -16,7 +17,10 @@ import redis.asyncio as aioredis
 from crawler.rss_parser import Article
 
 
-TTL_SECONDS = 86400  # 24h
+TTL_SECONDS = 43200  # 12h
+
+AI_PENDING_KEY = "news:ai:pending"
+CRAWL_SCHEDULE_KEY = "news:crawl:schedule"
 
 
 def _ts(dt: datetime) -> float:
@@ -79,6 +83,10 @@ async def save_article(redis: aioredis.Redis, article: Article) -> None:
     # Per-category
     pipe.zadd(f"news:cat:{article.category}", {article.id: ts})
     pipe.expire(f"news:cat:{article.category}", TTL_SECONDS)
+
+    # AI pending queue — atomic sorted set; popped when AI job picks it up
+    pipe.zadd(AI_PENDING_KEY, {article.id: ts})
+    pipe.expire(AI_PENDING_KEY, TTL_SECONDS)
 
     await pipe.execute()
 
@@ -152,6 +160,58 @@ async def get_pending_ai_articles(redis: aioredis.Redis, limit: int = 20) -> lis
         if len(articles) >= limit:
             break
     return articles
+
+
+async def pop_pending_ai_articles(redis: aioredis.Redis, limit: int = 10) -> list[dict]:
+    """
+    Atomically pop up to `limit` newest articles from the AI pending queue.
+    ZPOPMAX removes items from the sorted set while returning them, so the
+    same article cannot be picked up by two concurrent jobs.
+    """
+    items = await redis.zpopmax(AI_PENDING_KEY, limit)
+    if not items:
+        return []
+
+    pipe = redis.pipeline()
+    for aid_bytes, _score in items:
+        aid = aid_bytes.decode() if isinstance(aid_bytes, bytes) else aid_bytes
+        pipe.hgetall(f"news:{aid}")
+    results = await pipe.execute()
+
+    articles = []
+    for raw in results:
+        if raw:
+            articles.append({k.decode(): v.decode() for k, v in raw.items()})
+    return articles
+
+
+async def get_due_source_ids(
+    redis: aioredis.Redis,
+    all_source_ids: list[str],
+    limit: int,
+) -> list[str]:
+    """Return up to `limit` source IDs whose next crawl time is due.
+
+    Uses a Sorted Set (score = unix timestamp) as the schedule store.
+    Sources not yet in the schedule (first run) are treated as immediately due.
+    """
+    now = datetime.now(timezone.utc).timestamp()
+
+    # Sources already scheduled and overdue
+    raw_due = await redis.zrangebyscore(CRAWL_SCHEDULE_KEY, 0, now, start=0, num=limit * 2)
+    due = [b.decode() if isinstance(b, bytes) else b for b in raw_due]
+
+    # Sources never scheduled (brand new or after Redis flush)
+    all_raw = await redis.zrange(CRAWL_SCHEDULE_KEY, 0, -1)
+    already_scheduled = {b.decode() if isinstance(b, bytes) else b for b in all_raw}
+    unscheduled = [sid for sid in all_source_ids if sid not in already_scheduled]
+
+    return (due + unscheduled)[:limit]
+
+
+async def set_source_next_crawl(redis: aioredis.Redis, source_id: str, next_ts: float) -> None:
+    """Schedule a source's next crawl at the given Unix timestamp."""
+    await redis.zadd(CRAWL_SCHEDULE_KEY, {source_id: next_ts})
 
 
 async def get_feed_stats(redis: aioredis.Redis) -> dict:

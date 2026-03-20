@@ -13,6 +13,7 @@ import redis.asyncio as aioredis
 
 
 DEDUP_KEY = "news:dedup:simhashes"
+AI_DEDUP_KEY = "news:ai:dedup:simhashes"
 DEDUP_TTL_SECONDS = 86400  # 24h
 
 
@@ -79,6 +80,30 @@ class DedupResult:
 #     Sau khi check xong, nếu KHÔNG trùng thì lưu hash vào Redis với SADD + EXPIRE.
 #     """
 #     pass
+
+
+async def check_ai_duplicate(
+    redis: aioredis.Redis, title: str, threshold: int = 6
+) -> DedupResult:
+    """
+    Pre-AI semantic dedup: check if a similar story was already AI-processed.
+    Uses a looser threshold than crawl dedup to catch same-story-different-source.
+    Does NOT write to the set — call register_ai_simhash() after successful AI.
+    """
+    current_hash = _simhash(title)
+    stored = await redis.smembers(AI_DEDUP_KEY)
+    for raw in stored:
+        stored_hash = int(raw)
+        if _hamming_distance(current_hash, stored_hash) <= threshold:
+            return DedupResult(is_duplicate=True, simhash=current_hash, matched_hash=stored_hash)
+    return DedupResult(is_duplicate=False, simhash=current_hash)
+
+
+async def register_ai_simhash(redis: aioredis.Redis, title: str) -> None:
+    """Register that this title has been AI-processed (so future similar stories are skipped)."""
+    h = _simhash(title)
+    await redis.sadd(AI_DEDUP_KEY, h)
+    await redis.expire(AI_DEDUP_KEY, DEDUP_TTL_SECONDS)
 
 
 async def check_duplicate(redis: aioredis.Redis, title: str, threshold: int = 3) -> DedupResult:

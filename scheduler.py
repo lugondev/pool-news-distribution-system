@@ -1,9 +1,10 @@
 """
-APScheduler: staggered crawler + AI rewriter.
-Sources are split into N groups; each tick crawls one group in round-robin,
-so fresh articles arrive continuously instead of in large bursts.
+APScheduler: due-based crawler + AI rewriter.
+Every tick (default 30s), picks the N sources whose next_crawl_at is due
+and fetches them. 403/429 responses push next_crawl_at further into the future.
 """
 import logging
+import os
 
 import redis.asyncio as aioredis
 import yaml
@@ -11,35 +12,46 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from crawler.fetcher import fetch_all_sources
 from ai.rewriter import process_pending_articles
+from storage.redis_store import get_due_source_ids
 
 logger = logging.getLogger(__name__)
 
 _scheduler: AsyncIOScheduler | None = None
-_crawl_group_idx: int = 0
+
+# Config cache: avoid disk I/O on every job tick — re-read only when file changes.
+_config_cache: dict | None = None
+_config_mtime: float = 0.0
+_sources_cache: list[dict] | None = None
+_sources_mtime: float = 0.0
 
 
 def _load_config() -> dict:
-    with open("config/settings.yaml") as f:
-        return yaml.safe_load(f)
+    global _config_cache, _config_mtime
+    try:
+        mtime = os.path.getmtime("config/settings.yaml")
+    except OSError:
+        mtime = 0.0
+    if _config_cache is None or mtime > _config_mtime:
+        with open("config/settings.yaml") as f:
+            _config_cache = yaml.safe_load(f)
+        _config_mtime = mtime
+    return _config_cache
 
 
 def _load_sources() -> list[dict]:
-    with open("config/sources.yaml") as f:
-        data = yaml.safe_load(f)
-    return data.get("sources", [])
+    global _sources_cache, _sources_mtime
+    try:
+        mtime = os.path.getmtime("config/sources.yaml")
+    except OSError:
+        mtime = 0.0
+    if _sources_cache is None or mtime > _sources_mtime:
+        with open("config/sources.yaml") as f:
+            data = yaml.safe_load(f)
+        _sources_cache = data.get("sources", [])
+        _sources_mtime = mtime
+    return _sources_cache
 
 
-def _split_groups(items: list, n: int) -> list[list]:
-    """Split items into n roughly-equal groups."""
-    n = max(1, min(n, len(items)))
-    k, m = divmod(len(items), n)
-    groups = []
-    idx = 0
-    for i in range(n):
-        size = k + (1 if i < m else 0)
-        groups.append(items[idx : idx + size])
-        idx += size
-    return groups
 
 
 def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
@@ -54,41 +66,38 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
 
     async def crawl_job():
-        global _crawl_group_idx
         current_cfg = _load_config()
         crawler = current_cfg.get("crawler", {})
         active_cats = {
             c["id"] for c in current_cfg.get("categories", [])
             if c.get("enabled", True)
         }
-        current_sources = _load_sources()
-        filtered = [s for s in current_sources if s.get("category", "world") in active_cats]
-        skipped = len(current_sources) - len(filtered)
-
-        n_groups = crawler.get("stagger_groups", 3)
-        groups = _split_groups(filtered, n_groups)
-
-        if not groups:
+        all_sources = _load_sources()
+        filtered = [
+            s for s in all_sources
+            if s.get("enabled", True) and s.get("category", "world") in active_cats
+        ]
+        if not filtered:
             return
 
-        group_idx = _crawl_group_idx % len(groups)
-        batch = groups[group_idx]
-        _crawl_group_idx += 1
+        sources_per_tick = crawler.get("sources_per_tick", 3)
+        all_ids = [s["id"] for s in filtered]
+        source_map = {s["id"]: s for s in filtered}
 
-        logger.info(
-            f"=== Crawl group {group_idx + 1}/{len(groups)} "
-            f"({len(batch)} sources) ==="
-        )
-        if skipped:
-            logger.info(f"Skipping {skipped} source(s) in disabled categories")
+        # Pick sources whose next_crawl_at is due (or never scheduled)
+        due_ids = await get_due_source_ids(redis, all_ids, limit=sources_per_tick)
+        if not due_ids:
+            return
 
-        crawl_interval_sec = crawler.get("fetch_interval_minutes", 3) * 60
-        spread = crawl_interval_sec * 0.8
+        batch = [source_map[sid] for sid in due_ids if sid in source_map]
+        logger.info(f"=== Crawl tick: {len(batch)} sources due ({due_ids}) ===")
+
+        default_interval_sec = crawler.get("default_crawl_interval_minutes", 10) * 60
 
         await fetch_all_sources(
             sources=batch,
             redis=redis,
-            max_concurrent=crawler.get("max_concurrent_sources", 10),
+            max_concurrent=sources_per_tick,
             dedup_threshold=current_cfg.get("dedup", {}).get("simhash_distance_threshold", 3),
             max_articles_per_source=crawler.get("max_articles_per_source", 50),
             request_timeout=crawler.get("request_timeout_seconds", 15),
@@ -96,14 +105,16 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
                 crawler.get("domain_delay_min", 0.5),
                 crawler.get("domain_delay_max", 1.5),
             ),
-            spread_seconds=spread,
+            default_crawl_interval_sec=default_interval_sec,
+            backoff_429_sec=crawler.get("backoff_429_minutes", 30) * 60,
+            backoff_403_sec=crawler.get("backoff_403_minutes", 120) * 60,
         )
 
-    crawl_interval = crawler_cfg.get("fetch_interval_minutes", 3)
+    tick_interval = crawler_cfg.get("tick_interval_seconds", 30)
     scheduler.add_job(
         crawl_job,
         "interval",
-        minutes=crawl_interval,
+        seconds=tick_interval,
         id="crawl_all",
         max_instances=1,
         coalesce=True,
@@ -122,6 +133,7 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
             ai_interval_sec = ai.get("interval_minutes", 2) * 60
             spread = ai_interval_sec * 0.8
 
+            dedup_cfg = current_cfg.get("dedup", {})
             processed = await process_pending_articles(
                 redis=redis,
                 model=ai.get("model", "gpt-4o-mini"),
@@ -134,6 +146,7 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
                 webhook_endpoints=endpoints,
                 telegram_channels=tg_channels,
                 spread_seconds=spread,
+                ai_dedup_threshold=dedup_cfg.get("ai_simhash_distance_threshold", 6),
             )
             if processed:
                 logger.info(f"AI job: processed {processed} articles")

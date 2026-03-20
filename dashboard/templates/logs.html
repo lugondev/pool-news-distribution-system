@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Logs — News Aggregator</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3e;
+      --text: #e2e8f0; --muted: #718096; --accent: #6366f1;
+      --green: #10b981; --red: #ef4444; --yellow: #f59e0b;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px;
+             display: flex; align-items: center; gap: 12px; }
+    header h1 { font-size: 16px; font-weight: 600; }
+    .badge { background: var(--accent); color: white; font-size: 11px; padding: 2px 8px; border-radius: 999px; }
+    .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+             animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    .nav-links { margin-left: auto; display: flex; gap: 16px; font-size: 13px; }
+    .nav-links a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 6px; transition: all .15s; }
+    .nav-links a:hover, .nav-links a.active { color: var(--text); background: var(--border); }
+
+    .container { max-width: 1100px; margin: 0 auto; padding: 24px; }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 0; }
+    .tab {
+      padding: 10px 24px; font-size: 13px; font-weight: 600; cursor: pointer;
+      color: var(--muted); border: 1px solid transparent; border-bottom: none;
+      border-radius: 8px 8px 0 0; transition: all .15s; background: transparent;
+      position: relative; bottom: -1px;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active {
+      color: var(--text); background: var(--surface);
+      border-color: var(--border); border-bottom-color: var(--surface);
+    }
+
+    .tab-content { background: var(--surface); border: 1px solid var(--border); border-top: none;
+                   border-radius: 0 0 8px 8px; min-height: 400px; }
+    .panel-inner { padding: 24px; }
+
+    .log-table { width: 100%; border-collapse: collapse; }
+    .log-table th { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
+                    text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+    .log-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 12px; vertical-align: top; }
+    .log-table tr:hover td { background: rgba(99,102,241,0.04); }
+    .status-ok { color: var(--green); font-weight: 600; }
+    .status-fail { color: var(--red); font-weight: 600; }
+    .mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; }
+    .truncate { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .url-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+
+    .empty-state { text-align: center; padding: 24px; color: var(--muted); font-size: 12px; }
+
+    /* AI log detail expand */
+    .log-row-detail { display: none; }
+    .log-row-detail.open { display: table-row; }
+    .log-detail-cell { padding: 10px 8px !important; background: var(--bg) !important; }
+    .log-detail-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .log-detail-block { font-size: 11px; line-height: 1.5; }
+    .log-detail-block .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase;
+                              letter-spacing: .04em; font-weight: 600; margin-bottom: 3px; }
+    .log-detail-block .val { color: var(--text); }
+    .log-detail-block .summary-text { color: var(--muted); border-left: 2px solid var(--border);
+                                       padding-left: 8px; margin-top: 4px; line-height: 1.5; }
+    .log-row-toggle { cursor: pointer; }
+    .log-row-toggle:hover td { background: rgba(99,102,241,0.06) !important; }
+    .log-expand { color: var(--muted); font-size: 10px; transition: transform .15s; display: inline-block; }
+    .log-expand.open { transform: rotate(90deg); }
+    .log-source { font-size: 10px; color: var(--accent); }
+    .log-lang { font-size: 9px; background: var(--border); padding: 1px 5px; border-radius: 3px; color: var(--muted); }
+    .log-status-done { color: var(--green); font-size: 10px; font-weight: 600; }
+    .log-status-pending { color: var(--yellow); font-size: 10px; font-weight: 600; }
+
+    /* Pagination */
+    .log-pagination { display: flex; align-items: center; justify-content: space-between; margin-top: 12px;
+                      padding-top: 10px; border-top: 1px solid var(--border); }
+    .log-pagination .info { font-size: 11px; color: var(--muted); }
+    .log-pagination .pages { display: flex; gap: 4px; }
+    .page-btn {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; transition: all .15s;
+    }
+    .page-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .page-btn:disabled:hover { border-color: var(--border); color: var(--text); }
+    .page-btn.active { background: var(--accent); border-color: var(--accent); color: white; }
+
+    .section-title { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase;
+                     letter-spacing: 0.05em; margin: 0 0 12px; }
+
+    .refresh-btn {
+      background: transparent; border: 1px solid var(--border); color: var(--muted);
+      padding: 4px 12px; border-radius: 4px; font-size: 11px; cursor: pointer; transition: all .15s;
+    }
+    .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="pulse"></div>
+    <h1>News Aggregator</h1>
+    <span class="badge">LIVE</span>
+    <nav class="nav-links">
+      <a href="/">Feed</a>
+      <a href="/sources">Sources</a>
+      <a href="/settings">Settings</a>
+      <a href="/logs" class="active">Logs</a>
+    </nav>
+  </header>
+
+  <div class="container">
+    <div class="tabs">
+      <button class="tab" id="tab-ai" onclick="switchLogTab('ai')">AI Processing</button>
+      <button class="tab" id="tab-webhook" onclick="switchLogTab('webhook')">Webhook Delivery</button>
+      <button class="tab" id="tab-telegram" onclick="switchLogTab('telegram')">Telegram Delivery</button>
+    </div>
+
+    <div class="tab-content">
+      <!-- AI Logs panel -->
+      <div id="tab-panel-ai" style="display:none">
+        <div class="panel-inner">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+            <p class="section-title" style="margin:0">AI Processing Log</p>
+            <button class="refresh-btn"
+                    hx-get="/partials/ai-logs"
+                    hx-target="#ai-logs"
+                    hx-swap="innerHTML">Refresh</button>
+          </div>
+          <div id="ai-logs"
+               hx-get="/partials/ai-logs"
+               hx-trigger="revealed once"
+               hx-swap="innerHTML">
+            <p style="color:var(--muted);font-size:12px">Loading AI logs...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Webhook Logs panel -->
+      <div id="tab-panel-webhook" style="display:none">
+        <div class="panel-inner">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+            <p class="section-title" style="margin:0">Webhook Delivery Log</p>
+            <button class="refresh-btn"
+                    hx-get="/partials/logs-webhook"
+                    hx-target="#webhook-logs"
+                    hx-swap="innerHTML">Refresh</button>
+          </div>
+          <div id="webhook-logs"
+               hx-get="/partials/logs-webhook"
+               hx-trigger="revealed once"
+               hx-swap="innerHTML">
+            <p style="color:var(--muted);font-size:12px">Loading webhook logs...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Telegram Logs panel -->
+      <div id="tab-panel-telegram" style="display:none">
+        <div class="panel-inner">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+            <p class="section-title" style="margin:0">Telegram Delivery Log</p>
+            <button class="refresh-btn"
+                    hx-get="/partials/telegram-logs"
+                    hx-target="#telegram-logs"
+                    hx-swap="innerHTML">Refresh</button>
+          </div>
+          <div id="telegram-logs"
+               hx-get="/partials/telegram-logs"
+               hx-trigger="revealed once"
+               hx-swap="innerHTML">
+            <p style="color:var(--muted);font-size:12px">Loading Telegram logs...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var logTabNames = ['ai', 'webhook', 'telegram'];
+
+    function switchLogTab(name) {
+      logTabNames.forEach(function(t) {
+        document.getElementById('tab-' + t).classList.toggle('active', t === name);
+        document.getElementById('tab-panel-' + t).style.display = t === name ? '' : 'none';
+      });
+      localStorage.setItem('logs_tab', name);
+      // Trigger HTMX reveal for lazy-loaded panels
+      var panel = document.getElementById('tab-panel-' + name).querySelector('[hx-trigger]');
+      if (panel) htmx.trigger(panel, 'revealed');
+    }
+
+    // Restore tab from localStorage, default to 'ai'
+    (function() {
+      var saved = localStorage.getItem('logs_tab');
+      var active = (saved && logTabNames.indexOf(saved) !== -1) ? saved : 'ai';
+      switchLogTab(active);
+    })();
+  </script>
+</body>
+</html>

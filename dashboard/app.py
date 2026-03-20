@@ -5,6 +5,7 @@ import logging
 import math
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
 import yaml
@@ -18,6 +19,45 @@ from dashboard.api_router import router as api_router, set_redis as api_set_redi
 
 logger = logging.getLogger(__name__)
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
+
+
+def _fmt_dt(iso_str: str, fmt: str = "%Y-%m-%d %H:%M") -> str:
+    """Format ISO datetime string for display (UTC)."""
+    if not iso_str:
+        return "—"
+    try:
+        dt = datetime.fromisoformat(iso_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.strftime(fmt)
+    except Exception:
+        return iso_str[:16].replace("T", " ")
+
+
+def _dt_lag(fetched_str: str, published_str: str) -> str:
+    """Return human-readable crawl lag: how long after publish the article was fetched."""
+    try:
+        pub = datetime.fromisoformat(published_str)
+        fet = datetime.fromisoformat(fetched_str)
+        if pub.tzinfo is None:
+            pub = pub.replace(tzinfo=timezone.utc)
+        if fet.tzinfo is None:
+            fet = fet.replace(tzinfo=timezone.utc)
+        delta = int((fet - pub).total_seconds())
+        if delta < 0:
+            return ""
+        if delta < 60:
+            return f"+{delta}s"
+        if delta < 3600:
+            return f"+{delta // 60}m"
+        h, m = divmod(delta, 3600)
+        return f"+{h}h{m // 60}m" if m >= 60 else f"+{h}h"
+    except Exception:
+        return ""
+
+
+templates.env.filters["fmt_dt"] = _fmt_dt
+templates.env.filters["dt_lag"] = _dt_lag
 
 _BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 SOURCES_PATH = os.path.join(_BASE_DIR, "config", "sources.yaml")
@@ -334,6 +374,11 @@ async def settings_page(request: Request):
     return templates.TemplateResponse("settings.html", {"request": request})
 
 
+@app.get("/logs", response_class=HTMLResponse)
+async def logs_page(request: Request):
+    return templates.TemplateResponse("logs.html", {"request": request})
+
+
 @app.get("/partials/settings-ai", response_class=HTMLResponse)
 async def settings_ai_partial(request: Request):
     cfg = _read_settings()
@@ -464,9 +509,13 @@ async def _webhook_ctx(request, page=1, **extra) -> dict:
 @app.get("/partials/settings-webhook", response_class=HTMLResponse)
 async def settings_webhook_partial(request: Request, page: int = 1):
     ctx = await _webhook_ctx(request, page=page)
-    if page > 1:
-        return templates.TemplateResponse("partials/webhook_logs_table.html", ctx)
     return templates.TemplateResponse("partials/settings_webhook.html", ctx)
+
+
+@app.get("/partials/logs-webhook", response_class=HTMLResponse)
+async def logs_webhook_partial(request: Request, page: int = 1):
+    ctx = await _webhook_ctx(request, page=page)
+    return templates.TemplateResponse("partials/webhook_logs_table.html", ctx)
 
 
 @app.post("/webhooks/add", response_class=HTMLResponse)

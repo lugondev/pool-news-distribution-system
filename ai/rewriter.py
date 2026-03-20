@@ -11,9 +11,10 @@ from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 import redis.asyncio as aioredis
-from storage.redis_store import get_pending_ai_articles, update_article_ai
+from crawler.dedup import check_ai_duplicate, register_ai_simhash
+from storage.redis_store import pop_pending_ai_articles, update_article_ai
 from storage.sqlite_stats import log_ai_usage
-from webhook.dispatcher import dispatch_article
+from webhook.dispatcher import enqueue_dispatch
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,10 @@ async def rewrite_article(
         temperature=temperature,
     )
 
-    result = json.loads(response.choices[0].message.content)
+    content = response.choices[0].message.content if response.choices else None
+    if not content:
+        raise ValueError(f"Model returned empty content (model={resolved_model})")
+    result = json.loads(content)
     tokens = response.usage.total_tokens if response.usage else 0
     return result.get("vi", ""), result.get("en", ""), tokens
 
@@ -166,7 +170,9 @@ async def test_ai_connection(
             temperature=0.3,
         )
         ms = int((time.monotonic() - t0) * 1000)
-        content = response.choices[0].message.content
+        content = response.choices[0].message.content if response.choices else None
+        if not content:
+            return {"ok": False, "error": "Model returned empty content", "model": resolved_model, "base_url": resolved_url, "ms": ms}
         tokens = response.usage.total_tokens if response.usage else 0
         result = json.loads(content)
         return {
@@ -196,6 +202,7 @@ async def process_pending_articles(
     webhook_endpoints: list[dict] | None = None,
     telegram_channels: list[dict] | None = None,
     spread_seconds: float = 0,
+    ai_dedup_threshold: int = 6,
 ) -> int:
     """
     Lấy các bài pending, rewrite rồi dispatch webhook + telegram.
@@ -203,15 +210,31 @@ async def process_pending_articles(
     instead of all-at-once, to avoid bursts.
     Returns số bài đã xử lý.
     """
-    articles = await get_pending_ai_articles(redis, limit=batch_size)
+    articles = await pop_pending_ai_articles(redis, limit=batch_size)
     if not articles:
         return 0
 
+    # inter_delay spaces out actual AI calls — computed against full batch size
+    # so throughput matches the spread window even if some articles are dedup-skipped.
     inter_delay = spread_seconds / len(articles) if spread_seconds > 0 and len(articles) > 1 else 0
 
     processed = 0
-    for i, article in enumerate(articles):
-        if i > 0 and inter_delay > 0:
+    ai_call_count = 0  # tracks actual AI calls made (for rate limiting)
+
+    for article in articles:
+        title = article.get("title", "")
+
+        # Pre-AI semantic dedup: check BEFORE sleeping to avoid wasted delay
+        if ai_dedup_threshold > 0 and title:
+            ai_dup = await check_ai_duplicate(redis, title, threshold=ai_dedup_threshold)
+            if ai_dup.is_duplicate:
+                await redis.hset(f"news:{article['id']}", "ai_status", "dedup_skipped")
+                logger.info(f"AI dedup skip {article['id']}: similar story already summarised")
+                processed += 1
+                continue
+
+        # Rate-limit only actual AI calls
+        if ai_call_count > 0 and inter_delay > 0:
             await asyncio.sleep(inter_delay)
 
         try:
@@ -221,16 +244,23 @@ async def process_pending_articles(
                 api_key=api_key, base_url=base_url,
             )
         except Exception as e:
+            # AI failed after tenacity retries — mark failed so it won't block the queue.
+            # It will NOT be re-enqueued; the article stays in Redis with ai_status="failed".
             logger.warning(f"AI failed for {article['id']}: {e}")
+            await redis.hset(f"news:{article['id']}", "ai_status", "failed")
+            ai_call_count += 1
             continue
 
+        ai_call_count += 1
         await update_article_ai(redis, article["id"], vi, en)
         await log_ai_usage(article["id"], model, tokens)
+        if title:
+            await register_ai_simhash(redis, title)
 
         article["ai_summary_vi"] = vi
         article["ai_summary_en"] = en
         if webhook_endpoints or telegram_channels:
-            await dispatch_article(
+            await enqueue_dispatch(
                 article,
                 webhook_endpoints or [],
                 telegram_channels=telegram_channels,

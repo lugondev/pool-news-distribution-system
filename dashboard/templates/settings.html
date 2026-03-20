@@ -193,6 +193,7 @@
       <a href="/">Feed</a>
       <a href="/sources">Sources</a>
       <a href="/settings" class="active">Settings</a>
+      <a href="/logs">Logs</a>
     </nav>
   </header>
 
@@ -248,7 +249,20 @@
         var panel = document.getElementById('tab-panel-' + t);
         panel.style.display = t === name ? '' : 'none';
       });
+      localStorage.setItem('settings_tab', name);
     }
+    // Restore last active tab on load
+    (function() {
+      var saved = localStorage.getItem('settings_tab');
+      if (saved && tabNames.indexOf(saved) !== -1 && saved !== 'ai') {
+        document.getElementById('tab-ai').classList.remove('active');
+        document.getElementById('tab-panel-ai').style.display = 'none';
+        document.getElementById('tab-' + saved).classList.add('active');
+        var panel = document.getElementById('tab-panel-' + saved);
+        panel.style.display = '';
+        htmx.trigger(panel, 'revealed');
+      }
+    })();
   </script>
 </body>
 </html>

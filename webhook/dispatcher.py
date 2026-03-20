@@ -1,7 +1,11 @@
 """
 Unified dispatcher: webhook POST + Telegram channels.
 Each endpoint/channel has its own payload_mode config.
+
+Dispatch is decoupled from the AI loop via an asyncio.Queue.
+Call enqueue_dispatch() to add a job; start dispatch_worker() in app lifespan.
 """
+import asyncio
 import json
 import logging
 
@@ -12,6 +16,45 @@ from webhook.payload import build_payload
 from webhook.telegram import dispatch_to_telegram
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Dispatch queue — bounded so a stuck webhook doesn't grow memory unboundedly
+# ---------------------------------------------------------------------------
+_dispatch_queue: asyncio.Queue = asyncio.Queue(maxsize=2000)
+
+
+async def enqueue_dispatch(
+    article: dict,
+    endpoints: list[dict],
+    telegram_channels: list[dict] | None = None,
+) -> None:
+    """Put a dispatch job in the queue (non-blocking; drops if full)."""
+    try:
+        _dispatch_queue.put_nowait((article, endpoints, telegram_channels or []))
+    except asyncio.QueueFull:
+        logger.warning(f"Dispatch queue full, dropping article {article.get('id', '?')}")
+
+
+async def dispatch_worker(rate_limit_seconds: float = 0.3) -> None:
+    """
+    Background worker: drain the dispatch queue at a controlled rate.
+    rate_limit_seconds — minimum pause between successive dispatches.
+    Start once in app lifespan; cancel on shutdown.
+    """
+    logger.info("Dispatch worker started")
+    while True:
+        try:
+            article, endpoints, channels = await _dispatch_queue.get()
+            try:
+                await dispatch_article(article, endpoints, channels)
+            except Exception as e:
+                logger.error(f"Dispatch worker unhandled error for {article.get('id', '?')}: {e}")
+            finally:
+                _dispatch_queue.task_done()
+            await asyncio.sleep(rate_limit_seconds)
+        except asyncio.CancelledError:
+            break
+    logger.info("Dispatch worker stopped")
 
 
 async def _post_webhook(url: str, payload: dict | str, timeout: int = 10) -> tuple[int, bool]:
@@ -53,6 +96,7 @@ async def dispatch_article(
             payload=payload,
             timeout=ep.get("timeout_seconds", 10),
             retry_attempts=ep.get("retry_attempts", 3),
+            retry_delay_seconds=ep.get("retry_delay_seconds", 5),
         )
 
     if telegram_channels:
@@ -65,9 +109,12 @@ async def _dispatch_to_url(
     payload: dict | str,
     timeout: int,
     retry_attempts: int,
+    retry_delay_seconds: int = 5,
 ) -> None:
     last_error = None
     for attempt in range(retry_attempts):
+        if attempt > 0:
+            await asyncio.sleep(retry_delay_seconds)
         try:
             status_code, success = await _post_webhook(url, payload, timeout)
             await log_webhook(article_id, url, status_code, success)

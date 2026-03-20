@@ -88,10 +88,89 @@ async def health():
 
 # ── Articles ─────────────────────────────────────────────────────────────────
 
+def _format_article(a: dict) -> dict:
+    """Normalize and expose both time fields clearly."""
+    return {
+        **a,
+        "published_at": a.get("published_at", ""),
+        "fetched_at": a.get("fetched_at", ""),
+    }
+
+
+@router.get("/news")
+async def list_news(
+    page: int = 1,
+    limit: int = 20,
+    source: str | None = None,
+    category: str | None = None,
+    lang: str | None = None,
+    ai_status: str | None = None,
+):
+    """
+    News list with filters.
+
+    Query params:
+    - page / limit     — pagination (limit max 100)
+    - source           — filter by source_id
+    - category         — filter by category id (world, tech, business, ...)
+    - lang             — filter by detected language code (en, vi, ja, ...)
+    - ai_status        — filter by AI processing state: pending, done, failed, dedup_skipped
+    """
+    limit = max(1, min(limit, 100))
+    offset = (page - 1) * limit
+
+    # Over-fetch when post-filters (lang/ai_status) are active so pagination is accurate
+    fetch_limit = limit * 5 if (lang or ai_status) else limit
+    fetch_offset = (page - 1) * fetch_limit if (lang or ai_status) else offset
+
+    articles, total = await get_latest_articles(
+        _get_redis(),
+        limit=fetch_limit,
+        offset=fetch_offset if not (lang or ai_status) else 0,
+        source_id=source or None,
+        category=category or None,
+    )
+
+    # Post-filter for lang / ai_status (not indexable in Redis without extra sets)
+    if lang:
+        articles = [a for a in articles if a.get("lang") == lang]
+    if ai_status:
+        articles = [a for a in articles if a.get("ai_status") == ai_status]
+
+    # Slice to requested page when post-filtering
+    if lang or ai_status:
+        slice_offset = (page - 1) * limit
+        total = len(articles)
+        articles = articles[slice_offset: slice_offset + limit]
+    else:
+        total_pages = max(1, math.ceil(total / limit))
+
+    total_pages = max(1, math.ceil(total / limit))
+
+    return {
+        "articles": [_format_article(a) for a in articles],
+        "pagination": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": total_pages,
+            "has_prev": page > 1,
+            "has_next": page < total_pages,
+        },
+        "filters": {
+            "source": source,
+            "category": category,
+            "lang": lang,
+            "ai_status": ai_status,
+        },
+    }
+
+
 @router.get("/articles")
 async def list_articles(limit: int = 50, offset: int = 0, source: str = None, category: str = None):
+    """Legacy endpoint — prefer /api/news for new integrations."""
     articles, total = await get_latest_articles(
-        _get_redis(), limit=limit, offset=offset,
+        _get_redis(), limit=min(limit, 200), offset=offset,
         source_id=source or None, category=category or None,
     )
     return {"articles": articles, "count": len(articles), "total": total}

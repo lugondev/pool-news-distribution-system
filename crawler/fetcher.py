@@ -5,7 +5,8 @@ Per-domain rate limiting + random delays to avoid IP bans.
 import asyncio
 import logging
 import random
-from collections import defaultdict
+import time
+import weakref
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -14,7 +15,7 @@ import redis.asyncio as aioredis
 
 from crawler.dedup import check_duplicate
 from crawler.rss_parser import Article, parse_rss_feed
-from storage.redis_store import save_article
+from storage.redis_store import save_article, set_source_next_crawl
 from storage.sqlite_stats import log_crawl_result
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,40 @@ _USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) Gecko/20100101 Firefox/134.0",
 ]
 
-_domain_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+# WeakValueDictionary: lock entries are garbage-collected automatically when
+# no coroutine holds the lock — prevents unbounded memory growth over days.
+_domain_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+
+
+def _get_domain_lock(domain: str) -> asyncio.Lock:
+    lock = _domain_locks.get(domain)
+    if lock is None:
+        lock = asyncio.Lock()
+        _domain_locks[domain] = lock
+    return lock
+
+
+def compute_next_crawl_ts(
+    http_status: int | None,
+    default_sec: int,
+    backoff_429_sec: int = 1800,
+    backoff_403_sec: int = 7200,
+) -> float:
+    """Compute Unix timestamp for a source's next crawl based on HTTP response.
+
+    - 429 Too Many Requests → back off 30 min (default)
+    - 403 Forbidden         → back off 2 h   (default) — likely IP block
+    - 5xx server error      → back off 2× default interval, max 10 min
+    - success / other       → use default crawl interval
+    """
+    now = time.time()
+    if http_status == 429:
+        return now + backoff_429_sec
+    if http_status == 403:
+        return now + backoff_403_sec
+    if http_status is not None and http_status >= 500:
+        return now + min(default_sec * 2, 600)
+    return now + default_sec
 
 
 def _get_domain(url: str) -> str:
@@ -61,7 +95,7 @@ async def fetch_source(
         "error_msg": None,
     }
 
-    async with _domain_locks[domain]:
+    async with _get_domain_lock(domain):
         await asyncio.sleep(random.uniform(*domain_delay))
 
         try:
@@ -102,17 +136,18 @@ async def fetch_source(
 async def fetch_all_sources(
     sources: list[dict],
     redis: aioredis.Redis,
-    max_concurrent: int = 10,
+    max_concurrent: int = 3,
     dedup_threshold: int = 3,
     max_articles_per_source: int = 50,
     request_timeout: int = 15,
     domain_delay: tuple[float, float] = (0.5, 1.5),
-    spread_seconds: float = 0,
+    default_crawl_interval_sec: int = 600,
+    backoff_429_sec: int = 1800,
+    backoff_403_sec: int = 7200,
 ) -> list[dict]:
     """
-    Crawl sources with controlled concurrency.
-    If spread_seconds > 0, sources are staggered evenly across that window
-    instead of all launching at once.
+    Crawl sources with controlled concurrency, then update each source's
+    next_crawl_at in Redis based on the HTTP response (429/403 → longer backoff).
     """
     enabled = [s for s in sources if s.get("enabled", True)]
     if not enabled:
@@ -121,9 +156,6 @@ async def fetch_all_sources(
     random.shuffle(enabled)
     semaphore = asyncio.Semaphore(max_concurrent)
     ua = random.choice(_USER_AGENTS)
-    results: list[dict] = []
-
-    inter_delay = spread_seconds / len(enabled) if spread_seconds > 0 and len(enabled) > 1 else 0
 
     async with httpx.AsyncClient(
         follow_redirects=True,
@@ -135,9 +167,7 @@ async def fetch_all_sources(
         },
     ) as client:
 
-        async def _fetch_with_sem(source: dict, delay: float) -> dict:
-            if delay > 0:
-                await asyncio.sleep(delay)
+        async def _fetch_with_sem(source: dict) -> dict:
             async with semaphore:
                 return await fetch_source(
                     source, client, redis,
@@ -146,17 +176,26 @@ async def fetch_all_sources(
                     domain_delay=domain_delay,
                 )
 
-        tasks = [
-            _fetch_with_sem(s, inter_delay * i)
-            for i, s in enumerate(enabled)
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=False)
+        results = await asyncio.gather(
+            *[_fetch_with_sem(s) for s in enabled],
+            return_exceptions=False,
+        )
+
+    # Update crawl schedule for each source based on its response
+    for r in results:
+        next_ts = compute_next_crawl_ts(
+            r.get("http_status"),
+            default_sec=default_crawl_interval_sec,
+            backoff_429_sec=backoff_429_sec,
+            backoff_403_sec=backoff_403_sec,
+        )
+        await set_source_next_crawl(redis, r["source_id"], next_ts)
 
     total_saved = sum(r["saved"] for r in results)
     total_found = sum(r["found"] for r in results)
     failed = sum(1 for r in results if r["errors"] > 0)
     logger.info(
-        f"Crawl done: {total_found} found, {total_saved} saved, "
+        f"Crawl tick done: {total_found} found, {total_saved} saved, "
         f"{failed} failed from {len(results)} sources"
     )
 

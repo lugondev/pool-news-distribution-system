@@ -1,6 +1,7 @@
 """
 Entry point: FastAPI app + APScheduler trong cùng process.
 """
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 from dashboard.app import app as dashboard_app, get_redis
 from scheduler import get_scheduler
 from storage.sqlite_stats import init_db
+from webhook.dispatcher import dispatch_worker
 
 
 @asynccontextmanager
@@ -49,8 +51,16 @@ async def lifespan(app: FastAPI):
     # Trigger crawl ngay khi start
     scheduler.get_job("crawl_all").modify(next_run_time=__import__("datetime").datetime.now())
 
+    # Dispatch worker: dequeues webhook/Telegram jobs independently of AI loop
+    _dispatch_task = asyncio.create_task(dispatch_worker())
+
     yield
 
+    _dispatch_task.cancel()
+    try:
+        await _dispatch_task
+    except asyncio.CancelledError:
+        pass
     scheduler.shutdown(wait=False)
     await redis.aclose()
     logger.info("Shutdown complete")

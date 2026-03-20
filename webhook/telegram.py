@@ -128,8 +128,11 @@ async def dispatch_to_telegram(article: dict, channels: list[dict], message_dela
         if sent > 0 and message_delay > 0:
             await asyncio.sleep(message_delay)
 
+        retry_delay = ch.get("retry_delay_seconds", 5)
         last_error = None
         for attempt in range(retry_attempts):
+            if attempt > 0:
+                await asyncio.sleep(retry_delay)
             try:
                 status, ok, error = await send_telegram(token, chat_id, text, timeout)
                 if ok:
