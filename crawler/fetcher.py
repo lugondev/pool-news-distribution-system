@@ -1,9 +1,13 @@
 """
 Async fetcher: crawl tất cả sources song song, dedup, lưu vào Redis.
+Per-domain rate limiting + random delays to avoid IP bans.
 """
 import asyncio
 import logging
+import random
+from collections import defaultdict
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import httpx
 import redis.asyncio as aioredis
@@ -15,6 +19,23 @@ from storage.sqlite_stats import log_crawl_result
 
 logger = logging.getLogger(__name__)
 
+_USER_AGENTS = [
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) Gecko/20100101 Firefox/134.0",
+]
+
+_domain_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+
+
+def _get_domain(url: str) -> str:
+    """Extract base domain for rate-limiting (e.g. cnbc.com from www.cnbc.com/id/...)."""
+    host = urlparse(url).hostname or ""
+    parts = host.split(".")
+    return ".".join(parts[-2:]) if len(parts) >= 2 else host
+
 
 async def fetch_source(
     source: dict,
@@ -22,14 +43,17 @@ async def fetch_source(
     redis: aioredis.Redis,
     dedup_threshold: int = 3,
     max_articles: int = 50,
+    domain_delay: tuple[float, float] = (1.0, 3.0),
 ) -> dict:
     """
-    Crawl 1 source: fetch → parse → dedup → save.
-    Returns stats dict.
+    Crawl 1 source: per-domain lock → random delay → fetch → parse → dedup → save.
     """
     started_at = datetime.now(timezone.utc)
+    domain = _get_domain(source["url"])
     stats = {
         "source_id": source["id"],
+        "domain": domain,
+        "http_status": None,
         "found": 0,
         "saved": 0,
         "duplicates": 0,
@@ -37,23 +61,39 @@ async def fetch_source(
         "error_msg": None,
     }
 
-    try:
-        articles = await parse_rss_feed(source, client, max_articles=max_articles)
-        stats["found"] = len(articles)
+    async with _domain_locks[domain]:
+        await asyncio.sleep(random.uniform(*domain_delay))
 
-        for article in articles:
-            result = await check_duplicate(redis, article.title, threshold=dedup_threshold)
-            if result.is_duplicate:
-                stats["duplicates"] += 1
-                continue
+        try:
+            articles = await parse_rss_feed(source, client, max_articles=max_articles)
+            stats["http_status"] = 200
+            stats["found"] = len(articles)
 
-            await save_article(redis, article)
-            stats["saved"] += 1
+            for article in articles:
+                result = await check_duplicate(redis, article.title, threshold=dedup_threshold)
+                if result.is_duplicate:
+                    stats["duplicates"] += 1
+                    continue
 
-    except Exception as e:
-        stats["errors"] = 1
-        stats["error_msg"] = str(e)
-        logger.warning(f"Source {source['id']} failed: {e}")
+                await save_article(redis, article)
+                stats["saved"] += 1
+
+        except httpx.HTTPStatusError as e:
+            status = e.response.status_code
+            stats["http_status"] = status
+            stats["errors"] = 1
+            stats["error_msg"] = f"HTTP {status}: {e}"
+            if status == 429:
+                logger.warning(f"[{source['id']}] rate-limited (429) from {domain}")
+            elif status == 403:
+                logger.warning(f"[{source['id']}] forbidden (403) from {domain}, possible IP block")
+            else:
+                logger.warning(f"[{source['id']}] HTTP {status} from {domain}")
+
+        except Exception as e:
+            stats["errors"] = 1
+            stats["error_msg"] = str(e)[:500]
+            logger.warning(f"[{source['id']}] failed ({domain}): {e}")
 
     await log_crawl_result(source_id=source["id"], stats=stats, started_at=started_at)
     return stats
@@ -62,36 +102,62 @@ async def fetch_source(
 async def fetch_all_sources(
     sources: list[dict],
     redis: aioredis.Redis,
-    max_concurrent: int = 20,
+    max_concurrent: int = 10,
     dedup_threshold: int = 3,
     max_articles_per_source: int = 50,
     request_timeout: int = 15,
+    domain_delay: tuple[float, float] = (0.5, 1.5),
+    spread_seconds: float = 0,
 ) -> list[dict]:
     """
-    Crawl tất cả sources song song (semaphore giới hạn concurrency).
-    Returns list of stats per source.
+    Crawl sources with controlled concurrency.
+    If spread_seconds > 0, sources are staggered evenly across that window
+    instead of all launching at once.
     """
+    enabled = [s for s in sources if s.get("enabled", True)]
+    if not enabled:
+        return []
+
+    random.shuffle(enabled)
     semaphore = asyncio.Semaphore(max_concurrent)
+    ua = random.choice(_USER_AGENTS)
+    results: list[dict] = []
+
+    inter_delay = spread_seconds / len(enabled) if spread_seconds > 0 and len(enabled) > 1 else 0
 
     async with httpx.AsyncClient(
         follow_redirects=True,
         timeout=request_timeout,
-        headers={"User-Agent": "NewsAggregator/1.0 (+https://github.com/your/repo)"},
+        headers={
+            "User-Agent": ua,
+            "Accept": "application/rss+xml, application/xml, text/xml, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+        },
     ) as client:
 
-        async def _fetch_with_sem(source: dict) -> dict:
+        async def _fetch_with_sem(source: dict, delay: float) -> dict:
+            if delay > 0:
+                await asyncio.sleep(delay)
             async with semaphore:
                 return await fetch_source(
                     source, client, redis,
                     dedup_threshold=dedup_threshold,
                     max_articles=max_articles_per_source,
+                    domain_delay=domain_delay,
                 )
 
-        tasks = [_fetch_with_sem(s) for s in sources if s.get("enabled", True)]
+        tasks = [
+            _fetch_with_sem(s, inter_delay * i)
+            for i, s in enumerate(enabled)
+        ]
         results = await asyncio.gather(*tasks, return_exceptions=False)
 
     total_saved = sum(r["saved"] for r in results)
     total_found = sum(r["found"] for r in results)
-    logger.info(f"Crawl done: {total_found} found, {total_saved} saved from {len(results)} sources")
+    failed = sum(1 for r in results if r["errors"] > 0)
+    logger.info(
+        f"Crawl done: {total_found} found, {total_saved} saved, "
+        f"{failed} failed from {len(results)} sources"
+    )
 
     return results

@@ -1,55 +1,52 @@
 """
-HTTP POST webhook dispatcher.
-Push article JSON đến các configured endpoints với retry.
+Unified dispatcher: webhook POST + Telegram channels.
+Each endpoint/channel has its own payload_mode config.
 """
+import json
 import logging
-from datetime import datetime, timezone
 
 import httpx
 
 from storage.sqlite_stats import log_webhook
+from webhook.payload import build_payload
+from webhook.telegram import dispatch_to_telegram
 
 logger = logging.getLogger(__name__)
 
 
-def _build_payload(article: dict) -> dict:
-    return {
-        "id": article.get("id"),
-        "source_id": article.get("source_id"),
-        "source_name": article.get("source_name"),
-        "url": article.get("url"),
-        "title": article.get("title"),
-        "lang": article.get("lang"),
-        "category": article.get("category"),
-        "published_at": article.get("published_at"),
-        "summary": {
-            "vi": article.get("ai_summary_vi", ""),
-            "en": article.get("ai_summary_en", ""),
-        },
-        "sent_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-
-async def _post_webhook(url: str, payload: dict, timeout: int = 10) -> tuple[int, bool]:
-    """POST payload to URL. Returns (status_code, success)."""
+async def _post_webhook(url: str, payload: dict | str, timeout: int = 10) -> tuple[int, bool]:
+    """POST payload to URL. Sends JSON dict or raw text string."""
     async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(url, json=payload)
+        if isinstance(payload, str):
+            resp = await client.post(
+                url, content=payload,
+                headers={"Content-Type": "application/json"},
+            )
+        else:
+            resp = await client.post(url, json=payload)
         return resp.status_code, resp.status_code < 400
 
 
 async def dispatch_article(
     article: dict,
     endpoints: list[dict],
+    telegram_channels: list[dict] | None = None,
 ) -> None:
-    """Dispatch 1 article đến tất cả enabled webhook endpoints."""
-    payload = _build_payload(article)
-
+    """Dispatch 1 article to all enabled webhook endpoints + Telegram channels."""
     for ep in endpoints:
         if not ep.get("enabled", True):
             continue
         url = ep.get("url", "")
         if not url:
             continue
+
+        payload = build_payload(article, ep)
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
         await _dispatch_to_url(
             article_id=article["id"],
             url=url,
@@ -58,11 +55,14 @@ async def dispatch_article(
             retry_attempts=ep.get("retry_attempts", 3),
         )
 
+    if telegram_channels:
+        await dispatch_to_telegram(article, telegram_channels)
+
 
 async def _dispatch_to_url(
     article_id: str,
     url: str,
-    payload: dict,
+    payload: dict | str,
     timeout: int,
     retry_attempts: int,
 ) -> None:

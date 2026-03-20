@@ -2,6 +2,7 @@
 RSS parser + basic web scraper.
 Trả về list Article từ feed URL.
 """
+import asyncio
 import hashlib
 import re
 from dataclasses import dataclass, field
@@ -69,11 +70,23 @@ async def parse_rss_feed(
     max_articles: int = 50,
 ) -> list[Article]:
     """Fetch + parse RSS feed. Returns list of Article."""
-    try:
-        resp = await client.get(source["url"], timeout=15)
-        resp.raise_for_status()
-    except Exception as e:
-        raise RuntimeError(f"[{source['id']}] fetch failed: {e}") from e
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+        try:
+            resp = await client.get(source["url"], timeout=15)
+            if resp.status_code == 429 and attempt < max_retries:
+                retry_after = int(resp.headers.get("Retry-After", 5))
+                await asyncio.sleep(min(retry_after, 30))
+                continue
+            resp.raise_for_status()
+            break
+        except httpx.HTTPStatusError:
+            raise
+        except Exception as e:
+            if attempt < max_retries:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            raise RuntimeError(f"[{source['id']}] fetch failed: {e}") from e
 
     feed = feedparser.parse(resp.text)
     articles = []

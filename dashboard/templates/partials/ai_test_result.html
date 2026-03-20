@@ -1,0 +1,31 @@
+{% if result.ok %}
+<div class="alert alert-success" style="margin-top:12px">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+    <span style="font-size:18px">&#10003;</span>
+    <strong>AI Connection OK</strong>
+    <span class="hint" style="margin-left:auto">{{ result.ms }}ms &middot; {{ result.tokens }} tokens</span>
+  </div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:8px">
+    <strong>Model:</strong> {{ result.model }} &middot;
+    <strong>Endpoint:</strong> {{ result.base_url }} &middot;
+    <strong>Tone:</strong> {{ result.tone }}
+  </div>
+  <div class="payload-box" style="margin:0;font-size:12px">
+    <span class="key">"vi"</span>: <span class="str">"{{ result.vi }}"</span><br>
+    <span class="key">"en"</span>: <span class="str">"{{ result.en }}"</span>
+  </div>
+</div>
+{% else %}
+<div class="alert alert-error" style="margin-top:12px">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+    <span style="font-size:18px">&#10007;</span>
+    <strong>AI Connection Failed</strong>
+    {% if result.ms %}<span class="hint" style="margin-left:auto">{{ result.ms }}ms</span>{% endif %}
+  </div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:6px">
+    {% if result.model %}<strong>Model:</strong> {{ result.model }} &middot; {% endif %}
+    {% if result.base_url %}<strong>Endpoint:</strong> {{ result.base_url }}{% endif %}
+  </div>
+  <code style="font-size:11px;word-break:break-all;color:var(--danger,#ef4444)">{{ result.error }}</code>
+</div>
+{% endif %}

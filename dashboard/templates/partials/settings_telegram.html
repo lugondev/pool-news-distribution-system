@@ -1,0 +1,209 @@
+<div class="panel-inner">
+  <h3>Telegram Channels</h3>
+  <p class="desc">
+    Send article summaries to Telegram channels/groups via Bot API.
+    Create a bot with <a href="https://t.me/BotFather" target="_blank">@BotFather</a>,
+    add it to your channel as admin, then configure below.
+  </p>
+
+  {% if success %}
+  <div class="alert alert-success">{{ success }}</div>
+  {% endif %}
+  {% if error %}
+  <div class="alert alert-error">{{ error }}</div>
+  {% endif %}
+
+  <p class="section-title" style="margin-top:4px">Channels ({{ channels|length }})</p>
+
+  {% for ch in channels %}
+  <div class="wh-card" id="tg-{{ ch.id }}">
+    <div class="wh-header">
+      <div class="wh-info">
+        <span class="wh-name">{{ ch.name }}</span>
+        <span class="wh-id">{{ ch.id }}</span>
+        {% if ch.enabled %}
+          <span class="toggle-status toggle-on" style="font-size:10px">ON</span>
+        {% else %}
+          <span class="toggle-status toggle-off" style="font-size:10px">OFF</span>
+        {% endif %}
+        <span class="log-lang">{{ ch.lang or 'both' }}</span>
+      </div>
+      <div class="wh-actions">
+        <button class="btn btn-sm btn-toggle"
+                hx-post="/telegram/{{ ch.id }}/toggle"
+                hx-target="#tab-panel-telegram" hx-swap="innerHTML">
+          {% if ch.enabled %}Disable{% else %}Enable{% endif %}
+        </button>
+        <button class="btn btn-sm btn-edit"
+                hx-post="/telegram/{{ ch.id }}/test"
+                hx-target="#tg-test-result-{{ ch.id }}"
+                hx-swap="innerHTML">
+          Test
+        </button>
+        <button class="btn btn-sm btn-edit" onclick="toggleTgEdit('{{ ch.id }}')">Edit</button>
+        <button class="btn btn-sm btn-danger"
+                hx-delete="/telegram/{{ ch.id }}"
+                hx-target="#tab-panel-telegram" hx-swap="innerHTML"
+                hx-confirm="Delete Telegram channel '{{ ch.name }}'?">
+          Del
+        </button>
+      </div>
+    </div>
+    <div class="wh-url">Chat ID: {{ ch.chat_id }}</div>
+    <div class="wh-meta">
+      Token: {{ ch.bot_token[:8] if ch.bot_token else '—' }}••• · Lang: {{ ch.lang or 'both' }} · Retry: {{ ch.retry_attempts or 3 }}x · Timeout: {{ ch.timeout_seconds or 10 }}s
+      · Payload: <b>{{ ch.payload_mode or 'full' }}</b>{% if ch.payload_mode == 'fields' and ch.payload_fields %} ({{ ch.payload_fields|join(', ') }}){% endif %}
+    </div>
+    <div id="tg-test-result-{{ ch.id }}" style="margin-top:4px;font-size:11px"></div>
+
+    <form class="wh-edit-form" id="tg-edit-{{ ch.id }}" style="display:none"
+          hx-put="/telegram/{{ ch.id }}"
+          hx-target="#tab-panel-telegram" hx-swap="innerHTML">
+      <div class="form-row-2">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" name="name" value="{{ ch.name }}" required>
+        </div>
+        <div class="form-group">
+          <label>Chat ID</label>
+          <input type="text" name="chat_id" value="{{ ch.chat_id }}" required>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Bot Token</label>
+        <input type="text" name="bot_token" value="{{ ch.bot_token }}" required>
+      </div>
+      <div class="form-row-3">
+        <div class="form-group">
+          <label>Summary Language</label>
+          <select name="lang">
+            <option value="both" {{ 'selected' if (ch.lang or 'both') == 'both' }}>Both (VI + EN)</option>
+            <option value="vi" {{ 'selected' if ch.lang == 'vi' }}>Vietnamese only</option>
+            <option value="en" {{ 'selected' if ch.lang == 'en' }}>English only</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Retry</label>
+          <input type="number" name="retry_attempts" value="{{ ch.retry_attempts or 3 }}" min="1" max="10">
+        </div>
+        <div class="form-group">
+          <label>Timeout (s)</label>
+          <input type="number" name="timeout" value="{{ ch.timeout_seconds or 10 }}" min="1" max="60">
+        </div>
+      </div>
+      {% with prefix="tg-edit-" + ch.id, current_mode=ch.payload_mode or 'full', current_fields=ch.payload_fields or [], current_template=ch.payload_template or '' %}
+        {% include "partials/payload_config.html" %}
+      {% endwith %}
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button type="submit" class="btn btn-sm btn-save">Save</button>
+        <button type="button" class="btn btn-sm btn-cancel" onclick="toggleTgEdit('{{ ch.id }}')">Cancel</button>
+      </div>
+    </form>
+  </div>
+  {% endfor %}
+
+  {% if not channels %}
+  <div class="empty-state" style="margin-bottom:16px">No Telegram channels configured.</div>
+  {% endif %}
+
+  <div class="wh-add">
+    <p class="section-title">Add Channel</p>
+    <form hx-post="/telegram/add" hx-target="#tab-panel-telegram" hx-swap="innerHTML">
+      <div class="form-row-2">
+        <div class="form-group">
+          <label>ID <span class="hint">— unique slug</span></label>
+          <input type="text" name="id" placeholder="e.g. news-channel" required>
+        </div>
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" name="name" placeholder="e.g. Finance News Channel" required>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Bot Token <span class="hint">— from @BotFather</span></label>
+        <input type="text" name="bot_token" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" required>
+      </div>
+      <div class="form-group">
+        <label>Chat ID <span class="hint">— channel: -100xxx, group: -xxx, user: positive number</span></label>
+        <input type="text" name="chat_id" placeholder="-1001234567890" required>
+      </div>
+      <div class="form-row-3">
+        <div class="form-group">
+          <label>Summary Language</label>
+          <select name="lang">
+            <option value="both" selected>Both (VI + EN)</option>
+            <option value="vi">Vietnamese only</option>
+            <option value="en">English only</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Retry</label>
+          <input type="number" name="retry_attempts" value="3" min="1" max="10">
+        </div>
+        <div class="form-group">
+          <label>Timeout (s)</label>
+          <input type="number" name="timeout" value="10" min="1" max="60">
+        </div>
+      </div>
+      {% with prefix="tg-add", current_mode="full", current_fields=[], current_template="" %}
+        {% include "partials/payload_config.html" %}
+      {% endwith %}
+      <div class="form-actions" style="margin-top:10px">
+        <button type="submit" class="btn btn-primary">Add Channel</button>
+      </div>
+    </form>
+  </div>
+
+  <hr class="divider">
+
+  <p class="section-title">Message Format Preview</p>
+  <div class="payload-box">
+    <span class="comment">// Telegram HTML message sent to each enabled channel</span><br><br>
+    <span class="str">💰</span> <b><span class="key">Fed Holds Rates Steady Amid Iran Crisis</span></b><br>
+    <span class="str">📡</span> <i><span class="comment">Reuters Economy</span></i><br><br>
+    <span class="str">🇻🇳</span> <span class="comment">Fed giữ nguyên lãi suất trong bối cảnh khủng hoảng Iran...</span><br>
+    <span class="str">🇬🇧</span> <span class="comment">The Federal Reserve held interest rates steady as...</span><br><br>
+    <span class="str">🔗</span> <span class="key"><u>Read full article</u></span>
+  </div>
+
+  <hr class="divider">
+
+  <p class="section-title">Delivery Log</p>
+  <div id="telegram-logs"
+       hx-get="/partials/telegram-logs"
+       hx-trigger="load once"
+       hx-swap="innerHTML">
+    <p style="color:var(--muted);font-size:12px">Loading logs...</p>
+  </div>
+
+  <hr class="divider">
+
+  <p class="section-title">Setup Guide</p>
+  <div style="font-size:12px;color:var(--muted);line-height:1.7">
+    <b>1.</b> Message <a href="https://t.me/BotFather" target="_blank">@BotFather</a> on Telegram → <code>/newbot</code> → copy the token<br>
+    <b>2.</b> Create a channel/group, add the bot as admin<br>
+    <b>3.</b> Get chat ID: forward a message from the channel to <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a>, or use <code>https://api.telegram.org/bot{TOKEN}/getUpdates</code><br>
+    <b>4.</b> Add the channel here and click <b>Test</b> to verify
+  </div>
+</div>
+
+<script>
+  (function() {
+    var dot = document.getElementById('tab-telegram-dot');
+    if (dot) {
+      var hasEnabled = {{ 'true' if channels|selectattr('enabled')|list else 'false' }};
+      dot.className = 'tab-indicator ' + (hasEnabled ? 'on' : 'off');
+    }
+  })();
+  function toggleTgEdit(id) {
+    var form = document.getElementById('tg-edit-' + id);
+    form.style.display = form.style.display === 'none' ? '' : 'none';
+  }
+  function togglePayloadMode(prefix) {
+    var mode = document.getElementById(prefix + '-mode').value;
+    var fc = document.getElementById(prefix + '-fields-cfg');
+    var tc = document.getElementById(prefix + '-tpl-cfg');
+    if (fc) fc.style.display = mode === 'fields' ? '' : 'none';
+    if (tc) tc.style.display = mode === 'template' ? '' : 'none';
+  }
+</script>

@@ -32,9 +32,19 @@ async def lifespan(app: FastAPI):
     logger.info("SQLite initialized")
 
     redis = get_redis()
+    with open("config/settings.yaml") as f:
+        _cfg = yaml.safe_load(f)
+    _cr = _cfg.get("crawler", {})
+    _ai = _cfg.get("ai", {})
     scheduler = get_scheduler(redis)
     scheduler.start()
-    logger.info("Scheduler started — crawl every 10min, AI every 5min")
+    ci = _cr.get("fetch_interval_minutes", 3)
+    sg = _cr.get("stagger_groups", 3)
+    aim = _ai.get("interval_minutes", 2)
+    logger.info(
+        f"Scheduler started — crawl every {ci}min ({sg} groups, full cycle ~{ci*sg}min), "
+        f"AI every {aim}min (batch {_ai.get('batch_size', 10)})"
+    )
 
     # Trigger crawl ngay khi start
     scheduler.get_job("crawl_all").modify(next_run_time=__import__("datetime").datetime.now())

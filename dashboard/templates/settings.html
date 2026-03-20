@@ -77,6 +77,9 @@
            cursor: pointer; border: none; transition: all .15s; }
     .btn-primary { background: var(--accent); color: white; }
     .btn-primary:hover { opacity: 0.85; }
+    .btn-outline { background: transparent; color: var(--accent); border: 1.5px solid var(--accent); }
+    .btn-outline:hover { background: rgba(99,102,241,0.08); }
+    .btn-outline:disabled { opacity: 0.5; cursor: wait; }
     .form-actions { margin-top: 16px; display: flex; gap: 8px; }
 
     .alert { padding: 10px 14px; border-radius: 6px; font-size: 12px; margin-bottom: 14px; }
@@ -205,33 +208,46 @@
         Webhook Delivery
         <span class="tab-indicator" id="tab-webhook-dot"></span>
       </button>
+      <button class="tab" id="tab-telegram"
+              onclick="switchTab('telegram')">
+        Telegram
+        <span class="tab-indicator" id="tab-telegram-dot"></span>
+      </button>
     </div>
 
     <div class="tab-content">
       <div id="tab-panel-ai"
            hx-get="/partials/settings-ai"
-           hx-trigger="load"
+           hx-trigger="load once"
            hx-swap="innerHTML">
         <div class="panel-inner"><p style="color:var(--muted);font-size:12px">Loading AI settings...</p></div>
       </div>
 
       <div id="tab-panel-webhook" style="display:none"
            hx-get="/partials/settings-webhook"
-           hx-trigger="revealed"
+           hx-trigger="revealed once"
            hx-swap="innerHTML">
         <div class="panel-inner"><p style="color:var(--muted);font-size:12px">Loading webhook settings...</p></div>
+      </div>
+
+      <div id="tab-panel-telegram" style="display:none"
+           hx-get="/partials/settings-telegram"
+           hx-trigger="revealed once"
+           hx-swap="innerHTML">
+        <div class="panel-inner"><p style="color:var(--muted);font-size:12px">Loading Telegram settings...</p></div>
       </div>
     </div>
   </div>
 
   <script>
+    var tabNames = ['ai', 'webhook', 'telegram'];
     function switchTab(name) {
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
       document.getElementById('tab-' + name).classList.add('active');
-      document.getElementById('tab-panel-ai').style.display = name === 'ai' ? '' : 'none';
-      document.getElementById('tab-panel-webhook').style.display = name === 'webhook' ? '' : 'none';
-      // trigger htmx revealed event for lazy-loaded tab
-      htmx.trigger(document.getElementById('tab-panel-' + name), 'revealed');
+      tabNames.forEach(function(t) {
+        var panel = document.getElementById('tab-panel-' + t);
+        panel.style.display = t === name ? '' : 'none';
+      });
     }
   </script>
 </body>

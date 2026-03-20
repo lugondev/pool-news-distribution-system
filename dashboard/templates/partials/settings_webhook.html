@@ -45,6 +45,7 @@
     <div class="wh-url">{{ ep.url }}</div>
     <div class="wh-meta">
       Retry: {{ ep.retry_attempts or 3 }}x · Delay: {{ ep.retry_delay_seconds or 5 }}s · Timeout: {{ ep.timeout_seconds or 10 }}s
+      · Payload: <b>{{ ep.payload_mode or 'full' }}</b>{% if ep.payload_mode == 'fields' and ep.payload_fields %} ({{ ep.payload_fields|join(', ') }}){% endif %}
     </div>
 
     <!-- Inline edit form (hidden by default) -->
@@ -75,6 +76,9 @@
           <input type="number" name="timeout" value="{{ ep.timeout_seconds or 10 }}" min="1" max="60">
         </div>
       </div>
+      {% with prefix="wh-edit-" + ep.id, current_mode=ep.payload_mode or 'full', current_fields=ep.payload_fields or [], current_template=ep.payload_template or '' %}
+        {% include "partials/payload_config.html" %}
+      {% endwith %}
       <div style="display:flex;gap:6px;margin-top:8px">
         <button type="submit" class="btn btn-sm btn-save">Save</button>
         <button type="button" class="btn btn-sm btn-cancel" onclick="toggleEdit('{{ ep.id }}')">Cancel</button>
@@ -119,6 +123,9 @@
           <input type="number" name="timeout" value="10" min="1" max="60">
         </div>
       </div>
+      {% with prefix="wh-add", current_mode="full", current_fields=[], current_template="" %}
+        {% include "partials/payload_config.html" %}
+      {% endwith %}
       <div class="form-actions" style="margin-top:10px">
         <button type="submit" class="btn btn-primary">Add Webhook</button>
       </div>
@@ -168,5 +175,12 @@
   function toggleEdit(id) {
     var form = document.getElementById('edit-' + id);
     form.style.display = form.style.display === 'none' ? '' : 'none';
+  }
+  function togglePayloadMode(prefix) {
+    var mode = document.getElementById(prefix + '-mode').value;
+    var fc = document.getElementById(prefix + '-fields-cfg');
+    var tc = document.getElementById(prefix + '-tpl-cfg');
+    if (fc) fc.style.display = mode === 'fields' ? '' : 'none';
+    if (tc) tc.style.display = mode === 'template' ? '' : 'none';
   }
 </script>

@@ -62,3 +62,211 @@ sources:
   lang: vi
   category: world
   enabled: true
+
+# ── US: Finance, Economy & Markets ──────────────────────────
+- id: reuters_business
+  name: Reuters Business & Finance
+  url: https://www.reutersagency.com/feed/?best-topics=business-finance&post_type=best
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: reuters_economy
+  name: Reuters Economy
+  url: https://www.reutersagency.com/feed/?best-sectors=economy&post_type=best
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: cnbc_economy
+  name: CNBC Economy
+  url: https://www.cnbc.com/id/20910258/device/rss/rss.html
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: cnbc_finance
+  name: CNBC Finance
+  url: https://www.cnbc.com/id/10000664/device/rss/rss.html
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: cnbc_world_markets
+  name: CNBC World News
+  url: https://www.cnbc.com/id/100727362/device/rss/rss.html
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: cnbc_europe
+  name: CNBC Europe News
+  url: https://www.cnbc.com/id/19794221/device/rss/rss.html
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: cnbc_asia
+  name: CNBC Asia News
+  url: https://www.cnbc.com/id/19832390/device/rss/rss.html
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: marketwatch
+  name: MarketWatch Top Stories
+  url: https://feeds.content.dowjones.io/public/rss/mw_topstories
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: wsj_markets
+  name: WSJ Markets
+  url: https://feeds.a.dj.com/rss/RSSMarketsMain.xml
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: wsj_world
+  name: WSJ World News
+  url: https://feeds.a.dj.com/rss/RSSWorldNews.xml
+  type: rss
+  lang: en
+  category: world
+  enabled: true
+- id: ft_economy
+  name: Financial Times Global Economy
+  url: https://www.ft.com/global-economy?format=rss
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: ft_markets
+  name: Financial Times Markets
+  url: https://www.ft.com/markets?format=rss
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: economist_finance
+  name: The Economist Finance & Economics
+  url: https://www.economist.com/finance-and-economics/rss.xml
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: economist_business
+  name: The Economist Business
+  url: https://www.economist.com/business/rss.xml
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+
+# ── Middle East: Geopolitics & Economy ──────────────────────
+- id: aljazeera_economy
+  name: Al Jazeera Economy
+  url: https://www.aljazeera.com/xml/rss/economy.xml
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: aljazeera_middleeast
+  name: Al Jazeera Middle East
+  url: https://www.aljazeera.com/xml/rss/middleeast.xml
+  type: rss
+  lang: en
+  category: world
+  enabled: true
+
+# ── Europe: Finance & Economy ───────────────────────────────
+- id: ecb_press
+  name: ECB Press Releases
+  url: https://www.ecb.europa.eu/rss/press.html
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: dw_business
+  name: Deutsche Welle Business
+  url: https://rss.dw.com/rdf/rss-en-bus
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: ft_europe
+  name: Financial Times Europe
+  url: https://www.ft.com/world/europe?format=rss
+  type: rss
+  lang: en
+  category: world
+  enabled: true
+
+# ── Japan: Finance & Economy ────────────────────────────────
+- id: nikkei_economy
+  name: Nikkei Asia Economy
+  url: https://asia.nikkei.com/rss/feed/Economy
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: nikkei_markets
+  name: Nikkei Asia Markets
+  url: https://asia.nikkei.com/rss/feed/Markets
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: nikkei_business
+  name: Nikkei Asia Business
+  url: https://asia.nikkei.com/rss/feed/Business
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+
+# ── Korea: Finance & Economy ────────────────────────────────
+- id: koreaherald
+  name: Korea Herald
+  url: https://koreaherald.com/rss_xml.php
+  type: rss
+  lang: en
+  category: world
+  enabled: true
+- id: koreatimes
+  name: Korea Times
+  url: https://www.koreatimes.co.kr/www/rss/rss.xml
+  type: rss
+  lang: en
+  category: world
+  enabled: true
+
+# ── Singapore: Finance & Economy ────────────────────────────
+- id: cna_business
+  name: CNA Business (Singapore)
+  url: https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=6936
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: cna_asia
+  name: CNA Asia
+  url: https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=6511
+  type: rss
+  lang: en
+  category: world
+  enabled: true
+- id: cna_world
+  name: CNA World
+  url: https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=6311
+  type: rss
+  lang: en
+  category: world
+  enabled: true
+- id: straitstimes
+  name: The Straits Times
+  url: https://www.straitstimes.com/news/business/rss.xml
+  type: rss
+  lang: en
+  category: finance
+  enabled: true

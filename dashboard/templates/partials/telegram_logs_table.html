@@ -1,0 +1,63 @@
+{% if logs %}
+<table class="log-table">
+  <thead>
+    <tr>
+      <th>Time</th>
+      <th>Article</th>
+      <th>Channel</th>
+      <th>Chat ID</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for log in logs %}
+    <tr>
+      <td class="mono">{{ log.sent_at[:16].replace('T',' ') if log.sent_at else '—' }}</td>
+      <td class="truncate" title="{{ log.article_title }}">{{ log.article_title[:50] }}{% if log.article_title|length > 50 %}...{% endif %}</td>
+      <td class="mono">{{ log.channel_id }}</td>
+      <td class="mono">{{ log.chat_id }}</td>
+      <td>
+        {% if log.success %}
+          <span class="status-ok">{{ log.status_code }}</span>
+        {% else %}
+          <span class="status-fail">{{ log.status_code or 'ERR' }}</span>
+          {% if log.error_msg %}
+            <div style="font-size:10px;color:var(--red);margin-top:2px">{{ log.error_msg[:80] }}{% if log.error_msg|length > 80 %}...{% endif %}</div>
+          {% endif %}
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if tg_log_total_pages > 1 %}
+<div class="log-pagination">
+  <span class="info">{{ tg_log_total }} entries</span>
+  <div class="pages">
+    <button class="page-btn" {% if tg_log_page <= 1 %}disabled{% endif %}
+            hx-get="/partials/telegram-logs?page={{ tg_log_page - 1 }}"
+            hx-target="#telegram-logs" hx-swap="innerHTML">
+      &larr;
+    </button>
+    {% for p in range(1, tg_log_total_pages + 1) %}
+      {% if p == 1 or p == tg_log_total_pages or (p >= tg_log_page - 1 and p <= tg_log_page + 1) %}
+    <button class="page-btn {% if p == tg_log_page %}active{% endif %}"
+            hx-get="/partials/telegram-logs?page={{ p }}"
+            hx-target="#telegram-logs" hx-swap="innerHTML">{{ p }}</button>
+      {% elif p == 2 or p == tg_log_total_pages - 1 %}
+    <span style="color:var(--muted);font-size:11px;padding:0 2px">...</span>
+      {% endif %}
+    {% endfor %}
+    <button class="page-btn" {% if tg_log_page >= tg_log_total_pages %}disabled{% endif %}
+            hx-get="/partials/telegram-logs?page={{ tg_log_page + 1 }}"
+            hx-target="#telegram-logs" hx-swap="innerHTML">
+      &rarr;
+    </button>
+  </div>
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">No Telegram deliveries yet.</div>
+{% endif %}

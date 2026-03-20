@@ -4,7 +4,6 @@ AI rewriter: tóm tắt + dịch bài sang VI/EN dùng OpenAI-compatible API.
 import asyncio
 import json
 import logging
-import os
 from typing import Any
 
 import yaml
@@ -31,31 +30,54 @@ def _load_ai_config() -> dict:
 def get_openai_client(api_key: str | None = None, base_url: str | None = None) -> AsyncOpenAI:
     """
     Return a cached AsyncOpenAI client. Recreates if connection params changed.
-    Priority: explicit params > settings.yaml > env vars.
+    All config comes from settings.yaml (managed via Settings UI).
     """
     global _client, _client_fingerprint
 
-    resolved_key = api_key or os.getenv("OPENAI_API_KEY", "")
-    resolved_url = base_url or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-    fingerprint = f"{resolved_key}|{resolved_url}"
+    if not api_key or not base_url:
+        cfg = _load_ai_config()
+        api_key = api_key or cfg.get("api_key", "")
+        base_url = base_url or cfg.get("base_url", "https://api.openai.com/v1")
+
+    fingerprint = f"{api_key}|{base_url}"
 
     if _client is not None and _client_fingerprint == fingerprint:
         return _client
 
     _client = AsyncOpenAI(
-        api_key=resolved_key,
-        base_url=resolved_url,
+        api_key=api_key,
+        base_url=base_url,
         default_headers={
             "HTTP-Referer": "https://github.com/news-aggregator",
             "X-Title": "News Aggregator",
         },
     )
     _client_fingerprint = fingerprint
-    logger.info(f"OpenAI client initialized: base_url={resolved_url}")
+    logger.info(f"OpenAI client initialized: base_url={base_url}")
     return _client
 
 
-SUMMARIZE_PROMPT = """You are a professional news editor. Given the following news article, provide:
+TONE_PROMPTS = {
+    "formal": (
+        "You are a serious, authoritative news editor. "
+        "Write in a formal, objective tone — like a broadcast anchor or newspaper editorial. "
+        "Use precise language, avoid colloquialisms."
+    ),
+    "casual": (
+        "You are a friendly, upbeat news writer. "
+        "Write in a light, conversational tone — engaging and easy to read. "
+        "Use natural everyday language, keep it fun but still accurate."
+    ),
+    "general": (
+        "You are a professional news editor. "
+        "Write in a clear, neutral, informative tone. "
+        "Be concise, factual, and natural."
+    ),
+}
+
+SUMMARIZE_PROMPT = """{tone_instruction}
+
+Given the following news article, provide:
 1. A concise Vietnamese summary (2-3 sentences, natural Vietnamese)
 2. A concise English summary (2-3 sentences)
 
@@ -65,27 +87,34 @@ Article content: {content}
 Respond in JSON format:
 {{"vi": "Vietnamese summary here", "en": "English summary here"}}
 
-Be concise, factual, and natural. Do not add opinions."""
+Do not add opinions."""
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 async def rewrite_article(
     article: dict,
-    model: str = "gpt-4o-mini",
+    model: str | None = None,
     max_tokens: int = 300,
     temperature: float = 0.3,
+    tone: str = "general",
     api_key: str | None = None,
     base_url: str | None = None,
 ) -> tuple[str, str, int]:
     """Returns (vi_summary, en_summary, tokens_used)."""
     client = get_openai_client(api_key=api_key, base_url=base_url)
+    resolved_model = model or _load_ai_config().get("model", "gpt-4o-mini")
+    tone_instruction = TONE_PROMPTS.get(tone, TONE_PROMPTS["general"])
     content = article.get("content") or article.get("summary") or ""
     title = article.get("title", "")
 
-    prompt = SUMMARIZE_PROMPT.format(title=title, content=content[:1500])
+    prompt = SUMMARIZE_PROMPT.format(
+        tone_instruction=tone_instruction,
+        title=title,
+        content=content[:1500],
+    )
 
     response = await client.chat.completions.create(
-        model=model,
+        model=resolved_model,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=max_tokens,
         response_format={"type": "json_object"},
@@ -97,47 +126,115 @@ async def rewrite_article(
     return result.get("vi", ""), result.get("en", ""), tokens
 
 
+async def test_ai_connection(
+    api_key: str | None = None,
+    base_url: str | None = None,
+    model: str | None = None,
+    tone: str = "general",
+) -> dict:
+    """Send a short test prompt to verify AI connectivity. Returns result dict."""
+    import time
+    cfg = _load_ai_config()
+    resolved_key = api_key or cfg.get("api_key", "")
+    resolved_url = base_url or cfg.get("base_url", "https://api.openai.com/v1")
+    resolved_model = model or cfg.get("model", "gpt-4o-mini")
+    tone_instruction = TONE_PROMPTS.get(tone, TONE_PROMPTS["general"])
+
+    if not resolved_key:
+        return {"ok": False, "error": "API key is empty", "ms": 0}
+
+    try:
+        client = AsyncOpenAI(
+            api_key=resolved_key,
+            base_url=resolved_url,
+            default_headers={
+                "HTTP-Referer": "https://github.com/news-aggregator",
+                "X-Title": "News Aggregator",
+            },
+        )
+        t0 = time.monotonic()
+        response = await client.chat.completions.create(
+            model=resolved_model,
+            messages=[{"role": "user", "content": (
+                f"{tone_instruction}\n\n"
+                "Summarize this test headline in JSON: "
+                '{"vi": "...", "en": "..."}\n\n'
+                "Headline: Global markets rally on trade deal optimism"
+            )}],
+            max_tokens=120,
+            response_format={"type": "json_object"},
+            temperature=0.3,
+        )
+        ms = int((time.monotonic() - t0) * 1000)
+        content = response.choices[0].message.content
+        tokens = response.usage.total_tokens if response.usage else 0
+        result = json.loads(content)
+        return {
+            "ok": True,
+            "model": resolved_model,
+            "base_url": resolved_url,
+            "tone": tone,
+            "ms": ms,
+            "tokens": tokens,
+            "vi": result.get("vi", ""),
+            "en": result.get("en", ""),
+        }
+    except Exception as e:
+        ms = int((time.monotonic() - t0) * 1000) if "t0" in dir() else 0
+        return {"ok": False, "error": str(e), "model": resolved_model, "base_url": resolved_url, "ms": ms}
+
+
 async def process_pending_articles(
     redis: aioredis.Redis,
-    model: str = "gpt-4o-mini",
-    batch_size: int = 5,
+    model: str | None = None,
+    batch_size: int = 10,
     max_tokens: int = 300,
     temperature: float = 0.3,
+    tone: str = "general",
     api_key: str | None = None,
     base_url: str | None = None,
     webhook_endpoints: list[dict] | None = None,
+    telegram_channels: list[dict] | None = None,
+    spread_seconds: float = 0,
 ) -> int:
     """
-    Lấy các bài pending, rewrite rồi dispatch webhook.
+    Lấy các bài pending, rewrite rồi dispatch webhook + telegram.
+    If spread_seconds > 0, articles are processed one-by-one with even delays
+    instead of all-at-once, to avoid bursts.
     Returns số bài đã xử lý.
     """
     articles = await get_pending_ai_articles(redis, limit=batch_size)
     if not articles:
         return 0
 
-    tasks = [
-        rewrite_article(
-            a, model=model, max_tokens=max_tokens,
-            temperature=temperature, api_key=api_key, base_url=base_url,
-        )
-        for a in articles
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    inter_delay = spread_seconds / len(articles) if spread_seconds > 0 and len(articles) > 1 else 0
 
     processed = 0
-    for article, result in zip(articles, results):
-        if isinstance(result, Exception):
-            logger.warning(f"AI failed for {article['id']}: {result}")
+    for i, article in enumerate(articles):
+        if i > 0 and inter_delay > 0:
+            await asyncio.sleep(inter_delay)
+
+        try:
+            vi, en, tokens = await rewrite_article(
+                article, model=model, max_tokens=max_tokens,
+                temperature=temperature, tone=tone,
+                api_key=api_key, base_url=base_url,
+            )
+        except Exception as e:
+            logger.warning(f"AI failed for {article['id']}: {e}")
             continue
 
-        vi, en, tokens = result
         await update_article_ai(redis, article["id"], vi, en)
         await log_ai_usage(article["id"], model, tokens)
 
         article["ai_summary_vi"] = vi
         article["ai_summary_en"] = en
-        if webhook_endpoints:
-            await dispatch_article(article, webhook_endpoints)
+        if webhook_endpoints or telegram_channels:
+            await dispatch_article(
+                article,
+                webhook_endpoints or [],
+                telegram_channels=telegram_channels,
+            )
 
         processed += 1
         logger.info(f"Processed article {article['id']}: {article['title'][:60]}...")

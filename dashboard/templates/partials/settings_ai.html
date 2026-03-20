@@ -2,7 +2,8 @@
   <h3>AI Summarization</h3>
   <p class="desc">
     Rewrites article titles + content into bilingual summaries via an OpenAI-compatible API.
-    Runs every 5 minutes, processing a batch of pending articles.
+    Crawl runs every {{ crawler.fetch_interval_minutes or 3 }} min ({{ crawler.stagger_groups or 3 }} groups),
+    AI every {{ ai.interval_minutes or 2 }} min (batch {{ ai.batch_size or 10 }}).
   </p>
 
   {% if success %}
@@ -34,14 +35,14 @@
     <p class="section-title" style="margin-top:4px">API Connection</p>
     <div class="form-row-2">
       <div class="form-group">
-        <label>Base URL <span class="hint">— leave empty to use env var</span></label>
+        <label>Base URL</label>
         <input type="url" name="base_url" value="{{ ai.base_url or '' }}"
-               placeholder="https://openrouter.ai/api/v1">
+               placeholder="https://openrouter.ai/api/v1" required>
       </div>
       <div class="form-group">
-        <label>API Key <span class="hint">— leave empty to use env var</span></label>
+        <label>API Key</label>
         <input type="password" name="api_key" value="{{ ai.api_key or '' }}"
-               placeholder="sk-..." autocomplete="off">
+               placeholder="sk-..." autocomplete="off" required>
       </div>
     </div>
 
@@ -60,6 +61,27 @@
       </div>
     </div>
 
+    <p class="section-title">Writing Tone</p>
+    <div class="tone-selector" style="display:flex;gap:10px;margin-bottom:16px">
+      {% set current_tone = ai.tone or 'general' %}
+      {% for t in [
+        {'id': 'formal', 'label': 'Formal', 'icon': '📰', 'desc': 'Serious, authoritative — like a news anchor'},
+        {'id': 'casual', 'label': 'Casual', 'icon': '😊', 'desc': 'Light, conversational — fun and engaging'},
+        {'id': 'general', 'label': 'General', 'icon': '📝', 'desc': 'Neutral, clear — balanced and informative'},
+      ] %}
+      <label class="tone-card{% if current_tone == t.id %} tone-active{% endif %}"
+             style="flex:1;cursor:pointer;border:1.5px solid {% if current_tone == t.id %}var(--accent){% else %}var(--border){% endif %};border-radius:8px;padding:12px 14px;transition:all .15s;background:{% if current_tone == t.id %}var(--accent-bg, rgba(99,102,241,.08)){% else %}transparent{% endif %}">
+        <input type="radio" name="tone" value="{{ t.id }}"
+               {% if current_tone == t.id %}checked{% endif %}
+               style="display:none"
+               onchange="document.querySelectorAll('.tone-card').forEach(c=>{c.classList.remove('tone-active');c.style.borderColor='var(--border)';c.style.background='transparent'});this.closest('.tone-card').classList.add('tone-active');this.closest('.tone-card').style.borderColor='var(--accent)';this.closest('.tone-card').style.background='var(--accent-bg, rgba(99,102,241,.08))'">
+        <div style="font-size:20px;margin-bottom:4px">{{ t.icon }}</div>
+        <div style="font-weight:600;font-size:13px">{{ t.label }}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">{{ t.desc }}</div>
+      </label>
+      {% endfor %}
+    </div>
+
     <div class="form-row-2" style="margin-bottom:0">
       <div class="form-row-2">
         <div class="form-group">
@@ -75,7 +97,7 @@
       <div class="form-row-2">
         <div class="form-group">
           <label>Batch Size</label>
-          <input type="number" name="batch_size" value="{{ ai.batch_size or 5 }}" min="1" max="20">
+          <input type="number" name="batch_size" value="{{ ai.batch_size or 10 }}" min="1" max="50">
         </div>
         <div class="form-group">
           <label>Retry Attempts</label>
@@ -84,10 +106,54 @@
       </div>
     </div>
 
+    <p class="section-title">Pipeline Speed</p>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">
+      Sources are split into groups; each tick crawls one group in round-robin.
+      Full cycle = interval &times; groups. <b>Restart required</b> after changing intervals.
+    </div>
+    <div class="form-row-2" style="margin-bottom:0">
+      <div class="form-row-2">
+        <div class="form-group">
+          <label>Crawl Interval <span class="hint">min</span></label>
+          <input type="number" name="crawl_interval" value="{{ crawler.fetch_interval_minutes or 3 }}" min="1" max="60">
+        </div>
+        <div class="form-group">
+          <label>Stagger Groups</label>
+          <input type="number" name="stagger_groups" value="{{ crawler.stagger_groups or 3 }}" min="1" max="10">
+        </div>
+      </div>
+      <div class="form-row-2">
+        <div class="form-group">
+          <label>AI Interval <span class="hint">min</span></label>
+          <input type="number" name="ai_interval" value="{{ ai.interval_minutes or 2 }}" min="1" max="30">
+        </div>
+        <div class="form-group">
+          <label>Domain Delay <span class="hint">sec range</span></label>
+          <input type="text" name="domain_delay" value="{{ crawler.domain_delay_min or 0.5 }}-{{ crawler.domain_delay_max or 1.5 }}"
+                 placeholder="0.5-1.5" style="font-family:monospace">
+        </div>
+      </div>
+    </div>
+
     <div class="form-actions">
-      <button type="submit" class="btn btn-primary">Save AI Settings</button>
+      <button type="submit" class="btn btn-primary">Save Settings</button>
     </div>
   </form>
+
+  <div style="margin-top:12px;display:flex;align-items:center;gap:12px">
+    <button class="btn btn-outline"
+            hx-post="/settings/ai/test"
+            hx-target="#ai-test-result"
+            hx-swap="innerHTML"
+            hx-indicator="#ai-test-spinner"
+            onclick="this.disabled=true;var s=this;setTimeout(function(){s.disabled=false},10000)">
+      Test AI Connection
+    </button>
+    <span id="ai-test-spinner" class="htmx-indicator" style="font-size:12px;color:var(--muted)">
+      Testing...
+    </span>
+  </div>
+  <div id="ai-test-result"></div>
 
   <hr class="divider">
 
@@ -98,8 +164,8 @@
     <span class="key">"content"</span>: <span class="str">"Article body text (first 1500 chars)"</span><br>
     <br>
     <span class="comment">// POST → {{ ai.base_url or 'OPENAI_BASE_URL env' }}/chat/completions</span><br>
-    <span class="comment">// Model: {{ ai.model or 'gpt-4o-mini' }} | temp: {{ ai.temperature if ai.temperature is not none else 0.3 }} | format: json_object</span><br>
-    <span class="comment">// Prompt: "You are a professional news editor..."</span><br>
+    <span class="comment">// Model: {{ ai.model or 'gpt-4o-mini' }} | temp: {{ ai.temperature if ai.temperature is not none else 0.3 }} | tone: {{ ai.tone or 'general' }} | format: json_object</span><br>
+    <span class="comment">// Prompt tone: {% if (ai.tone or 'general') == 'formal' %}"Serious, authoritative news editor"{% elif (ai.tone or 'general') == 'casual' %}"Friendly, upbeat news writer"{% else %}"Professional news editor — clear, neutral"{% endif %}</span><br>
     <br>
     <span class="comment">// Output: stored back to Redis article hash</span><br>
     <span class="key">"ai_summary_vi"</span>: <span class="str">"Tóm tắt tiếng Việt (2-3 câu)"</span><br>
@@ -112,7 +178,7 @@
 <div class="panel-inner" id="ai-sub-logs" style="display:none;padding-top:20px">
   <div id="ai-logs"
        hx-get="/partials/ai-logs"
-       hx-trigger="revealed"
+       hx-trigger="load once"
        hx-swap="innerHTML">
     <p style="color:var(--muted);font-size:12px">Loading logs...</p>
   </div>

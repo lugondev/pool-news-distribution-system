@@ -13,7 +13,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from storage.redis_store import get_latest_articles, get_feed_stats, get_article
-from storage.sqlite_stats import get_dashboard_stats, get_recent_webhook_logs, get_recent_ai_logs, init_db
+from storage.sqlite_stats import get_dashboard_stats, get_recent_webhook_logs, get_recent_ai_logs, get_recent_telegram_logs, init_db
+from dashboard.api_router import router as api_router, set_redis as api_set_redis
 
 logger = logging.getLogger(__name__)
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
@@ -33,6 +34,7 @@ def get_redis() -> aioredis.Redis:
             encoding="utf-8",
             decode_responses=False,
         )
+        api_set_redis(_redis)
     return _redis
 
 
@@ -74,6 +76,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="News Aggregator Dashboard", lifespan=lifespan)
+app.include_router(api_router)
 
 PAGE_SIZE = 20
 
@@ -337,6 +340,7 @@ async def settings_ai_partial(request: Request):
     return templates.TemplateResponse("partials/settings_ai.html", {
         "request": request,
         "ai": cfg.get("ai", {}),
+        "crawler": cfg.get("crawler", {}),
     })
 
 
@@ -347,30 +351,73 @@ async def settings_ai_update(
     api_key: str = Form(""),
     base_url: str = Form(""),
     model: str = Form("gpt-4o-mini"),
+    tone: str = Form("general"),
     temperature: float = Form(0.3),
-    batch_size: int = Form(5),
+    batch_size: int = Form(10),
     max_tokens: int = Form(300),
     retry_attempts: int = Form(3),
     output_languages: str = Form("vi,en"),
+    crawl_interval: int = Form(3),
+    stagger_groups: int = Form(3),
+    ai_interval: int = Form(2),
+    domain_delay: str = Form("0.5-1.5"),
 ):
+    valid_tones = ("formal", "casual", "general")
+    resolved_tone = tone if tone in valid_tones else "general"
+
+    delay_parts = domain_delay.replace(" ", "").split("-")
+    try:
+        delay_min = max(0.1, float(delay_parts[0]))
+        delay_max = max(delay_min, float(delay_parts[1])) if len(delay_parts) > 1 else delay_min + 1.0
+    except (ValueError, IndexError):
+        delay_min, delay_max = 0.5, 1.5
+
     cfg = _read_settings()
     cfg["ai"] = {
         "enabled": enabled == "on",
         "api_key": api_key.strip(),
         "base_url": base_url.strip(),
         "model": model.strip(),
+        "tone": resolved_tone,
+        "interval_minutes": max(1, min(ai_interval, 30)),
         "temperature": max(0.0, min(float(temperature), 2.0)),
-        "batch_size": max(1, min(batch_size, 20)),
+        "batch_size": max(1, min(batch_size, 50)),
         "max_tokens_summary": max(100, min(max_tokens, 1000)),
         "retry_attempts": max(1, min(retry_attempts, 10)),
         "output_languages": [l.strip() for l in output_languages.split(",") if l.strip()],
     }
+    cfg.setdefault("crawler", {}).update({
+        "fetch_interval_minutes": max(1, min(crawl_interval, 60)),
+        "stagger_groups": max(1, min(stagger_groups, 10)),
+        "domain_delay_min": delay_min,
+        "domain_delay_max": delay_max,
+    })
     _write_settings(cfg)
-    logger.info(f"AI settings updated: model={cfg['ai']['model']}, enabled={cfg['ai']['enabled']}")
+    logger.info(
+        f"Settings updated: model={cfg['ai']['model']}, tone={resolved_tone}, "
+        f"crawl={crawl_interval}min×{stagger_groups}groups, ai={ai_interval}min"
+    )
     return templates.TemplateResponse("partials/settings_ai.html", {
         "request": request,
         "ai": cfg["ai"],
-        "success": "AI settings saved",
+        "crawler": cfg["crawler"],
+        "success": "Settings saved. Restart app to apply interval changes.",
+    })
+
+
+@app.post("/settings/ai/test", response_class=HTMLResponse)
+async def settings_ai_test(request: Request):
+    from ai.rewriter import test_ai_connection
+    cfg = _read_settings().get("ai", {})
+    result = await test_ai_connection(
+        api_key=cfg.get("api_key"),
+        base_url=cfg.get("base_url"),
+        model=cfg.get("model"),
+        tone=cfg.get("tone", "general"),
+    )
+    return templates.TemplateResponse("partials/ai_test_result.html", {
+        "request": request,
+        "result": result,
     })
 
 
@@ -431,19 +478,24 @@ async def webhook_add(
     retry_attempts: int = Form(3),
     retry_delay: int = Form(5),
     timeout: int = Form(10),
+    payload_mode: str = Form("full"),
+    payload_fields: str = Form(""),
+    payload_template: str = Form(""),
 ):
     endpoints = _get_webhook_endpoints()
     if any(ep["id"] == id for ep in endpoints):
         ctx = await _webhook_ctx(request, error=f"Webhook '{id}' already exists")
         return templates.TemplateResponse("partials/settings_webhook.html", ctx)
+    fields_list = [f.strip() for f in payload_fields.split(",") if f.strip()] if payload_fields else []
     endpoints.append({
-        "id": id.strip(),
-        "name": name.strip(),
-        "url": url.strip(),
+        "id": id.strip(), "name": name.strip(), "url": url.strip(),
         "enabled": True,
         "retry_attempts": max(1, min(retry_attempts, 10)),
         "retry_delay_seconds": max(1, min(retry_delay, 60)),
         "timeout_seconds": max(1, min(timeout, 60)),
+        "payload_mode": payload_mode,
+        "payload_fields": fields_list,
+        "payload_template": payload_template,
     })
     _save_webhook_endpoints(endpoints)
     logger.info(f"Webhook added: {id}")
@@ -472,8 +524,12 @@ async def webhook_update(
     retry_attempts: int = Form(3),
     retry_delay: int = Form(5),
     timeout: int = Form(10),
+    payload_mode: str = Form("full"),
+    payload_fields: str = Form(""),
+    payload_template: str = Form(""),
 ):
     endpoints = _get_webhook_endpoints()
+    fields_list = [f.strip() for f in payload_fields.split(",") if f.strip()] if payload_fields else []
     for ep in endpoints:
         if ep["id"] == wh_id:
             ep["name"] = name.strip()
@@ -481,6 +537,9 @@ async def webhook_update(
             ep["retry_attempts"] = max(1, min(retry_attempts, 10))
             ep["retry_delay_seconds"] = max(1, min(retry_delay, 60))
             ep["timeout_seconds"] = max(1, min(timeout, 60))
+            ep["payload_mode"] = payload_mode
+            ep["payload_fields"] = fields_list
+            ep["payload_template"] = payload_template
             break
     _save_webhook_endpoints(endpoints)
     logger.info(f"Webhook updated: {wh_id}")
@@ -498,31 +557,168 @@ async def webhook_delete(request: Request, wh_id: str):
     return templates.TemplateResponse("partials/settings_webhook.html", ctx)
 
 
-# --- API ---
+# --- Telegram channel management ---
 
-@app.get("/api/articles")
-async def api_articles(limit: int = 50, offset: int = 0, source: str = None, category: str = None):
-    redis = get_redis()
-    articles, total = await get_latest_articles(
-        redis, limit=limit, offset=offset,
-        source_id=source or None, category=category or None,
+def _get_telegram_channels() -> list[dict]:
+    return _read_settings().get("telegram", {}).get("channels", [])
+
+
+def _save_telegram_channels(channels: list[dict]) -> None:
+    cfg = _read_settings()
+    cfg.setdefault("telegram", {})["channels"] = channels
+    _write_settings(cfg)
+
+
+def _telegram_ctx(request, **extra) -> dict:
+    ctx = {"request": request, "channels": _get_telegram_channels()}
+    ctx.update(extra)
+    return ctx
+
+
+@app.get("/partials/settings-telegram", response_class=HTMLResponse)
+async def settings_telegram_partial(request: Request):
+    return templates.TemplateResponse(
+        "partials/settings_telegram.html", _telegram_ctx(request)
     )
-    return {"articles": articles, "count": len(articles), "total": total}
 
 
-@app.get("/api/stats")
-async def api_stats():
-    redis = get_redis()
-    redis_stats = await get_feed_stats(redis)
-    db_stats = await get_dashboard_stats()
-    return {"redis": redis_stats, "db": db_stats}
+@app.get("/partials/telegram-logs", response_class=HTMLResponse)
+async def telegram_logs_partial(request: Request, page: int = 1, channel_id: str | None = None):
+    offset = (page - 1) * LOG_PAGE_SIZE
+    logs, total = await get_recent_telegram_logs(limit=LOG_PAGE_SIZE, offset=offset, channel_id=channel_id)
+    logs = await _enrich_logs(logs, full=True)
+    return templates.TemplateResponse("partials/telegram_logs_table.html", {
+        "request": request,
+        "logs": logs,
+        "tg_log_page": page,
+        "tg_log_total_pages": max(1, math.ceil(total / LOG_PAGE_SIZE)),
+        "tg_log_total": total,
+    })
 
 
-@app.get("/api/sources")
-async def api_sources():
-    return {"sources": _read_sources()}
+@app.post("/telegram/add", response_class=HTMLResponse)
+async def telegram_add(
+    request: Request,
+    id: str = Form(...),
+    name: str = Form(...),
+    bot_token: str = Form(...),
+    chat_id: str = Form(...),
+    lang: str = Form("both"),
+    retry_attempts: int = Form(3),
+    timeout: int = Form(10),
+    payload_mode: str = Form("full"),
+    payload_fields: str = Form(""),
+    payload_template: str = Form(""),
+):
+    channels = _get_telegram_channels()
+    if any(ch["id"] == id for ch in channels):
+        return templates.TemplateResponse(
+            "partials/settings_telegram.html",
+            _telegram_ctx(request, error=f"Channel '{id}' already exists"),
+        )
+    fields_list = [f.strip() for f in payload_fields.split(",") if f.strip()] if payload_fields else []
+    channels.append({
+        "id": id.strip(), "name": name.strip(),
+        "bot_token": bot_token.strip(), "chat_id": chat_id.strip(),
+        "lang": lang, "enabled": True,
+        "retry_attempts": max(1, min(retry_attempts, 10)),
+        "timeout_seconds": max(1, min(timeout, 60)),
+        "payload_mode": payload_mode,
+        "payload_fields": fields_list,
+        "payload_template": payload_template,
+    })
+    _save_telegram_channels(channels)
+    logger.info(f"Telegram channel added: {id}")
+    return templates.TemplateResponse(
+        "partials/settings_telegram.html",
+        _telegram_ctx(request, success=f"Channel '{name}' added"),
+    )
 
 
-@app.get("/api/categories")
-async def api_categories():
-    return {"categories": _get_categories()}
+@app.post("/telegram/{ch_id}/toggle", response_class=HTMLResponse)
+async def telegram_toggle(request: Request, ch_id: str):
+    channels = _get_telegram_channels()
+    for ch in channels:
+        if ch["id"] == ch_id:
+            ch["enabled"] = not ch.get("enabled", True)
+            break
+    _save_telegram_channels(channels)
+    return templates.TemplateResponse(
+        "partials/settings_telegram.html", _telegram_ctx(request)
+    )
+
+
+@app.put("/telegram/{ch_id}", response_class=HTMLResponse)
+async def telegram_update(
+    request: Request,
+    ch_id: str,
+    name: str = Form(...),
+    bot_token: str = Form(...),
+    chat_id: str = Form(...),
+    lang: str = Form("both"),
+    retry_attempts: int = Form(3),
+    timeout: int = Form(10),
+    payload_mode: str = Form("full"),
+    payload_fields: str = Form(""),
+    payload_template: str = Form(""),
+):
+    channels = _get_telegram_channels()
+    fields_list = [f.strip() for f in payload_fields.split(",") if f.strip()] if payload_fields else []
+    for ch in channels:
+        if ch["id"] == ch_id:
+            ch["name"] = name.strip()
+            ch["bot_token"] = bot_token.strip()
+            ch["chat_id"] = chat_id.strip()
+            ch["lang"] = lang
+            ch["retry_attempts"] = max(1, min(retry_attempts, 10))
+            ch["timeout_seconds"] = max(1, min(timeout, 60))
+            ch["payload_mode"] = payload_mode
+            ch["payload_fields"] = fields_list
+            ch["payload_template"] = payload_template
+            break
+    _save_telegram_channels(channels)
+    logger.info(f"Telegram channel updated: {ch_id}")
+    return templates.TemplateResponse(
+        "partials/settings_telegram.html",
+        _telegram_ctx(request, success=f"Channel '{name}' updated"),
+    )
+
+
+@app.delete("/telegram/{ch_id}", response_class=HTMLResponse)
+async def telegram_delete(request: Request, ch_id: str):
+    channels = _get_telegram_channels()
+    channels = [ch for ch in channels if ch["id"] != ch_id]
+    _save_telegram_channels(channels)
+    logger.info(f"Telegram channel deleted: {ch_id}")
+    return templates.TemplateResponse(
+        "partials/settings_telegram.html",
+        _telegram_ctx(request, success=f"Channel '{ch_id}' deleted"),
+    )
+
+
+@app.post("/telegram/{ch_id}/test", response_class=HTMLResponse)
+async def telegram_test(request: Request, ch_id: str):
+    from webhook.telegram import send_telegram
+    channels = _get_telegram_channels()
+    target = next((ch for ch in channels if ch["id"] == ch_id), None)
+    if not target:
+        return HTMLResponse('<span style="color:var(--red)">Channel not found</span>')
+
+    text = (
+        "\u2705 <b>News Aggregator — Test Message</b>\n\n"
+        f"Channel: <i>{target['name']}</i>\n"
+        f"Chat ID: <code>{target['chat_id']}</code>\n\n"
+        "If you see this, your Telegram integration is working!"
+    )
+    try:
+        status, ok, error = await send_telegram(
+            target["bot_token"], target["chat_id"], text,
+            timeout=target.get("timeout_seconds", 10),
+        )
+        if ok:
+            return HTMLResponse('<span style="color:var(--green);font-weight:600">&#10003; Test sent!</span>')
+        return HTMLResponse(f'<span style="color:var(--red)">{error}</span>')
+    except Exception as e:
+        return HTMLResponse(f'<span style="color:var(--red)">{e}</span>')
+
+
