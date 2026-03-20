@@ -1,0 +1,49 @@
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+{% if success %}
+<div class="alert alert-success">{{ success }}</div>
+{% endif %}
+
+<div class="cat-list">
+  {% for c in categories %}
+  <div class="cat-item">
+    <div class="cat-info">
+      <span class="cat-name">{{ c.name }}</span>
+      <span class="cat-id">{{ c.id }}</span>
+    </div>
+    <div class="cat-status">
+      {% if c.enabled %}
+        <span class="status-on">ON</span>
+      {% else %}
+        <span class="status-off">OFF</span>
+      {% endif %}
+    </div>
+    <div class="cat-actions">
+      <button class="btn btn-sm btn-toggle"
+              hx-post="/categories/{{ c.id }}/toggle"
+              hx-target="#categories-list"
+              hx-swap="innerHTML">
+        {% if c.enabled %}Disable{% else %}Enable{% endif %}
+      </button>
+      <button class="btn btn-sm btn-danger"
+              hx-delete="/categories/{{ c.id }}"
+              hx-target="#categories-list"
+              hx-swap="innerHTML"
+              hx-confirm="Delete '{{ c.name }}'?">
+        Del
+      </button>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{% if not categories %}
+<div style="text-align:center;padding:20px;color:var(--muted)">
+  No categories configured.
+</div>
+{% endif %}
+
+<div style="margin-top:10px;font-size:11px;color:var(--muted)">
+  {{ categories|length }} category(ies).
+</div>

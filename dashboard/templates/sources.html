@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sources — News Aggregator</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3e;
+      --text: #e2e8f0; --muted: #718096; --accent: #6366f1;
+      --green: #10b981; --red: #ef4444; --yellow: #f59e0b;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px;
+             display: flex; align-items: center; gap: 12px; }
+    header h1 { font-size: 16px; font-weight: 600; }
+    .badge { background: var(--accent); color: white; font-size: 11px; padding: 2px 8px; border-radius: 999px; }
+    .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+             animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    .nav-links { margin-left: auto; display: flex; gap: 16px; font-size: 13px; }
+    .nav-links a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 6px; transition: all .15s; }
+    .nav-links a:hover, .nav-links a.active { color: var(--text); background: var(--border); }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    .section-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase;
+                     letter-spacing: 0.05em; margin-bottom: 16px; }
+
+    /* Add form */
+    .add-form { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+                padding: 20px; margin-bottom: 24px; }
+    .add-form h3 { font-size: 14px; font-weight: 600; margin-bottom: 14px; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .form-grid .full { grid-column: 1 / -1; }
+    .form-group { display: flex; flex-direction: column; gap: 4px; }
+    .form-group label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .form-group input, .form-group select {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      padding: 8px 10px; border-radius: 6px; font-size: 13px; outline: none; transition: border-color .15s;
+    }
+    .form-group input:focus, .form-group select:focus { border-color: var(--accent); }
+    .btn { padding: 8px 18px; border-radius: 6px; font-size: 13px; font-weight: 500;
+           cursor: pointer; border: none; transition: all .15s; }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover { opacity: 0.85; }
+    .btn-sm { padding: 4px 10px; font-size: 11px; }
+    .btn-danger { background: transparent; border: 1px solid var(--red); color: var(--red); }
+    .btn-danger:hover { background: var(--red); color: white; }
+    .btn-toggle { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+    .btn-toggle:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-edit { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
+    .btn-edit:hover { background: var(--accent); color: white; }
+    .btn-save { background: var(--green); border: 1px solid var(--green); color: white; }
+    .btn-save:hover { opacity: 0.85; }
+    .btn-cancel { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+    .btn-cancel:hover { border-color: var(--text); color: var(--text); }
+    .form-actions { margin-top: 14px; display: flex; gap: 8px; }
+
+    /* Source table */
+    .source-table { width: 100%; border-collapse: collapse; }
+    .source-table th { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
+                       text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+    .source-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
+    .source-table tr:hover td { background: rgba(99,102,241,0.04); }
+    .status-on { color: var(--green); font-weight: 600; font-size: 11px; }
+    .status-off { color: var(--red); font-weight: 600; font-size: 11px; }
+    .lang-badge { font-size: 10px; background: var(--border); padding: 2px 6px; border-radius: 3px; color: var(--muted); }
+    .actions { display: flex; gap: 6px; }
+
+    .alert { padding: 10px 14px; border-radius: 6px; font-size: 12px; margin-bottom: 14px; }
+    .alert-error { background: rgba(239,68,68,0.12); color: var(--red); border: 1px solid rgba(239,68,68,0.25); }
+    .alert-success { background: rgba(16,185,129,0.12); color: var(--green); border: 1px solid rgba(16,185,129,0.25); }
+
+    /* Categories */
+    .two-col { display: grid; grid-template-columns: 1fr 340px; gap: 24px; }
+    @media (max-width: 860px) { .two-col { grid-template-columns: 1fr; } }
+    .cat-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; height: fit-content; }
+    .cat-panel h3 { font-size: 14px; font-weight: 600; margin-bottom: 14px; }
+    .cat-list { display: flex; flex-direction: column; gap: 6px; }
+    .cat-item {
+      display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px;
+      padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    }
+    .cat-info { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+    .cat-name { font-size: 13px; font-weight: 500; white-space: nowrap; }
+    .cat-id { font-size: 10px; color: var(--muted); }
+    .cat-status { white-space: nowrap; }
+    .cat-actions { display: flex; gap: 4px; }
+    .cat-add-form { display: flex; gap: 6px; margin-top: 12px; }
+    .cat-add-form input {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      padding: 6px 8px; border-radius: 6px; font-size: 12px; flex: 1; min-width: 0; outline: none;
+    }
+    .cat-add-form input:focus { border-color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="pulse"></div>
+    <h1>News Aggregator</h1>
+    <span class="badge">LIVE</span>
+    <nav class="nav-links">
+      <a href="/">Feed</a>
+      <a href="/sources" class="active">Sources</a>
+      <a href="/settings">Settings</a>
+    </nav>
+  </header>
+
+  <div class="container">
+    <div class="two-col">
+      <!-- Left: Sources -->
+      <div>
+        <div class="add-form">
+          <h3>Add New Source</h3>
+          <form hx-post="/sources/add" hx-target="#sources-list" hx-swap="innerHTML">
+            <div class="form-grid">
+              <div class="form-group">
+                <label>ID (unique slug)</label>
+                <input type="text" name="id" placeholder="e.g. nytimes" required>
+              </div>
+              <div class="form-group">
+                <label>Name</label>
+                <input type="text" name="name" placeholder="e.g. New York Times" required>
+              </div>
+              <div class="form-group full">
+                <label>RSS Feed URL</label>
+                <input type="url" name="url" placeholder="https://rss.nytimes.com/services/xml/rss/nyt/World.xml" required>
+              </div>
+              <div class="form-group">
+                <label>Language</label>
+                <select name="lang">
+                  <option value="en">English</option>
+                  <option value="vi">Vietnamese</option>
+                  <option value="ja">Japanese</option>
+                  <option value="ko">Korean</option>
+                  <option value="zh">Chinese</option>
+                  <option value="fr">French</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Category</label>
+                <select name="category"
+                        hx-get="/partials/category-options"
+                        hx-trigger="load"
+                        hx-swap="innerHTML">
+                  <option value="world">World</option>
+                  <option value="tech">Tech</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">Add Source</button>
+            </div>
+          </form>
+        </div>
+
+        <p class="section-title">RSS Sources</p>
+        <div id="sources-list"
+             hx-get="/partials/sources"
+             hx-trigger="load"
+             hx-swap="innerHTML">
+          <p style="color:var(--muted)">Loading sources...</p>
+        </div>
+      </div>
+
+      <!-- Right: Categories -->
+      <div>
+        <div class="cat-panel">
+          <h3>Categories</h3>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:14px">
+            Only sources in <strong>enabled</strong> categories are crawled.
+          </p>
+          <div id="categories-list"
+               hx-get="/partials/categories"
+               hx-trigger="load"
+               hx-swap="innerHTML">
+            <p style="color:var(--muted);font-size:12px">Loading...</p>
+          </div>
+          <form class="cat-add-form" hx-post="/categories/add" hx-target="#categories-list" hx-swap="innerHTML">
+            <input type="text" name="id" placeholder="ID (e.g. finance)" required>
+            <input type="text" name="name" placeholder="Name" required>
+            <button type="submit" class="btn btn-sm btn-primary">Add</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

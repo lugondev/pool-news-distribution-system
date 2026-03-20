@@ -1,0 +1,128 @@
+<!-- Category filter bar -->
+<div class="filter-bar" style="margin-bottom:8px">
+  <span class="filter-label">Category:</span>
+  <button class="filter-chip {% if not category %}active{% endif %}"
+          hx-get="/partials/feed?page=1{% if source %}&source={{ source }}{% endif %}"
+          hx-target="#feed" hx-swap="innerHTML">All</button>
+  {% for c in categories %}
+  {% if c.enabled %}
+  <button class="filter-chip {% if category == c.id %}active{% endif %}"
+          hx-get="/partials/feed?page=1&category={{ c.id }}{% if source %}&source={{ source }}{% endif %}"
+          hx-target="#feed" hx-swap="innerHTML">{{ c.name }}</button>
+  {% endif %}
+  {% endfor %}
+</div>
+
+<!-- Source filter bar -->
+<div class="filter-bar">
+  <span class="filter-label">Source:</span>
+  <button class="filter-chip {% if not source %}active{% endif %}"
+          hx-get="/partials/feed?page=1{% if category %}&category={{ category }}{% endif %}"
+          hx-target="#feed" hx-swap="innerHTML">All</button>
+  {% for s in sources %}
+  {% if s.enabled %}
+  <button class="filter-chip {% if source == s.id %}active{% endif %}"
+          hx-get="/partials/feed?page=1&source={{ s.id }}{% if category %}&category={{ category }}{% endif %}"
+          hx-target="#feed" hx-swap="innerHTML">{{ s.name }}</button>
+  {% endif %}
+  {% endfor %}
+</div>
+
+{% if source or category %}
+<div class="filter-active">
+  {% if category %}Category: <strong>{{ category }}</strong>{% endif %}
+  {% if source and category %} · {% endif %}
+  {% if source %}Source: <strong>{{ source }}</strong>{% endif %}
+  <button class="filter-clear"
+          hx-get="/partials/feed?page=1"
+          hx-target="#feed" hx-swap="innerHTML">Clear all</button>
+</div>
+{% endif %}
+
+{% for article in articles %}
+<div class="article-card">
+  <div class="meta">
+    <span class="source source-link"
+          hx-get="/partials/feed?page=1&source={{ article.source_id }}{% if category %}&category={{ category }}{% endif %}"
+          hx-target="#feed" hx-swap="innerHTML">{{ article.source_name }}</span>
+    <span class="lang">{{ article.lang }}</span>
+    <span class="cat-badge"
+          hx-get="/partials/feed?page=1&category={{ article.category }}{% if source %}&source={{ source }}{% endif %}"
+          hx-target="#feed" hx-swap="innerHTML">{{ article.category }}</span>
+    {% if article.ai_status == 'done' %}
+      <span class="ai-badge ai-done">AI ✓</span>
+    {% else %}
+      <span class="ai-badge ai-pending">AI pending</span>
+    {% endif %}
+    <span class="time">
+      {% if article.published_at %}
+        {{ article.published_at[:16].replace('T',' ') }}
+      {% endif %}
+    </span>
+  </div>
+  <div class="title">
+    <a href="{{ article.url }}" target="_blank" rel="noopener">{{ article.title }}</a>
+  </div>
+  {% if article.ai_status == 'done' and article.ai_summary_vi %}
+  <div class="summary">
+    🇻🇳 {{ article.ai_summary_vi }}
+  </div>
+  {% elif article.summary %}
+  <div class="summary">{{ article.summary[:200] }}{% if article.summary|length > 200 %}...{% endif %}</div>
+  {% endif %}
+</div>
+{% endfor %}
+
+{% if not articles %}
+<div style="text-align:center;padding:40px;color:var(--muted)">
+  {% if source or category %}
+    No articles matching this filter.
+  {% else %}
+    No articles yet. Waiting for first crawl...
+  {% endif %}
+</div>
+{% endif %}
+
+{% set qs_source = "&source=" ~ source if source else "" %}
+{% set qs_category = "&category=" ~ category if category else "" %}
+{% set qs_filters = qs_source ~ qs_category %}
+
+{% if total_pages > 1 %}
+<nav class="pagination">
+  <span class="info">{{ total }} articles</span>
+
+  <button hx-get="/partials/feed?page={{ page - 1 }}{{ qs_filters }}"
+          hx-target="#feed" hx-swap="innerHTML"
+          {% if page <= 1 %}disabled{% endif %}>
+    ← Prev
+  </button>
+
+  {% set window = 2 %}
+  {% set start_page = [page - window, 1] | max %}
+  {% set end_page = [page + window, total_pages] | min %}
+
+  {% if start_page > 1 %}
+  <button class="page-btn" hx-get="/partials/feed?page=1{{ qs_filters }}"
+          hx-target="#feed" hx-swap="innerHTML">1</button>
+  {% if start_page > 2 %}<span class="ellipsis">...</span>{% endif %}
+  {% endif %}
+
+  {% for p in range(start_page, end_page + 1) %}
+  <button class="page-btn {% if p == page %}active{% endif %}"
+          hx-get="/partials/feed?page={{ p }}{{ qs_filters }}"
+          hx-target="#feed" hx-swap="innerHTML">{{ p }}</button>
+  {% endfor %}
+
+  {% if end_page < total_pages %}
+  {% if end_page < total_pages - 1 %}<span class="ellipsis">...</span>{% endif %}
+  <button class="page-btn" hx-get="/partials/feed?page={{ total_pages }}{{ qs_filters }}"
+          hx-target="#feed" hx-swap="innerHTML">{{ total_pages }}</button>
+  {% endif %}
+
+  <button hx-get="/partials/feed?page={{ page + 1 }}{{ qs_filters }}"
+          hx-target="#feed" hx-swap="innerHTML"
+          {% if page >= total_pages %}disabled{% endif %}>
+    Next →
+  </button>
+</nav>
+{% endif %}

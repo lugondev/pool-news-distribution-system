@@ -1,0 +1,48 @@
+<div>
+  <h3 style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px">
+    Today's Stats
+  </h3>
+
+  <div style="display:grid;gap:8px;margin-bottom:16px">
+    <div class="stat-card">
+      <div class="label">Articles in Redis</div>
+      <div class="value">{{ redis.total_in_redis or 0 }}</div>
+      <div class="sub">{{ redis.this_hour or 0 }} this hour · {{ redis.today or 0 }} today</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Crawled Today</div>
+      <div class="value">{{ db.crawl.found or 0 }}</div>
+      <div class="sub">{{ db.crawl.saved or 0 }} saved · {{ db.crawl.dupes or 0 }} dupes</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Webhooks Sent</div>
+      <div class="value">{{ db.webhook.total or 0 }}</div>
+      <div class="sub">{{ db.webhook.ok or 0 }} success</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">AI Rewrites</div>
+      <div class="value">{{ db.ai.total or 0 }}</div>
+      <div class="sub">{{ db.ai.tokens or 0 }} tokens used</div>
+    </div>
+  </div>
+
+  <h3 style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">
+    Top Sources Today
+  </h3>
+  {% set max_saved = db.top_sources[0].saved if db.top_sources else 1 %}
+  {% for s in db.top_sources %}
+  <div class="source-row"
+       style="cursor:pointer"
+       hx-get="/partials/feed?page=1&source={{ s.source_id }}"
+       hx-target="#feed" hx-swap="innerHTML">
+    <span class="name">{{ s.source_id }}</span>
+    <span class="cnt">{{ s.saved }}</span>
+  </div>
+  <div class="bar">
+    <div class="bar-fill" style="width:{{ [(s.saved / max_saved * 100)|int, 100]|min }}%"></div>
+  </div>
+  {% endfor %}
+  {% if not db.top_sources %}
+  <p style="color:var(--muted);font-size:12px">No data yet</p>
+  {% endif %}
+</div>

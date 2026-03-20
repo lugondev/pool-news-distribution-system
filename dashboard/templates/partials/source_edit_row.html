@@ -1,0 +1,55 @@
+<tr id="edit-{{ s.id }}">
+  <td>
+    <div class="form-group" style="gap:4px">
+      <input type="text" name="name" value="{{ s.name }}" form="edit-form-{{ s.id }}"
+             style="background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:6px 8px;border-radius:4px;font-size:12px;width:100%">
+      <div style="font-size:11px;color:var(--muted)">{{ s.id }}</div>
+    </div>
+  </td>
+  <td>
+    <input type="url" name="url" value="{{ s.url }}" form="edit-form-{{ s.id }}"
+           style="background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:6px 8px;border-radius:4px;font-size:12px;width:100%">
+  </td>
+  <td>
+    <select name="lang" form="edit-form-{{ s.id }}"
+            style="background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:6px 8px;border-radius:4px;font-size:12px">
+      <option value="en" {% if s.lang == 'en' %}selected{% endif %}>en</option>
+      <option value="vi" {% if s.lang == 'vi' %}selected{% endif %}>vi</option>
+      <option value="ja" {% if s.lang == 'ja' %}selected{% endif %}>ja</option>
+      <option value="ko" {% if s.lang == 'ko' %}selected{% endif %}>ko</option>
+      <option value="zh" {% if s.lang == 'zh' %}selected{% endif %}>zh</option>
+      <option value="fr" {% if s.lang == 'fr' %}selected{% endif %}>fr</option>
+    </select>
+  </td>
+  <td>
+    <select name="category" form="edit-form-{{ s.id }}"
+            style="background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:6px 8px;border-radius:4px;font-size:12px">
+      <option value="world" {% if s.category == 'world' %}selected{% endif %}>world</option>
+      <option value="tech" {% if s.category == 'tech' %}selected{% endif %}>tech</option>
+      <option value="business" {% if s.category == 'business' %}selected{% endif %}>business</option>
+      <option value="sports" {% if s.category == 'sports' %}selected{% endif %}>sports</option>
+      <option value="science" {% if s.category == 'science' %}selected{% endif %}>science</option>
+    </select>
+  </td>
+  <td>
+    {% if s.enabled %}
+      <span class="status-on">ON</span>
+    {% else %}
+      <span class="status-off">OFF</span>
+    {% endif %}
+  </td>
+  <td>
+    <form id="edit-form-{{ s.id }}" style="display:contents"
+          hx-put="/sources/{{ s.id }}"
+          hx-target="#sources-list"
+          hx-swap="innerHTML">
+    </form>
+    <div class="actions">
+      <button type="submit" form="edit-form-{{ s.id }}" class="btn btn-sm btn-save">Save</button>
+      <button class="btn btn-sm btn-cancel"
+              hx-get="/partials/sources"
+              hx-target="#sources-list"
+              hx-swap="innerHTML">Cancel</button>
+    </div>
+  </td>
+</tr>

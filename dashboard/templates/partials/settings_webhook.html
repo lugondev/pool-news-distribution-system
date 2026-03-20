@@ -1,0 +1,109 @@
+<div class="panel">
+  <h3>Webhook Delivery</h3>
+  <p class="desc">
+    After AI summarization, articles are POSTed as JSON to configured URLs.
+  </p>
+
+  {% if success %}
+  <div class="alert alert-success">{{ success }}</div>
+  {% endif %}
+
+  <form hx-post="/settings/webhook" hx-target="#webhook-panel" hx-swap="innerHTML">
+    <div class="toggle-row">
+      <input type="hidden" name="enabled" value="off">
+      <input type="checkbox" name="enabled" value="on" id="wh-enabled"
+             {% if webhook.enabled %}checked{% endif %}
+             style="accent-color:var(--accent)">
+      <label for="wh-enabled" class="toggle-label">Enable webhook dispatch</label>
+      {% if webhook.enabled %}
+        <span class="toggle-status toggle-on">ACTIVE</span>
+      {% else %}
+        <span class="toggle-status toggle-off">DISABLED</span>
+      {% endif %}
+    </div>
+
+    <div class="form-group">
+      <label>Webhook URLs <span class="hint">— one URL per line</span></label>
+      <textarea name="urls" rows="4"
+                placeholder="https://your-webhook.com/news&#10;https://another-service.com/api/ingest">{% for u in webhook.urls %}{{ u }}{% if not loop.last %}
+{% endif %}{% endfor %}</textarea>
+    </div>
+
+    <div class="form-row-3">
+      <div class="form-group">
+        <label>Retry Attempts</label>
+        <input type="number" name="retry_attempts" value="{{ webhook.retry_attempts or 3 }}" min="1" max="10">
+      </div>
+      <div class="form-group">
+        <label>Retry Delay (s)</label>
+        <input type="number" name="retry_delay" value="{{ webhook.retry_delay_seconds or 5 }}" min="1" max="60">
+      </div>
+      <div class="form-group">
+        <label>Timeout (s)</label>
+        <input type="number" name="timeout" value="{{ webhook.timeout_seconds or 10 }}" min="1" max="60">
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">Save Webhook Settings</button>
+    </div>
+  </form>
+
+  <!-- Webhook payload format -->
+  <p class="section-title">Payload Format</p>
+  <div class="payload-box">
+    <span class="comment">// POST to each configured URL</span><br>
+    <span class="comment">// Content-Type: application/json</span><br>
+    {<br>
+    &nbsp;&nbsp;<span class="key">"id"</span>: <span class="str">"a1b2c3d4e5f6..."</span>,<br>
+    &nbsp;&nbsp;<span class="key">"source_id"</span>: <span class="str">"techcrunch"</span>,<br>
+    &nbsp;&nbsp;<span class="key">"source_name"</span>: <span class="str">"TechCrunch"</span>,<br>
+    &nbsp;&nbsp;<span class="key">"url"</span>: <span class="str">"https://techcrunch.com/..."</span>,<br>
+    &nbsp;&nbsp;<span class="key">"title"</span>: <span class="str">"Original article title"</span>,<br>
+    &nbsp;&nbsp;<span class="key">"lang"</span>: <span class="str">"en"</span>,<br>
+    &nbsp;&nbsp;<span class="key">"category"</span>: <span class="str">"tech"</span>,<br>
+    &nbsp;&nbsp;<span class="key">"published_at"</span>: <span class="str">"2026-03-20T10:30:00+00:00"</span>,<br>
+    &nbsp;&nbsp;<span class="key">"summary"</span>: {<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"vi"</span>: <span class="str">"Tóm tắt tiếng Việt..."</span>,<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"en"</span>: <span class="str">"English summary..."</span><br>
+    &nbsp;&nbsp;},<br>
+    &nbsp;&nbsp;<span class="key">"sent_at"</span>: <span class="str">"2026-03-20T10:35:00+00:00"</span><br>
+    }
+  </div>
+
+  <!-- Recent webhook logs -->
+  <p class="section-title">Recent Deliveries</p>
+  {% if logs %}
+  <table class="log-table">
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Article</th>
+        <th>URL</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for log in logs %}
+      <tr>
+        <td class="mono">{{ log.sent_at[:16].replace('T',' ') if log.sent_at else '—' }}</td>
+        <td class="truncate" title="{{ log.article_title }}">{{ log.article_title[:40] }}{% if log.article_title|length > 40 %}...{% endif %}</td>
+        <td class="url-cell" title="{{ log.webhook_url }}">{{ log.webhook_url }}</td>
+        <td>
+          {% if log.success %}
+            <span class="status-ok">{{ log.status_code }}</span>
+          {% else %}
+            <span class="status-fail">{{ log.status_code or 'ERR' }}</span>
+            {% if log.error_msg %}
+              <div style="font-size:10px;color:var(--red);margin-top:2px">{{ log.error_msg[:60] }}{% if log.error_msg|length > 60 %}...{% endif %}</div>
+            {% endif %}
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No webhook deliveries yet.</div>
+  {% endif %}
+</div>

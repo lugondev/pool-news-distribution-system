@@ -1,0 +1,74 @@
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+{% if success %}
+<div class="alert alert-success">{{ success }}</div>
+{% endif %}
+
+<table class="source-table">
+  <thead>
+    <tr>
+      <th>Source</th>
+      <th>URL</th>
+      <th>Lang</th>
+      <th>Category</th>
+      <th>Status</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in sources %}
+    <tr id="row-{{ s.id }}">
+      <td>
+        <strong>{{ s.name }}</strong>
+        <div style="font-size:11px;color:var(--muted)">{{ s.id }}</div>
+      </td>
+      <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+        <a href="{{ s.url }}" target="_blank" rel="noopener" style="font-size:12px">{{ s.url }}</a>
+      </td>
+      <td><span class="lang-badge">{{ s.lang }}</span></td>
+      <td style="font-size:12px;color:var(--muted)">{{ s.category }}</td>
+      <td>
+        {% if s.enabled %}
+          <span class="status-on">ON</span>
+        {% else %}
+          <span class="status-off">OFF</span>
+        {% endif %}
+      </td>
+      <td>
+        <div class="actions">
+          <button class="btn btn-sm btn-edit"
+                  hx-get="/sources/{{ s.id }}/edit"
+                  hx-target="#row-{{ s.id }}"
+                  hx-swap="outerHTML">
+            Edit
+          </button>
+          <button class="btn btn-sm btn-toggle"
+                  hx-post="/sources/{{ s.id }}/toggle"
+                  hx-target="#sources-list"
+                  hx-swap="innerHTML">
+            {% if s.enabled %}Disable{% else %}Enable{% endif %}
+          </button>
+          <button class="btn btn-sm btn-danger"
+                  hx-delete="/sources/{{ s.id }}"
+                  hx-target="#sources-list"
+                  hx-swap="innerHTML"
+                  hx-confirm="Delete source '{{ s.name }}'?">
+            Delete
+          </button>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if not sources %}
+<div style="text-align:center;padding:40px;color:var(--muted)">
+  No sources configured yet.
+</div>
+{% endif %}
+
+<div style="margin-top:12px;font-size:12px;color:var(--muted)">
+  {{ sources|length }} source(s) configured. Changes take effect on next crawl cycle.
+</div>

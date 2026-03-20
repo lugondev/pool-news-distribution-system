@@ -1,0 +1,101 @@
+<div class="panel">
+  <h3>AI Summarization</h3>
+  <p class="desc">
+    Rewrites article titles + content into bilingual summaries using an OpenAI-compatible API.
+  </p>
+
+  {% if success %}
+  <div class="alert alert-success">{{ success }}</div>
+  {% endif %}
+
+  <form hx-post="/settings/ai" hx-target="#ai-panel" hx-swap="innerHTML">
+    <div class="toggle-row">
+      <input type="hidden" name="enabled" value="off">
+      <input type="checkbox" name="enabled" value="on" id="ai-enabled"
+             {% if ai.enabled %}checked{% endif %}
+             style="accent-color:var(--accent)">
+      <label for="ai-enabled" class="toggle-label">Enable AI rewriting</label>
+      {% if ai.enabled %}
+        <span class="toggle-status toggle-on">ACTIVE</span>
+      {% else %}
+        <span class="toggle-status toggle-off">DISABLED</span>
+      {% endif %}
+    </div>
+
+    <div class="form-group">
+      <label>Model <span class="hint">— OpenAI-compatible model identifier</span></label>
+      <input type="text" name="model" value="{{ ai.model or 'gpt-4o-mini' }}"
+             placeholder="google/gemini-2.5-flash">
+    </div>
+
+    <div class="form-group">
+      <label>Output Languages <span class="hint">— comma-separated codes</span></label>
+      <input type="text" name="output_languages"
+             value="{{ ai.output_languages | join(', ') if ai.output_languages else 'vi, en' }}"
+             placeholder="vi, en">
+    </div>
+
+    <div class="form-row-3">
+      <div class="form-group">
+        <label>Batch Size</label>
+        <input type="number" name="batch_size" value="{{ ai.batch_size or 5 }}" min="1" max="20">
+      </div>
+      <div class="form-group">
+        <label>Max Tokens</label>
+        <input type="number" name="max_tokens" value="{{ ai.max_tokens_summary or 300 }}" min="100" max="1000">
+      </div>
+      <div class="form-group">
+        <label>Retry Attempts</label>
+        <input type="number" name="retry_attempts" value="{{ ai.retry_attempts or 3 }}" min="1" max="10">
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">Save AI Settings</button>
+    </div>
+  </form>
+
+  <!-- AI pipeline explanation -->
+  <p class="section-title">How it works</p>
+  <div class="payload-box">
+    <span class="comment">// Input: article from Redis (ai_status = "pending")</span><br>
+    <span class="key">"title"</span>: <span class="str">"Original article title"</span><br>
+    <span class="key">"content"</span>: <span class="str">"Article body text (first 1500 chars)"</span><br>
+    <br>
+    <span class="comment">// Prompt → "You are a professional news editor..."</span><br>
+    <span class="comment">// Model: {{ ai.model or 'gpt-4o-mini' }}</span><br>
+    <span class="comment">// Response format: JSON { vi, en }</span><br>
+    <br>
+    <span class="comment">// Output: stored back to Redis article hash</span><br>
+    <span class="key">"ai_summary_vi"</span>: <span class="str">"Tóm tắt tiếng Việt (2-3 câu)"</span><br>
+    <span class="key">"ai_summary_en"</span>: <span class="str">"English summary (2-3 sentences)"</span><br>
+    <span class="key">"ai_status"</span>: <span class="str">"done"</span>
+  </div>
+
+  <!-- Recent AI logs -->
+  <p class="section-title">Recent AI Processing</p>
+  {% if logs %}
+  <table class="log-table">
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Article</th>
+        <th>Model</th>
+        <th>Tokens</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for log in logs %}
+      <tr>
+        <td class="mono">{{ log.created_at[:16].replace('T',' ') if log.created_at else '—' }}</td>
+        <td class="truncate" title="{{ log.article_title }}">{{ log.article_title[:50] }}{% if log.article_title|length > 50 %}...{% endif %}</td>
+        <td class="mono">{{ log.model or '—' }}</td>
+        <td class="mono">{{ log.tokens_used or 0 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No AI processing logs yet.</div>
+  {% endif %}
+</div>

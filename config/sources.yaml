@@ -1,0 +1,84 @@
+sources:
+  # === ENGLISH ===
+  - id: techcrunch
+    name: TechCrunch
+    url: https://techcrunch.com/feed/
+    type: rss
+    lang: en
+    category: tech
+    enabled: true
+
+  - id: bbc_world
+    name: BBC World News
+    url: http://feeds.bbci.co.uk/news/world/rss.xml
+    type: rss
+    lang: en
+    category: world
+    enabled: true
+
+  - id: reuters_top
+    name: Reuters Top News
+    url: https://feeds.reuters.com/reuters/topNews
+    type: rss
+    lang: en
+    category: world
+    enabled: true
+
+  - id: hnews
+    name: Hacker News
+    url: https://hnrss.org/frontpage
+    type: rss
+    lang: en
+    category: tech
+    enabled: true
+
+  # === JAPANESE ===
+  - id: nhk_world
+    name: NHK World
+    url: https://www3.nhk.or.jp/rss/news/cat0.xml
+    type: rss
+    lang: ja
+    category: world
+    enabled: true
+
+  - id: asahi
+    name: Asahi Shimbun
+    url: https://rss.asahi.com/rss/asahi/newsheadlines.rdf
+    type: rss
+    lang: ja
+    category: world
+    enabled: true
+
+  # === KOREAN ===
+  - id: yonhap
+    name: Yonhap News
+    url: https://www.yna.co.kr/rss/news.xml
+    type: rss
+    lang: ko
+    category: world
+    enabled: true
+
+  - id: chosun
+    name: Chosun Ilbo
+    url: https://www.chosun.com/arc/outboundfeeds/rss/?outputType=xml
+    type: rss
+    lang: ko
+    category: world
+    enabled: true
+
+  # === VIETNAMESE ===
+  - id: vnexpress
+    name: VnExpress
+    url: https://vnexpress.net/rss/tin-moi-nhat.rss
+    type: rss
+    lang: vi
+    category: world
+    enabled: true
+
+  - id: tuoitre
+    name: Tuoi Tre
+    url: https://tuoitre.vn/rss/tin-moi-nhat.rss
+    type: rss
+    lang: vi
+    category: world
+    enabled: true
