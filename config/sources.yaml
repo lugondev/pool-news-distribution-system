@@ -270,3 +270,225 @@ sources:
   lang: en
   category: finance
   enabled: true
+
+# ── Technology (EN) ─────────────────────────────────────────
+- id: theverge
+  name: The Verge
+  url: https://www.theverge.com/rss/index.xml
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: wired
+  name: Wired
+  url: https://www.wired.com/feed/rss
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: arstechnica
+  name: Ars Technica
+  url: https://feeds.arstechnica.com/arstechnica/index
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: mit_tech_review
+  name: MIT Technology Review
+  url: https://www.technologyreview.com/feed/
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: venturebeat
+  name: VentureBeat
+  url: https://venturebeat.com/feed/
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: techinasia
+  name: Tech in Asia
+  url: https://www.techinasia.com/feed
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: guardian_tech
+  name: The Guardian Technology
+  url: https://www.theguardian.com/uk/technology/rss
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+
+# ── Finance & Economy (EN, additional) ──────────────────────
+- id: forbes_finance
+  name: Forbes Finance
+  url: https://www.forbes.com/money/feed/
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: forbes_tech
+  name: Forbes Technology
+  url: https://www.forbes.com/innovation/feed/
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: imf_news
+  name: IMF News
+  url: https://www.imf.org/en/News/rss?language=eng
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: worldbank
+  name: World Bank News
+  url: https://feeds.worldbank.org/worldbank/blogs/all
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: economist_world
+  name: The Economist World
+  url: https://www.economist.com/the-world-this-week/rss.xml
+  type: rss
+  lang: en
+  category: world
+  enabled: true
+- id: guardian_economy
+  name: The Guardian Economics
+  url: https://www.theguardian.com/business/economics/rss
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+
+# ── Society (EN) ─────────────────────────────────────────────
+- id: guardian_society
+  name: The Guardian Society
+  url: https://www.theguardian.com/society/rss
+  type: rss
+  lang: en
+  category: society
+  enabled: true
+- id: guardian_world
+  name: The Guardian World
+  url: https://www.theguardian.com/world/rss
+  type: rss
+  lang: en
+  category: world
+  enabled: true
+- id: npr_news
+  name: NPR News
+  url: https://feeds.npr.org/1001/rss.xml
+  type: rss
+  lang: en
+  category: society
+  enabled: true
+- id: dw_society
+  name: Deutsche Welle Society
+  url: https://rss.dw.com/rdf/rss-en-all
+  type: rss
+  lang: en
+  category: society
+  enabled: true
+
+# ── Vietnam: Tài chính, Kinh tế, Xã hội, Công nghệ ─────────
+- id: vnexpress_kinh_te
+  name: VnExpress Kinh Doanh
+  url: https://vnexpress.net/rss/kinh-doanh.rss
+  type: rss
+  lang: vi
+  category: finance
+  enabled: true
+- id: vnexpress_xa_hoi
+  name: VnExpress Xã Hội
+  url: https://vnexpress.net/rss/xa-hoi.rss
+  type: rss
+  lang: vi
+  category: society
+  enabled: true
+- id: vnexpress_cong_nghe
+  name: VnExpress Công Nghệ
+  url: https://vnexpress.net/rss/so-hoa.rss
+  type: rss
+  lang: vi
+  category: tech
+  enabled: true
+- id: tuoitre
+  name: Tuổi Trẻ
+  url: https://tuoitre.vn/rss/tin-moi-nhat.rss
+  type: rss
+  lang: vi
+  category: world
+  enabled: true
+- id: tuoitre_kinh_te
+  name: Tuổi Trẻ Kinh Tế
+  url: https://tuoitre.vn/rss/kinh-te.rss
+  type: rss
+  lang: vi
+  category: finance
+  enabled: true
+- id: thanhnien
+  name: Thanh Niên
+  url: https://thanhnien.vn/rss/home.rss
+  type: rss
+  lang: vi
+  category: world
+  enabled: true
+- id: dantri
+  name: Dân Trí
+  url: https://dantri.com.vn/rss/home.rss
+  type: rss
+  lang: vi
+  category: society
+  enabled: true
+- id: cafef
+  name: CafeF
+  url: https://cafef.vn/rss/home.rss
+  type: rss
+  lang: vi
+  category: finance
+  enabled: true
+- id: vietnamnet
+  name: VietnamNet
+  url: https://vietnamnet.vn/rss/home.rss
+  type: rss
+  lang: vi
+  category: world
+  enabled: true
+- id: baomoi
+  name: Báo Mới
+  url: https://baomoi.com/rss.epi
+  type: rss
+  lang: vi
+  category: world
+  enabled: true
+
+# ── Japan: Tech & Society ────────────────────────────────────
+- id: japantimes
+  name: Japan Times
+  url: https://www.japantimes.co.jp/feed/
+  type: rss
+  lang: en
+  category: world
+  enabled: true
+- id: japantimes_business
+  name: Japan Times Business
+  url: https://www.japantimes.co.jp/feed/category/business/
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+
+# ── Korea: Tech & Society ────────────────────────────────────
+- id: kbs_economy
+  name: KBS World Economy
+  url: https://world.kbs.co.kr/rss/rss_economy.htm
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
