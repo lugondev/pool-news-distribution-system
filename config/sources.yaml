@@ -468,6 +468,143 @@ sources:
   category: world
   enabled: true
 
+# ── Science (EN) ─────────────────────────────────────────────
+- id: nasa_breaking
+  name: NASA Breaking News
+  url: https://www.nasa.gov/rss/dyn/breaking_news.rss
+  type: rss
+  lang: en
+  category: science
+  enabled: true
+- id: bbc_science
+  name: BBC Science & Environment
+  url: https://feeds.bbci.co.uk/news/science_and_environment/rss.xml
+  type: rss
+  lang: en
+  category: science
+  enabled: true
+- id: guardian_science
+  name: The Guardian Science
+  url: https://www.theguardian.com/science/rss
+  type: rss
+  lang: en
+  category: science
+  enabled: true
+- id: sciencedaily
+  name: Science Daily
+  url: https://www.sciencedaily.com/rss/all.xml
+  type: rss
+  lang: en
+  category: science
+  enabled: true
+- id: phys_org
+  name: Phys.org
+  url: https://phys.org/rss-feed/
+  type: rss
+  lang: en
+  category: science
+  enabled: true
+- id: new_scientist
+  name: New Scientist
+  url: https://www.newscientist.com/feed/home/
+  type: rss
+  lang: en
+  category: science
+  enabled: true
+- id: nature_news
+  name: Nature News
+  url: https://www.nature.com/nature.rss
+  type: rss
+  lang: en
+  category: science
+  enabled: true
+- id: scientific_american
+  name: Scientific American
+  url: https://www.scientificamerican.com/platform/feeds/homepage.rss/
+  type: rss
+  lang: en
+  category: science
+  enabled: true
+- id: ars_science
+  name: Ars Technica Science
+  url: https://feeds.arstechnica.com/arstechnica/science
+  type: rss
+  lang: en
+  category: science
+  enabled: true
+- id: smithsonian_magazine
+  name: Smithsonian Magazine
+  url: https://www.smithsonianmag.com/rss/latest_articles/
+  type: rss
+  lang: en
+  category: science
+  enabled: true
+
+# ── Business (EN) ─────────────────────────────────────────────
+- id: hbr
+  name: Harvard Business Review
+  url: https://feeds.hbr.org/harvardbusiness
+  type: rss
+  lang: en
+  category: business
+  enabled: true
+- id: fast_company
+  name: Fast Company
+  url: https://www.fastcompany.com/latest/rss
+  type: rss
+  lang: en
+  category: business
+  enabled: true
+- id: inc_magazine
+  name: Inc. Magazine
+  url: https://www.inc.com/rss
+  type: rss
+  lang: en
+  category: business
+  enabled: true
+- id: entrepreneur
+  name: Entrepreneur
+  url: https://www.entrepreneur.com/latest.rss
+  type: rss
+  lang: en
+  category: business
+  enabled: true
+- id: fortune
+  name: Fortune
+  url: https://fortune.com/feed
+  type: rss
+  lang: en
+  category: business
+  enabled: true
+- id: bbc_business
+  name: BBC Business
+  url: https://feeds.bbci.co.uk/news/business/rss.xml
+  type: rss
+  lang: en
+  category: business
+  enabled: true
+- id: business_insider
+  name: Business Insider
+  url: https://feeds.businessinsider.com/custom/all
+  type: rss
+  lang: en
+  category: business
+  enabled: true
+- id: skift
+  name: Skift (Travel & Business)
+  url: https://skift.com/feed/
+  type: rss
+  lang: en
+  category: business
+  enabled: true
+- id: mit_sloan
+  name: MIT Sloan Management Review
+  url: https://sloanreview.mit.edu/feed/
+  type: rss
+  lang: en
+  category: business
+  enabled: true
+
 # ── Japan: Tech & Society ────────────────────────────────────
 - id: japantimes
   name: Japan Times

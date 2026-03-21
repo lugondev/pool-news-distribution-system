@@ -490,6 +490,17 @@ def _save_webhook_endpoints(endpoints: list[dict]) -> None:
     _write_settings(cfg)
 
 
+def _get_all_categories() -> list[str]:
+    cfg = _read_settings()
+    return [c["id"] for c in cfg.get("categories", []) if c.get("enabled", True)]
+
+
+def _get_all_source_ids() -> list[str]:
+    with open(SOURCES_PATH) as f:
+        sources = yaml.safe_load(f).get("sources", [])
+    return [s["id"] for s in sources if s.get("enabled", True)]
+
+
 async def _webhook_ctx(request, page=1, **extra) -> dict:
     offset = (page - 1) * LOG_PAGE_SIZE
     logs, total = await get_recent_webhook_logs(limit=LOG_PAGE_SIZE, offset=offset)
@@ -501,6 +512,8 @@ async def _webhook_ctx(request, page=1, **extra) -> dict:
         "log_page": page,
         "log_total_pages": max(1, math.ceil(total / LOG_PAGE_SIZE)),
         "log_total": total,
+        "all_categories": _get_all_categories(),
+        "all_sources": _get_all_source_ids(),
     }
     ctx.update(extra)
     return ctx
@@ -530,12 +543,20 @@ async def webhook_add(
     payload_mode: str = Form("full"),
     payload_fields: str = Form(""),
     payload_template: str = Form(""),
+    filter_categories_mode: str = Form("all"),
+    filter_categories: str = Form(""),
+    filter_sources_mode: str = Form("all"),
+    filter_sources: str = Form(""),
+    rate_limit_max: int = Form(0),
+    rate_limit_window_minutes: int = Form(60),
 ):
     endpoints = _get_webhook_endpoints()
     if any(ep["id"] == id for ep in endpoints):
         ctx = await _webhook_ctx(request, error=f"Webhook '{id}' already exists")
         return templates.TemplateResponse("partials/settings_webhook.html", ctx)
     fields_list = [f.strip() for f in payload_fields.split(",") if f.strip()] if payload_fields else []
+    cat_list = [c.strip() for c in filter_categories.split(",") if c.strip()] if filter_categories else []
+    src_list = [s.strip() for s in filter_sources.split(",") if s.strip()] if filter_sources else []
     endpoints.append({
         "id": id.strip(), "name": name.strip(), "url": url.strip(),
         "enabled": True,
@@ -545,6 +566,12 @@ async def webhook_add(
         "payload_mode": payload_mode,
         "payload_fields": fields_list,
         "payload_template": payload_template,
+        "filter_categories_mode": filter_categories_mode,
+        "filter_categories": cat_list,
+        "filter_sources_mode": filter_sources_mode,
+        "filter_sources": src_list,
+        "rate_limit_max": max(0, rate_limit_max),
+        "rate_limit_window_minutes": max(1, rate_limit_window_minutes),
     })
     _save_webhook_endpoints(endpoints)
     logger.info(f"Webhook added: {id}")
@@ -576,9 +603,17 @@ async def webhook_update(
     payload_mode: str = Form("full"),
     payload_fields: str = Form(""),
     payload_template: str = Form(""),
+    filter_categories_mode: str = Form("all"),
+    filter_categories: str = Form(""),
+    filter_sources_mode: str = Form("all"),
+    filter_sources: str = Form(""),
+    rate_limit_max: int = Form(0),
+    rate_limit_window_minutes: int = Form(60),
 ):
     endpoints = _get_webhook_endpoints()
     fields_list = [f.strip() for f in payload_fields.split(",") if f.strip()] if payload_fields else []
+    cat_list = [c.strip() for c in filter_categories.split(",") if c.strip()] if filter_categories else []
+    src_list = [s.strip() for s in filter_sources.split(",") if s.strip()] if filter_sources else []
     for ep in endpoints:
         if ep["id"] == wh_id:
             ep["name"] = name.strip()
@@ -589,6 +624,12 @@ async def webhook_update(
             ep["payload_mode"] = payload_mode
             ep["payload_fields"] = fields_list
             ep["payload_template"] = payload_template
+            ep["filter_categories_mode"] = filter_categories_mode
+            ep["filter_categories"] = cat_list
+            ep["filter_sources_mode"] = filter_sources_mode
+            ep["filter_sources"] = src_list
+            ep["rate_limit_max"] = max(0, rate_limit_max)
+            ep["rate_limit_window_minutes"] = max(1, rate_limit_window_minutes)
             break
     _save_webhook_endpoints(endpoints)
     logger.info(f"Webhook updated: {wh_id}")
@@ -619,7 +660,12 @@ def _save_telegram_channels(channels: list[dict]) -> None:
 
 
 def _telegram_ctx(request, **extra) -> dict:
-    ctx = {"request": request, "channels": _get_telegram_channels()}
+    ctx = {
+        "request": request,
+        "channels": _get_telegram_channels(),
+        "all_categories": _get_all_categories(),
+        "all_sources": _get_all_source_ids(),
+    }
     ctx.update(extra)
     return ctx
 
@@ -658,6 +704,12 @@ async def telegram_add(
     payload_mode: str = Form("full"),
     payload_fields: str = Form(""),
     payload_template: str = Form(""),
+    filter_categories_mode: str = Form("all"),
+    filter_categories: str = Form(""),
+    filter_sources_mode: str = Form("all"),
+    filter_sources: str = Form(""),
+    rate_limit_max: int = Form(0),
+    rate_limit_window_minutes: int = Form(60),
 ):
     channels = _get_telegram_channels()
     if any(ch["id"] == id for ch in channels):
@@ -666,6 +718,8 @@ async def telegram_add(
             _telegram_ctx(request, error=f"Channel '{id}' already exists"),
         )
     fields_list = [f.strip() for f in payload_fields.split(",") if f.strip()] if payload_fields else []
+    cat_list = [c.strip() for c in filter_categories.split(",") if c.strip()] if filter_categories else []
+    src_list = [s.strip() for s in filter_sources.split(",") if s.strip()] if filter_sources else []
     channels.append({
         "id": id.strip(), "name": name.strip(),
         "bot_token": bot_token.strip(), "chat_id": chat_id.strip(),
@@ -675,6 +729,12 @@ async def telegram_add(
         "payload_mode": payload_mode,
         "payload_fields": fields_list,
         "payload_template": payload_template,
+        "filter_categories_mode": filter_categories_mode,
+        "filter_categories": cat_list,
+        "filter_sources_mode": filter_sources_mode,
+        "filter_sources": src_list,
+        "rate_limit_max": max(0, rate_limit_max),
+        "rate_limit_window_minutes": max(1, rate_limit_window_minutes),
     })
     _save_telegram_channels(channels)
     logger.info(f"Telegram channel added: {id}")
@@ -710,9 +770,17 @@ async def telegram_update(
     payload_mode: str = Form("full"),
     payload_fields: str = Form(""),
     payload_template: str = Form(""),
+    filter_categories_mode: str = Form("all"),
+    filter_categories: str = Form(""),
+    filter_sources_mode: str = Form("all"),
+    filter_sources: str = Form(""),
+    rate_limit_max: int = Form(0),
+    rate_limit_window_minutes: int = Form(60),
 ):
     channels = _get_telegram_channels()
     fields_list = [f.strip() for f in payload_fields.split(",") if f.strip()] if payload_fields else []
+    cat_list = [c.strip() for c in filter_categories.split(",") if c.strip()] if filter_categories else []
+    src_list = [s.strip() for s in filter_sources.split(",") if s.strip()] if filter_sources else []
     for ch in channels:
         if ch["id"] == ch_id:
             ch["name"] = name.strip()
@@ -724,6 +792,12 @@ async def telegram_update(
             ch["payload_mode"] = payload_mode
             ch["payload_fields"] = fields_list
             ch["payload_template"] = payload_template
+            ch["filter_categories_mode"] = filter_categories_mode
+            ch["filter_categories"] = cat_list
+            ch["filter_sources_mode"] = filter_sources_mode
+            ch["filter_sources"] = src_list
+            ch["rate_limit_max"] = max(0, rate_limit_max)
+            ch["rate_limit_window_minutes"] = max(1, rate_limit_window_minutes)
             break
     _save_telegram_channels(channels)
     logger.info(f"Telegram channel updated: {ch_id}")

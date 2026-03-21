@@ -8,6 +8,7 @@ import logging
 import httpx
 
 from storage.sqlite_stats import log_telegram
+from webhook.filters import check_rate_limit, passes_filter
 from webhook.payload import build_payload
 
 logger = logging.getLogger(__name__)
@@ -115,6 +116,11 @@ async def dispatch_to_telegram(article: dict, channels: list[dict], message_dela
         chat_id = ch.get("chat_id", "")
         channel_id = ch.get("id", chat_id)
         if not token or not chat_id:
+            continue
+        if not passes_filter(article, ch):
+            logger.debug(f"Telegram {channel_id} filtered out article {article.get('id','?')} (category/source filter)")
+            continue
+        if not check_rate_limit(channel_id, ch):
             continue
 
         text = build_telegram_text(article, ch)

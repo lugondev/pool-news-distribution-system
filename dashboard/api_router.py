@@ -393,6 +393,12 @@ class WebhookIn(BaseModel):
     payload_mode: str = "full"
     payload_fields: list[str] = []
     payload_template: str = ""
+    filter_categories_mode: str = "all"
+    filter_categories: list[str] = []
+    filter_sources_mode: str = "all"
+    filter_sources: list[str] = []
+    rate_limit_max: int = 0
+    rate_limit_window_minutes: int = 60
 
 
 class WebhookUpdate(BaseModel):
@@ -404,6 +410,12 @@ class WebhookUpdate(BaseModel):
     payload_mode: str | None = None
     payload_fields: list[str] | None = None
     payload_template: str | None = None
+    filter_categories_mode: str | None = None
+    filter_categories: list[str] | None = None
+    filter_sources_mode: str | None = None
+    filter_sources: list[str] | None = None
+    rate_limit_max: int | None = None
+    rate_limit_window_minutes: int | None = None
 
 
 def _get_webhook_endpoints() -> list[dict]:
@@ -434,6 +446,12 @@ async def add_webhook(body: WebhookIn):
         "payload_mode": body.payload_mode,
         "payload_fields": body.payload_fields,
         "payload_template": body.payload_template,
+        "filter_categories_mode": body.filter_categories_mode,
+        "filter_categories": body.filter_categories,
+        "filter_sources_mode": body.filter_sources_mode,
+        "filter_sources": body.filter_sources,
+        "rate_limit_max": max(0, body.rate_limit_max),
+        "rate_limit_window_minutes": max(1, body.rate_limit_window_minutes),
     }
     endpoints.append(ep)
     _save_webhook_endpoints(endpoints)
@@ -448,7 +466,10 @@ async def update_webhook(wh_id: str, body: WebhookUpdate):
     if not target:
         raise HTTPException(404, "Webhook not found")
     for field in ("name", "url", "retry_attempts", "retry_delay_seconds", "timeout_seconds",
-                  "payload_mode", "payload_fields", "payload_template"):
+                  "payload_mode", "payload_fields", "payload_template",
+                  "filter_categories_mode", "filter_categories",
+                  "filter_sources_mode", "filter_sources",
+                  "rate_limit_max", "rate_limit_window_minutes"):
         val = getattr(body, field, None)
         if val is not None:
             target[field] = val
@@ -571,6 +592,12 @@ class TelegramChannelIn(BaseModel):
     payload_mode: str = "full"
     payload_fields: list[str] = []
     payload_template: str = ""
+    filter_categories_mode: str = "all"
+    filter_categories: list[str] = []
+    filter_sources_mode: str = "all"
+    filter_sources: list[str] = []
+    rate_limit_max: int = 0
+    rate_limit_window_minutes: int = 60
 
 
 class TelegramChannelUpdate(BaseModel):
@@ -583,6 +610,12 @@ class TelegramChannelUpdate(BaseModel):
     payload_mode: str | None = None
     payload_fields: list[str] | None = None
     payload_template: str | None = None
+    filter_categories_mode: str | None = None
+    filter_categories: list[str] | None = None
+    filter_sources_mode: str | None = None
+    filter_sources: list[str] | None = None
+    rate_limit_max: int | None = None
+    rate_limit_window_minutes: int | None = None
 
 
 def _get_telegram_channels() -> list[dict]:
@@ -614,6 +647,12 @@ async def add_telegram_channel(body: TelegramChannelIn):
         "payload_mode": body.payload_mode,
         "payload_fields": body.payload_fields,
         "payload_template": body.payload_template,
+        "filter_categories_mode": body.filter_categories_mode,
+        "filter_categories": body.filter_categories,
+        "filter_sources_mode": body.filter_sources_mode,
+        "filter_sources": body.filter_sources,
+        "rate_limit_max": max(0, body.rate_limit_max),
+        "rate_limit_window_minutes": max(1, body.rate_limit_window_minutes),
     }
     channels.append(ch)
     _save_telegram_channels(channels)
@@ -628,7 +667,10 @@ async def update_telegram_channel(ch_id: str, body: TelegramChannelUpdate):
     if not target:
         raise HTTPException(404, "Telegram channel not found")
     for field in ("name", "bot_token", "chat_id", "lang", "retry_attempts", "timeout_seconds",
-                  "payload_mode", "payload_fields", "payload_template"):
+                  "payload_mode", "payload_fields", "payload_template",
+                  "filter_categories_mode", "filter_categories",
+                  "filter_sources_mode", "filter_sources",
+                  "rate_limit_max", "rate_limit_window_minutes"):
         val = getattr(body, field, None)
         if val is not None:
             target[field] = val
@@ -716,6 +758,29 @@ async def validate_payload_template(body: TemplateValidateIn):
         return {"ok": False, "error": error}
     preview = render_template(body.template, SAMPLE_ARTICLE)
     return {"ok": True, "preview": preview}
+
+
+@router.get("/filter-options")
+async def get_filter_options(q: str = ""):
+    """Return available categories and source IDs for filter hints. Optionally search with ?q=."""
+    cfg = _read_settings()
+    categories = [
+        {"id": c["id"], "name": c.get("name", c["id"])}
+        for c in cfg.get("categories", [])
+        if c.get("enabled", True)
+    ]
+    with open(SOURCES_PATH) as f:
+        raw_sources = yaml.safe_load(f).get("sources", [])
+    sources = [
+        {"id": s["id"], "name": s.get("name", s["id"]), "category": s.get("category", ""), "lang": s.get("lang", "")}
+        for s in raw_sources
+        if s.get("enabled", True)
+    ]
+    if q:
+        q_low = q.lower()
+        categories = [c for c in categories if q_low in c["id"] or q_low in c["name"].lower()]
+        sources = [s for s in sources if q_low in s["id"] or q_low in s["name"].lower() or q_low in s.get("category", "")]
+    return {"categories": categories, "sources": sources}
 
 
 @router.get("/payload/fields")

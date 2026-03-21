@@ -1,3 +1,90 @@
+<script>
+var _filterCache = null;
+var _acDrop = null;
+
+function addFilterToken(inputId, val) {
+  var el = document.getElementById(inputId);
+  if (!el) return;
+  var tokens = el.value.split(',').map(function(t){ return t.trim(); }).filter(Boolean);
+  if (tokens.indexOf(val) < 0) tokens.push(val);
+  el.value = tokens.join(', ');
+  _hideAcDrop();
+}
+function toggleFilterInput(sel, wrapperId) {
+  var w = document.getElementById(wrapperId);
+  if (w) w.style.display = sel.value === 'all' ? 'none' : '';
+}
+function _hideAcDrop() {
+  if (_acDrop) _acDrop.style.display = 'none';
+}
+function _showAcDrop(input, items) {
+  if (!_acDrop) {
+    _acDrop = document.createElement('div');
+    _acDrop.style.cssText = 'position:fixed;z-index:9999;background:#1e2130;border:1px solid #2a2d3e;border-radius:4px;max-height:200px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.5)';
+    document.body.appendChild(_acDrop);
+  }
+  _acDrop.innerHTML = '';
+  if (!items.length) { _acDrop.style.display = 'none'; return; }
+  items.forEach(function(item) {
+    var d = document.createElement('div');
+    d.style.cssText = 'padding:5px 10px;cursor:pointer;font-size:12px;display:flex;justify-content:space-between;gap:8px;align-items:center';
+    d.innerHTML = '<span style="color:#e2e8f0">' + item.id + '</span>'
+      + '<span style="color:#718096;font-size:10px;white-space:nowrap">'
+      + (item.name && item.name !== item.id ? item.name : '')
+      + (item.category ? ' [' + item.category + ']' : '')
+      + '</span>';
+    d.onmouseover = function(){ this.style.background='#2a2d3e'; };
+    d.onmouseout  = function(){ this.style.background=''; };
+    d.onmousedown = function(e){ e.preventDefault(); addFilterToken(input.id, item.id); };
+    _acDrop.appendChild(d);
+  });
+  var r = input.getBoundingClientRect();
+  _acDrop.style.left  = r.left + 'px';
+  _acDrop.style.top   = (r.bottom + 2) + 'px';
+  _acDrop.style.width = r.width + 'px';
+  _acDrop.style.display = 'block';
+}
+function _attachAc(input, type) {
+  if (input._acInit) return;
+  input._acInit = true;
+  input.addEventListener('input', function() {
+    if (!_filterCache) return;
+    var all = type === 'category' ? _filterCache.categories : _filterCache.sources;
+    var parts = this.value.split(',');
+    var q = parts[parts.length - 1].trim().toLowerCase();
+    var already = parts.slice(0, -1).map(function(t){ return t.trim(); });
+    var hits = all.filter(function(x){
+      return already.indexOf(x.id) < 0
+        && (!q || x.id.indexOf(q) >= 0 || x.name.toLowerCase().indexOf(q) >= 0
+            || (x.category && x.category.indexOf(q) >= 0));
+    }).slice(0, 25);
+    _showAcDrop(input, hits);
+  });
+  input.addEventListener('focus', function() {
+    if (!_filterCache) return;
+    var all = type === 'category' ? _filterCache.categories : _filterCache.sources;
+    var parts = this.value.split(',');
+    var q = parts[parts.length - 1].trim().toLowerCase();
+    var already = parts.slice(0, -1).map(function(t){ return t.trim(); });
+    var hits = all.filter(function(x){ return already.indexOf(x.id) < 0 && (!q || x.id.indexOf(q) >= 0 || x.name.toLowerCase().indexOf(q) >= 0); }).slice(0, 25);
+    if (hits.length) _showAcDrop(input, hits);
+  });
+  input.addEventListener('blur', function(){ setTimeout(_hideAcDrop, 150); });
+  input.addEventListener('keydown', function(e){ if (e.key === 'Escape') _hideAcDrop(); });
+}
+function _initAllAc() {
+  document.querySelectorAll('[data-filter-type]').forEach(function(inp) {
+    _attachAc(inp, inp.getAttribute('data-filter-type'));
+  });
+}
+function loadFilterOptions() {
+  if (_filterCache) { _initAllAc(); return; }
+  fetch('/api/filter-options').then(function(r){ return r.json(); }).then(function(data){
+    _filterCache = data;
+    _initAllAc();
+  });
+}
+</script>
 <div class="panel-inner">
   <h3>Webhook Delivery</h3>
   <p class="desc">
@@ -46,6 +133,10 @@
     <div class="wh-meta">
       Retry: {{ ep.retry_attempts or 3 }}x · Delay: {{ ep.retry_delay_seconds or 5 }}s · Timeout: {{ ep.timeout_seconds or 10 }}s
       · Payload: <b>{{ ep.payload_mode or 'full' }}</b>{% if ep.payload_mode == 'fields' and ep.payload_fields %} ({{ ep.payload_fields|join(', ') }}){% endif %}
+      {% set cat_mode = ep.filter_categories_mode or 'all' %}{% set src_mode = ep.filter_sources_mode or 'all' %}
+      {% if cat_mode != 'all' and ep.filter_categories %} · Cat {{ cat_mode }}: <b>{{ ep.filter_categories|join(', ') }}</b>{% endif %}
+      {% if src_mode != 'all' and ep.filter_sources %} · Src {{ src_mode }}: <b>{{ ep.filter_sources|join(', ') }}</b>{% endif %}
+      {% if ep.rate_limit_max %} · Rate: <b>{{ ep.rate_limit_max }}/{{ ep.rate_limit_window_minutes or 60 }}min</b>{% endif %}
     </div>
 
     <!-- Inline edit form (hidden by default) -->
@@ -79,6 +170,47 @@
       {% with prefix="wh-edit-" + ep.id, current_mode=ep.payload_mode or 'full', current_fields=ep.payload_fields or [], current_template=ep.payload_template or '' %}
         {% include "partials/payload_config.html" %}
       {% endwith %}
+      <div class="filter-section" style="margin-top:10px;padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:6px">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Filters & Rate Limit</div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Categories</label>
+            <select name="filter_categories_mode" onchange="toggleFilterInput(this,'wh-fc-wrap-{{ ep.id }}')">
+              <option value="all" {{ 'selected' if (ep.filter_categories_mode or 'all') == 'all' }}>All categories</option>
+              <option value="include" {{ 'selected' if ep.filter_categories_mode == 'include' }}>Include only</option>
+              <option value="exclude" {{ 'selected' if ep.filter_categories_mode == 'exclude' }}>Exclude</option>
+            </select>
+          </div>
+          <div class="form-group" id="wh-fc-wrap-{{ ep.id }}" style="display:{{ 'none' if (ep.filter_categories_mode or 'all') == 'all' else '' }}">
+            <label>Category list</label>
+            <input type="text" id="wh-fc-{{ ep.id }}" name="filter_categories" value="{{ ep.filter_categories|join(', ') if ep.filter_categories else '' }}" placeholder="tech, finance, world" autocomplete="off" data-filter-type="category">
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Sources</label>
+            <select name="filter_sources_mode" onchange="toggleFilterInput(this,'wh-fs-wrap-{{ ep.id }}')">
+              <option value="all" {{ 'selected' if (ep.filter_sources_mode or 'all') == 'all' }}>All sources</option>
+              <option value="include" {{ 'selected' if ep.filter_sources_mode == 'include' }}>Include only</option>
+              <option value="exclude" {{ 'selected' if ep.filter_sources_mode == 'exclude' }}>Exclude</option>
+            </select>
+          </div>
+          <div class="form-group" id="wh-fs-wrap-{{ ep.id }}" style="display:{{ 'none' if (ep.filter_sources_mode or 'all') == 'all' else '' }}">
+            <label>Source IDs</label>
+            <input type="text" id="wh-fs-{{ ep.id }}" name="filter_sources" value="{{ ep.filter_sources|join(', ') if ep.filter_sources else '' }}" placeholder="techcrunch, reuters" autocomplete="off" data-filter-type="source">
+          </div>
+        </div>
+        <div class="form-row-2" style="margin-top:6px">
+          <div class="form-group">
+            <label>Max messages <span class="hint">0 = unlimited</span></label>
+            <input type="number" name="rate_limit_max" value="{{ ep.rate_limit_max or 0 }}" min="0" max="1000">
+          </div>
+          <div class="form-group">
+            <label>Per (minutes)</label>
+            <input type="number" name="rate_limit_window_minutes" value="{{ ep.rate_limit_window_minutes or 60 }}" min="1" max="1440">
+          </div>
+        </div>
+      </div>
       <div style="display:flex;gap:6px;margin-top:8px">
         <button type="submit" class="btn btn-sm btn-save">Save</button>
         <button type="button" class="btn btn-sm btn-cancel" onclick="toggleEdit('{{ ep.id }}')">Cancel</button>
@@ -126,6 +258,47 @@
       {% with prefix="wh-add", current_mode="full", current_fields=[], current_template="" %}
         {% include "partials/payload_config.html" %}
       {% endwith %}
+      <div class="filter-section" style="margin-top:10px;padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:6px">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Filters & Rate Limit</div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Categories</label>
+            <select name="filter_categories_mode" onchange="toggleFilterInput(this,'wh-add-fc-wrap')">
+              <option value="all" selected>All categories</option>
+              <option value="include">Include only</option>
+              <option value="exclude">Exclude</option>
+            </select>
+          </div>
+          <div class="form-group" id="wh-add-fc-wrap" style="display:none">
+            <label>Category list</label>
+            <input type="text" id="wh-add-fc" name="filter_categories" placeholder="tech, finance, world" autocomplete="off" data-filter-type="category">
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Sources</label>
+            <select name="filter_sources_mode" onchange="toggleFilterInput(this,'wh-add-fs-wrap')">
+              <option value="all" selected>All sources</option>
+              <option value="include">Include only</option>
+              <option value="exclude">Exclude</option>
+            </select>
+          </div>
+          <div class="form-group" id="wh-add-fs-wrap" style="display:none">
+            <label>Source IDs</label>
+            <input type="text" id="wh-add-fs" name="filter_sources" placeholder="techcrunch, reuters" autocomplete="off" data-filter-type="source">
+          </div>
+        </div>
+        <div class="form-row-2" style="margin-top:6px">
+          <div class="form-group">
+            <label>Max messages <span class="hint">0 = unlimited</span></label>
+            <input type="number" name="rate_limit_max" value="0" min="0" max="1000">
+          </div>
+          <div class="form-group">
+            <label>Per (minutes)</label>
+            <input type="number" name="rate_limit_window_minutes" value="60" min="1" max="1440">
+          </div>
+        </div>
+      </div>
       <div class="form-actions" style="margin-top:10px">
         <button type="submit" class="btn btn-primary">Add Webhook</button>
       </div>
@@ -176,4 +349,5 @@
     if (fc) fc.style.display = mode === 'fields' ? '' : 'none';
     if (tc) tc.style.display = mode === 'template' ? '' : 'none';
   }
+  loadFilterOptions();
 </script>

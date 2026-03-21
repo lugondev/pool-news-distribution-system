@@ -12,6 +12,7 @@ import logging
 import httpx
 
 from storage.sqlite_stats import log_webhook
+from webhook.filters import check_rate_limit, passes_filter
 from webhook.payload import build_payload
 from webhook.telegram import dispatch_to_telegram
 
@@ -81,6 +82,11 @@ async def dispatch_article(
             continue
         url = ep.get("url", "")
         if not url:
+            continue
+        if not passes_filter(article, ep):
+            logger.debug(f"Webhook {ep.get('id')} filtered out article {article.get('id','?')} (category/source filter)")
+            continue
+        if not check_rate_limit(ep.get("id", url), ep):
             continue
 
         payload = build_payload(article, ep)

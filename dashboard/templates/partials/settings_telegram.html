@@ -1,3 +1,90 @@
+<script>
+var _filterCache = null;
+var _acDrop = null;
+
+function addFilterToken(inputId, val) {
+  var el = document.getElementById(inputId);
+  if (!el) return;
+  var tokens = el.value.split(',').map(function(t){ return t.trim(); }).filter(Boolean);
+  if (tokens.indexOf(val) < 0) tokens.push(val);
+  el.value = tokens.join(', ');
+  _hideAcDrop();
+}
+function toggleFilterInput(sel, wrapperId) {
+  var w = document.getElementById(wrapperId);
+  if (w) w.style.display = sel.value === 'all' ? 'none' : '';
+}
+function _hideAcDrop() {
+  if (_acDrop) _acDrop.style.display = 'none';
+}
+function _showAcDrop(input, items) {
+  if (!_acDrop) {
+    _acDrop = document.createElement('div');
+    _acDrop.style.cssText = 'position:fixed;z-index:9999;background:#1e2130;border:1px solid #2a2d3e;border-radius:4px;max-height:200px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.5)';
+    document.body.appendChild(_acDrop);
+  }
+  _acDrop.innerHTML = '';
+  if (!items.length) { _acDrop.style.display = 'none'; return; }
+  items.forEach(function(item) {
+    var d = document.createElement('div');
+    d.style.cssText = 'padding:5px 10px;cursor:pointer;font-size:12px;display:flex;justify-content:space-between;gap:8px;align-items:center';
+    d.innerHTML = '<span style="color:#e2e8f0">' + item.id + '</span>'
+      + '<span style="color:#718096;font-size:10px;white-space:nowrap">'
+      + (item.name && item.name !== item.id ? item.name : '')
+      + (item.category ? ' [' + item.category + ']' : '')
+      + '</span>';
+    d.onmouseover = function(){ this.style.background='#2a2d3e'; };
+    d.onmouseout  = function(){ this.style.background=''; };
+    d.onmousedown = function(e){ e.preventDefault(); addFilterToken(input.id, item.id); };
+    _acDrop.appendChild(d);
+  });
+  var r = input.getBoundingClientRect();
+  _acDrop.style.left  = r.left + 'px';
+  _acDrop.style.top   = (r.bottom + 2) + 'px';
+  _acDrop.style.width = r.width + 'px';
+  _acDrop.style.display = 'block';
+}
+function _attachAc(input, type) {
+  if (input._acInit) return;
+  input._acInit = true;
+  input.addEventListener('input', function() {
+    if (!_filterCache) return;
+    var all = type === 'category' ? _filterCache.categories : _filterCache.sources;
+    var parts = this.value.split(',');
+    var q = parts[parts.length - 1].trim().toLowerCase();
+    var already = parts.slice(0, -1).map(function(t){ return t.trim(); });
+    var hits = all.filter(function(x){
+      return already.indexOf(x.id) < 0
+        && (!q || x.id.indexOf(q) >= 0 || x.name.toLowerCase().indexOf(q) >= 0
+            || (x.category && x.category.indexOf(q) >= 0));
+    }).slice(0, 25);
+    _showAcDrop(input, hits);
+  });
+  input.addEventListener('focus', function() {
+    if (!_filterCache) return;
+    var all = type === 'category' ? _filterCache.categories : _filterCache.sources;
+    var parts = this.value.split(',');
+    var q = parts[parts.length - 1].trim().toLowerCase();
+    var already = parts.slice(0, -1).map(function(t){ return t.trim(); });
+    var hits = all.filter(function(x){ return already.indexOf(x.id) < 0 && (!q || x.id.indexOf(q) >= 0 || x.name.toLowerCase().indexOf(q) >= 0); }).slice(0, 25);
+    if (hits.length) _showAcDrop(input, hits);
+  });
+  input.addEventListener('blur', function(){ setTimeout(_hideAcDrop, 150); });
+  input.addEventListener('keydown', function(e){ if (e.key === 'Escape') _hideAcDrop(); });
+}
+function _initAllAc() {
+  document.querySelectorAll('[data-filter-type]').forEach(function(inp) {
+    _attachAc(inp, inp.getAttribute('data-filter-type'));
+  });
+}
+function loadFilterOptions() {
+  if (_filterCache) { _initAllAc(); return; }
+  fetch('/api/filter-options').then(function(r){ return r.json(); }).then(function(data){
+    _filterCache = data;
+    _initAllAc();
+  });
+}
+</script>
 <div class="panel-inner">
   <h3>Telegram Channels</h3>
   <p class="desc">
@@ -53,6 +140,10 @@
     <div class="wh-meta">
       Token: {{ ch.bot_token[:8] if ch.bot_token else '—' }}••• · Lang: {{ ch.lang or 'both' }} · Retry: {{ ch.retry_attempts or 3 }}x · Timeout: {{ ch.timeout_seconds or 10 }}s
       · Payload: <b>{{ ch.payload_mode or 'full' }}</b>{% if ch.payload_mode == 'fields' and ch.payload_fields %} ({{ ch.payload_fields|join(', ') }}){% endif %}
+      {% set cat_mode = ch.filter_categories_mode or 'all' %}{% set src_mode = ch.filter_sources_mode or 'all' %}
+      {% if cat_mode != 'all' and ch.filter_categories %} · Cat {{ cat_mode }}: <b>{{ ch.filter_categories|join(', ') }}</b>{% endif %}
+      {% if src_mode != 'all' and ch.filter_sources %} · Src {{ src_mode }}: <b>{{ ch.filter_sources|join(', ') }}</b>{% endif %}
+      {% if ch.rate_limit_max %} · Rate: <b>{{ ch.rate_limit_max }}/{{ ch.rate_limit_window_minutes or 60 }}min</b>{% endif %}
     </div>
     <div id="tg-test-result-{{ ch.id }}" style="margin-top:4px;font-size:11px"></div>
 
@@ -94,6 +185,47 @@
       {% with prefix="tg-edit-" + ch.id, current_mode=ch.payload_mode or 'full', current_fields=ch.payload_fields or [], current_template=ch.payload_template or '' %}
         {% include "partials/payload_config.html" %}
       {% endwith %}
+      <div class="filter-section" style="margin-top:10px;padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:6px">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Filters & Rate Limit</div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Categories</label>
+            <select name="filter_categories_mode" onchange="toggleFilterInput(this,'tg-fc-wrap-{{ ch.id }}')">
+              <option value="all" {{ 'selected' if (ch.filter_categories_mode or 'all') == 'all' }}>All categories</option>
+              <option value="include" {{ 'selected' if ch.filter_categories_mode == 'include' }}>Include only</option>
+              <option value="exclude" {{ 'selected' if ch.filter_categories_mode == 'exclude' }}>Exclude</option>
+            </select>
+          </div>
+          <div class="form-group" id="tg-fc-wrap-{{ ch.id }}" style="display:{{ 'none' if (ch.filter_categories_mode or 'all') == 'all' else '' }}">
+            <label>Category list</label>
+            <input type="text" id="tg-fc-{{ ch.id }}" name="filter_categories" value="{{ ch.filter_categories|join(', ') if ch.filter_categories else '' }}" placeholder="tech, finance, world" autocomplete="off" data-filter-type="category">
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Sources</label>
+            <select name="filter_sources_mode" onchange="toggleFilterInput(this,'tg-fs-wrap-{{ ch.id }}')">
+              <option value="all" {{ 'selected' if (ch.filter_sources_mode or 'all') == 'all' }}>All sources</option>
+              <option value="include" {{ 'selected' if ch.filter_sources_mode == 'include' }}>Include only</option>
+              <option value="exclude" {{ 'selected' if ch.filter_sources_mode == 'exclude' }}>Exclude</option>
+            </select>
+          </div>
+          <div class="form-group" id="tg-fs-wrap-{{ ch.id }}" style="display:{{ 'none' if (ch.filter_sources_mode or 'all') == 'all' else '' }}">
+            <label>Source IDs</label>
+            <input type="text" id="tg-fs-{{ ch.id }}" name="filter_sources" value="{{ ch.filter_sources|join(', ') if ch.filter_sources else '' }}" placeholder="techcrunch, reuters" autocomplete="off" data-filter-type="source">
+          </div>
+        </div>
+        <div class="form-row-2" style="margin-top:6px">
+          <div class="form-group">
+            <label>Max messages <span class="hint">0 = unlimited</span></label>
+            <input type="number" name="rate_limit_max" value="{{ ch.rate_limit_max or 0 }}" min="0" max="1000">
+          </div>
+          <div class="form-group">
+            <label>Per (minutes)</label>
+            <input type="number" name="rate_limit_window_minutes" value="{{ ch.rate_limit_window_minutes or 60 }}" min="1" max="1440">
+          </div>
+        </div>
+      </div>
       <div style="display:flex;gap:6px;margin-top:8px">
         <button type="submit" class="btn btn-sm btn-save">Save</button>
         <button type="button" class="btn btn-sm btn-cancel" onclick="toggleTgEdit('{{ ch.id }}')">Cancel</button>
@@ -148,6 +280,47 @@
       {% with prefix="tg-add", current_mode="full", current_fields=[], current_template="" %}
         {% include "partials/payload_config.html" %}
       {% endwith %}
+      <div class="filter-section" style="margin-top:10px;padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:6px">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Filters & Rate Limit</div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Categories</label>
+            <select name="filter_categories_mode" onchange="toggleFilterInput(this,'tg-add-fc-wrap')">
+              <option value="all" selected>All categories</option>
+              <option value="include">Include only</option>
+              <option value="exclude">Exclude</option>
+            </select>
+          </div>
+          <div class="form-group" id="tg-add-fc-wrap" style="display:none">
+            <label>Category list</label>
+            <input type="text" id="tg-add-fc" name="filter_categories" placeholder="tech, finance, world" autocomplete="off" data-filter-type="category">
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Sources</label>
+            <select name="filter_sources_mode" onchange="toggleFilterInput(this,'tg-add-fs-wrap')">
+              <option value="all" selected>All sources</option>
+              <option value="include">Include only</option>
+              <option value="exclude">Exclude</option>
+            </select>
+          </div>
+          <div class="form-group" id="tg-add-fs-wrap" style="display:none">
+            <label>Source IDs</label>
+            <input type="text" id="tg-add-fs" name="filter_sources" placeholder="techcrunch, reuters" autocomplete="off" data-filter-type="source">
+          </div>
+        </div>
+        <div class="form-row-2" style="margin-top:6px">
+          <div class="form-group">
+            <label>Max messages <span class="hint">0 = unlimited</span></label>
+            <input type="number" name="rate_limit_max" value="0" min="0" max="1000">
+          </div>
+          <div class="form-group">
+            <label>Per (minutes)</label>
+            <input type="number" name="rate_limit_window_minutes" value="60" min="1" max="1440">
+          </div>
+        </div>
+      </div>
       <div class="form-actions" style="margin-top:10px">
         <button type="submit" class="btn btn-primary">Add Channel</button>
       </div>
@@ -197,4 +370,5 @@
     if (fc) fc.style.display = mode === 'fields' ? '' : 'none';
     if (tc) tc.style.display = mode === 'template' ? '' : 'none';
   }
+  loadFilterOptions();
 </script>
