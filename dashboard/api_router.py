@@ -18,6 +18,8 @@ from storage.redis_store import (
     get_pending_ai_articles,
 )
 from storage.sqlite_stats import (
+    get_api_logs,
+    get_api_summary,
     get_crawl_domain_summary,
     get_crawl_error_breakdown,
     get_crawl_logs,
@@ -26,6 +28,8 @@ from storage.sqlite_stats import (
     get_dashboard_stats,
     get_recent_ai_logs,
     get_recent_webhook_logs,
+    get_system_logs,
+    get_system_summary,
 )
 
 logger = logging.getLogger(__name__)
@@ -725,6 +729,83 @@ async def test_telegram_channel(ch_id: str):
     raise HTTPException(400, f"Telegram API error: {error}")
 
 
+# ── System Logs ──────────────────────────────────────────────────────────────
+
+@router.get("/logs/system")
+async def list_system_logs(
+    page: int = 1,
+    limit: int = LOG_PAGE_SIZE,
+    event_type: str | None = None,
+    status: str | None = None,
+    since: str | None = None,
+):
+    """
+    Browse scheduler and system event logs.
+
+    Query params:
+    - event_type  — filter by type: crawl_job, ai_job
+    - status      — filter by status: ok, error, skipped
+    - since       — ISO datetime lower bound
+    """
+    offset = (page - 1) * limit
+    logs, total = await get_system_logs(
+        limit=limit, offset=offset,
+        event_type=event_type, status=status, since=since,
+    )
+    return {
+        "logs": logs, "total": total,
+        "page": page, "total_pages": max(1, math.ceil(total / limit)),
+    }
+
+
+@router.get("/logs/system/summary")
+async def system_log_summary(since: str | None = None):
+    """Per event_type stats: total runs, success/error counts, avg duration."""
+    rows = await get_system_summary(since=since)
+    return {"summary": rows, "count": len(rows)}
+
+
+# ── API Request Logs ──────────────────────────────────────────────────────────
+
+@router.get("/logs/api")
+async def list_api_logs(
+    page: int = 1,
+    limit: int = LOG_PAGE_SIZE,
+    method: str | None = None,
+    path: str | None = None,
+    status_code: int | None = None,
+    errors_only: bool = False,
+    since: str | None = None,
+):
+    """
+    Browse API request logs.
+
+    Query params:
+    - method       — HTTP method (GET, POST, PUT, DELETE)
+    - path         — partial path match (e.g. /api/sources)
+    - status_code  — exact HTTP status code
+    - errors_only  — only 4xx/5xx responses (bool)
+    - since        — ISO datetime lower bound
+    """
+    offset = (page - 1) * limit
+    logs, total = await get_api_logs(
+        limit=limit, offset=offset,
+        method=method, path=path,
+        status_code=status_code, errors_only=errors_only, since=since,
+    )
+    return {
+        "logs": logs, "total": total,
+        "page": page, "total_pages": max(1, math.ceil(total / limit)),
+    }
+
+
+@router.get("/logs/api/summary")
+async def api_log_summary(since: str | None = None):
+    """Per-endpoint stats: total requests, avg latency, error rate."""
+    rows = await get_api_summary(since=since)
+    return {"endpoints": rows, "count": len(rows)}
+
+
 # ── Payload Template Validation & Preview ────────────────────────────────────
 
 class TemplateValidateIn(BaseModel):
@@ -788,6 +869,22 @@ async def list_payload_fields():
     """List all available fields for payload_mode=fields."""
     from webhook.payload import ALL_FIELDS
     return {"fields": ALL_FIELDS}
+
+
+@router.get("/SKILL.md", response_class=__import__("fastapi").responses.PlainTextResponse)
+async def serve_skill_md(request: __import__("fastapi").Request):
+    """Serve SKILL.md with $API and localhost URL replaced by the actual request base URL."""
+    import pathlib
+    skill_path = pathlib.Path(_BASE_DIR) / "SKILL.md"
+    content = skill_path.read_text(encoding="utf-8")
+
+    # Build actual API base URL from the incoming request
+    base_url = str(request.base_url).rstrip("/")
+    actual_api = f"{base_url}/api"
+
+    content = content.replace("http://localhost:8000/api", actual_api)
+    content = content.replace("$API", actual_api)
+    return content
 
 
 @router.post("/payload/preview")

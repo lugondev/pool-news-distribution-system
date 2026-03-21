@@ -5,6 +5,7 @@ and fetches them. 403/429 responses push next_crawl_at further into the future.
 """
 import logging
 import os
+from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
 import yaml
@@ -13,6 +14,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from crawler.fetcher import fetch_all_sources
 from ai.rewriter import process_pending_articles
 from storage.redis_store import get_due_source_ids
+from storage.sqlite_stats import log_system_event
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,7 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
 
     async def crawl_job():
+        started = datetime.now(timezone.utc)
         current_cfg = _load_config()
         crawler = current_cfg.get("crawler", {})
         active_cats = {
@@ -78,6 +81,8 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
             if s.get("enabled", True) and s.get("category", "world") in active_cats
         ]
         if not filtered:
+            await log_system_event("crawl_job", started, status="skipped",
+                                   metadata={"reason": "no enabled sources"})
             return
 
         sources_per_tick = crawler.get("sources_per_tick", 3)
@@ -87,6 +92,8 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
         # Pick sources whose next_crawl_at is due (or never scheduled)
         due_ids = await get_due_source_ids(redis, all_ids, limit=sources_per_tick)
         if not due_ids:
+            await log_system_event("crawl_job", started, status="skipped",
+                                   metadata={"reason": "no sources due", "eligible": len(filtered)})
             return
 
         batch = [source_map[sid] for sid in due_ids if sid in source_map]
@@ -94,21 +101,34 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
 
         default_interval_sec = crawler.get("default_crawl_interval_minutes", 10) * 60
 
-        await fetch_all_sources(
-            sources=batch,
-            redis=redis,
-            max_concurrent=sources_per_tick,
-            dedup_threshold=current_cfg.get("dedup", {}).get("simhash_distance_threshold", 3),
-            max_articles_per_source=crawler.get("max_articles_per_source", 50),
-            request_timeout=crawler.get("request_timeout_seconds", 15),
-            domain_delay=(
-                crawler.get("domain_delay_min", 0.5),
-                crawler.get("domain_delay_max", 1.5),
-            ),
-            default_crawl_interval_sec=default_interval_sec,
-            backoff_429_sec=crawler.get("backoff_429_minutes", 30) * 60,
-            backoff_403_sec=crawler.get("backoff_403_minutes", 120) * 60,
-        )
+        try:
+            results = await fetch_all_sources(
+                sources=batch,
+                redis=redis,
+                max_concurrent=sources_per_tick,
+                dedup_threshold=current_cfg.get("dedup", {}).get("simhash_distance_threshold", 3),
+                max_articles_per_source=crawler.get("max_articles_per_source", 50),
+                request_timeout=crawler.get("request_timeout_seconds", 15),
+                domain_delay=(
+                    crawler.get("domain_delay_min", 0.5),
+                    crawler.get("domain_delay_max", 1.5),
+                ),
+                default_crawl_interval_sec=default_interval_sec,
+                backoff_429_sec=crawler.get("backoff_429_minutes", 30) * 60,
+                backoff_403_sec=crawler.get("backoff_403_minutes", 120) * 60,
+            )
+            meta = {
+                "sources_in_batch": len(batch),
+                "source_ids": due_ids,
+                "total_found": sum(r.get("found", 0) for r in (results or [])),
+                "total_saved": sum(r.get("saved", 0) for r in (results or [])),
+                "total_duplicates": sum(r.get("duplicates", 0) for r in (results or [])),
+                "errors": sum(1 for r in (results or []) if r.get("errors", 0)),
+            }
+            await log_system_event("crawl_job", started, status="ok", metadata=meta)
+        except Exception as exc:
+            await log_system_event("crawl_job", started, status="error", error_msg=str(exc))
+            raise
 
     tick_interval = crawler_cfg.get("tick_interval_seconds", 30)
     scheduler.add_job(
@@ -122,11 +142,14 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
 
     if ai_cfg.get("enabled", True):
         async def ai_job():
+            started = datetime.now(timezone.utc)
             current_cfg = _load_config()
             ai = current_cfg.get("ai", {})
             wh = current_cfg.get("webhook", {})
             tg = current_cfg.get("telegram", {})
             if not ai.get("enabled", True):
+                await log_system_event("ai_job", started, status="skipped",
+                                       metadata={"reason": "AI disabled"})
                 return
             endpoints = wh.get("endpoints", [])
             tg_channels = tg.get("channels", [])
@@ -134,22 +157,37 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
             spread = ai_interval_sec * 0.8
 
             dedup_cfg = current_cfg.get("dedup", {})
-            processed = await process_pending_articles(
-                redis=redis,
-                model=ai.get("model", "gpt-4o-mini"),
-                batch_size=ai.get("batch_size", 10),
-                max_tokens=ai.get("max_tokens_summary", 300),
-                temperature=ai.get("temperature", 0.3),
-                tone=ai.get("tone", "general"),
-                api_key=ai.get("api_key") or None,
-                base_url=ai.get("base_url") or None,
-                webhook_endpoints=endpoints,
-                telegram_channels=tg_channels,
-                spread_seconds=spread,
-                ai_dedup_threshold=dedup_cfg.get("ai_simhash_distance_threshold", 6),
-            )
-            if processed:
-                logger.info(f"AI job: processed {processed} articles")
+            try:
+                processed = await process_pending_articles(
+                    redis=redis,
+                    model=ai.get("model", "gpt-4o-mini"),
+                    batch_size=ai.get("batch_size", 10),
+                    max_tokens=ai.get("max_tokens_summary", 300),
+                    temperature=ai.get("temperature", 0.3),
+                    tone=ai.get("tone", "general"),
+                    api_key=ai.get("api_key") or None,
+                    base_url=ai.get("base_url") or None,
+                    webhook_endpoints=endpoints,
+                    telegram_channels=tg_channels,
+                    spread_seconds=spread,
+                    ai_dedup_threshold=dedup_cfg.get("ai_simhash_distance_threshold", 6),
+                )
+                if processed:
+                    logger.info(f"AI job: processed {processed} articles")
+                await log_system_event(
+                    "ai_job", started,
+                    status="ok" if processed is not None else "skipped",
+                    metadata={
+                        "processed": processed or 0,
+                        "model": ai.get("model", "gpt-4o-mini"),
+                        "batch_size": ai.get("batch_size", 10),
+                        "webhooks": len(endpoints),
+                        "telegram_channels": len(tg_channels),
+                    },
+                )
+            except Exception as exc:
+                await log_system_event("ai_job", started, status="error", error_msg=str(exc))
+                raise
 
         ai_interval = ai_cfg.get("interval_minutes", 2)
         scheduler.add_job(

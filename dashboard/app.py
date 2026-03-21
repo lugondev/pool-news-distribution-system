@@ -11,10 +11,12 @@ import redis.asyncio as aioredis
 import yaml
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse
+from fastapi.routing import APIRoute
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from storage.redis_store import get_latest_articles, get_feed_stats, get_article
-from storage.sqlite_stats import get_dashboard_stats, get_recent_webhook_logs, get_recent_ai_logs, get_recent_telegram_logs, init_db
+from storage.sqlite_stats import get_dashboard_stats, get_recent_webhook_logs, get_recent_ai_logs, get_recent_telegram_logs, init_db, log_api_request
 from dashboard.api_router import router as api_router, set_redis as api_set_redis
 
 logger = logging.getLogger(__name__)
@@ -115,7 +117,35 @@ async def lifespan(app: FastAPI):
         await _redis.aclose()
 
 
+_API_PREFIX = "/api/"
+
+class _APIRequestLogger(BaseHTTPMiddleware):
+    """Log method, path, status_code and latency for all /api/* requests."""
+
+    async def dispatch(self, request: Request, call_next):
+        if not request.url.path.startswith(_API_PREFIX):
+            return await call_next(request)
+        started = datetime.now(timezone.utc)
+        t0 = started.timestamp()
+        response = await call_next(request)
+        duration_ms = int((datetime.now(timezone.utc).timestamp() - t0) * 1000)
+        error_msg = None if response.status_code < 400 else f"HTTP {response.status_code}"
+        try:
+            await log_api_request(
+                method=request.method,
+                path=request.url.path,
+                status_code=response.status_code,
+                duration_ms=duration_ms,
+                requested_at=started,
+                error_msg=error_msg,
+            )
+        except Exception:
+            pass
+        return response
+
+
 app = FastAPI(title="News Aggregator Dashboard", lifespan=lifespan)
+app.add_middleware(_APIRequestLogger)
 app.include_router(api_router)
 
 PAGE_SIZE = 20

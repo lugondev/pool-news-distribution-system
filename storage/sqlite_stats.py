@@ -1,7 +1,8 @@
 """
-SQLite statistics — crawl logs, webhook logs, AI logs.
+SQLite statistics — crawl logs, webhook logs, AI logs, system events, API requests.
 Dùng aiosqlite để không block event loop.
 """
+import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -77,6 +78,33 @@ async def init_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_tg_sent ON telegram_logs(sent_at);
             CREATE INDEX IF NOT EXISTS idx_tg_channel ON telegram_logs(channel_id);
+
+            CREATE TABLE IF NOT EXISTS system_logs (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type  TEXT NOT NULL,
+                started_at  TEXT NOT NULL,
+                finished_at TEXT,
+                duration_ms INTEGER DEFAULT 0,
+                status      TEXT DEFAULT 'ok',
+                metadata    TEXT,
+                error_msg   TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_sys_event ON system_logs(event_type);
+            CREATE INDEX IF NOT EXISTS idx_sys_started ON system_logs(started_at);
+            CREATE INDEX IF NOT EXISTS idx_sys_status ON system_logs(status);
+
+            CREATE TABLE IF NOT EXISTS api_logs (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                method       TEXT NOT NULL,
+                path         TEXT NOT NULL,
+                status_code  INTEGER,
+                duration_ms  INTEGER DEFAULT 0,
+                requested_at TEXT NOT NULL,
+                error_msg    TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_api_path ON api_logs(path);
+            CREATE INDEX IF NOT EXISTS idx_api_requested ON api_logs(requested_at);
+            CREATE INDEX IF NOT EXISTS idx_api_status ON api_logs(status_code);
         """)
 
         for col, typedef in [
@@ -411,6 +439,178 @@ async def get_crawl_error_breakdown(since: str | None = None) -> list[dict]:
             WHERE errors > 0 {time_filter}
             GROUP BY error_type
             ORDER BY count DESC""",
+            params,
+        )
+        return [dict(r) for r in rows]
+
+
+async def log_system_event(
+    event_type: str,
+    started_at: datetime,
+    status: str = "ok",
+    metadata: dict | None = None,
+    error_msg: str | None = None,
+) -> None:
+    finished_at = datetime.now(timezone.utc)
+    duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+    async with aiosqlite.connect(_db_path()) as db:
+        await db.execute(
+            """INSERT INTO system_logs
+               (event_type, started_at, finished_at, duration_ms, status, metadata, error_msg)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                event_type,
+                started_at.isoformat(),
+                finished_at.isoformat(),
+                duration_ms,
+                status,
+                json.dumps(metadata) if metadata else None,
+                error_msg,
+            ),
+        )
+        await db.commit()
+
+
+async def log_api_request(
+    method: str,
+    path: str,
+    status_code: int,
+    duration_ms: int,
+    requested_at: datetime,
+    error_msg: str | None = None,
+) -> None:
+    async with aiosqlite.connect(_db_path()) as db:
+        await db.execute(
+            """INSERT INTO api_logs (method, path, status_code, duration_ms, requested_at, error_msg)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (method, path, status_code, duration_ms, requested_at.isoformat(), error_msg),
+        )
+        await db.commit()
+
+
+async def get_system_logs(
+    limit: int = 50,
+    offset: int = 0,
+    event_type: str | None = None,
+    status: str | None = None,
+    since: str | None = None,
+) -> tuple[list[dict], int]:
+    async with aiosqlite.connect(_db_path()) as db:
+        db.row_factory = aiosqlite.Row
+        where, params = [], []
+        if event_type:
+            where.append("event_type = ?")
+            params.append(event_type)
+        if status:
+            where.append("status = ?")
+            params.append(status)
+        if since:
+            where.append("started_at >= ?")
+            params.append(since)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        total_row = await db.execute_fetchall(
+            f"SELECT COUNT(*) as cnt FROM system_logs {clause}", params
+        )
+        total = total_row[0]["cnt"] if total_row else 0
+        rows = await db.execute_fetchall(
+            f"SELECT id, event_type, started_at, finished_at, duration_ms, status, metadata, error_msg "
+            f"FROM system_logs {clause} ORDER BY started_at DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        )
+        result = []
+        for r in rows:
+            row = dict(r)
+            if row.get("metadata"):
+                try:
+                    row["metadata"] = json.loads(row["metadata"])
+                except Exception:
+                    pass
+            result.append(row)
+        return result, total
+
+
+async def get_system_summary(since: str | None = None) -> list[dict]:
+    """Per event_type aggregated stats."""
+    async with aiosqlite.connect(_db_path()) as db:
+        db.row_factory = aiosqlite.Row
+        time_filter = "WHERE started_at >= ?" if since else ""
+        params = [since] if since else []
+        rows = await db.execute_fetchall(
+            f"""SELECT
+                event_type,
+                COUNT(*) as total_runs,
+                SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) as success_runs,
+                SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_runs,
+                ROUND(AVG(duration_ms)) as avg_duration_ms,
+                MAX(duration_ms) as max_duration_ms,
+                MAX(started_at) as last_run
+            FROM system_logs {time_filter}
+            GROUP BY event_type
+            ORDER BY total_runs DESC""",
+            params,
+        )
+        return [dict(r) for r in rows]
+
+
+async def get_api_logs(
+    limit: int = 50,
+    offset: int = 0,
+    method: str | None = None,
+    path: str | None = None,
+    status_code: int | None = None,
+    errors_only: bool = False,
+    since: str | None = None,
+) -> tuple[list[dict], int]:
+    async with aiosqlite.connect(_db_path()) as db:
+        db.row_factory = aiosqlite.Row
+        where, params = [], []
+        if method:
+            where.append("method = ?")
+            params.append(method.upper())
+        if path:
+            where.append("path LIKE ?")
+            params.append(f"%{path}%")
+        if status_code:
+            where.append("status_code = ?")
+            params.append(status_code)
+        if errors_only:
+            where.append("status_code >= 400")
+        if since:
+            where.append("requested_at >= ?")
+            params.append(since)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        total_row = await db.execute_fetchall(
+            f"SELECT COUNT(*) as cnt FROM api_logs {clause}", params
+        )
+        total = total_row[0]["cnt"] if total_row else 0
+        rows = await db.execute_fetchall(
+            f"SELECT id, method, path, status_code, duration_ms, requested_at, error_msg "
+            f"FROM api_logs {clause} ORDER BY requested_at DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        )
+        return [dict(r) for r in rows], total
+
+
+async def get_api_summary(since: str | None = None) -> list[dict]:
+    """Per-path aggregated stats: count, avg latency, error rate."""
+    async with aiosqlite.connect(_db_path()) as db:
+        db.row_factory = aiosqlite.Row
+        time_filter = "WHERE requested_at >= ?" if since else ""
+        params = [since] if since else []
+        rows = await db.execute_fetchall(
+            f"""SELECT
+                method,
+                path,
+                COUNT(*) as total_requests,
+                SUM(CASE WHEN status_code < 400 THEN 1 ELSE 0 END) as success_count,
+                SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as error_count,
+                ROUND(100.0 * SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) / COUNT(*), 1) as error_rate,
+                ROUND(AVG(duration_ms)) as avg_duration_ms,
+                MAX(duration_ms) as max_duration_ms,
+                MAX(requested_at) as last_request
+            FROM api_logs {time_filter}
+            GROUP BY method, path
+            ORDER BY total_requests DESC""",
             params,
         )
         return [dict(r) for r in rows]

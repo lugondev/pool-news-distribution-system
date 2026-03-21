@@ -247,6 +247,70 @@ curl -s "$API/logs/ai?page=1&limit=20" | jq .
 
 Returns `logs` (article_id, model, tokens_used, created_at), `total`, `page`, `total_pages`.
 
+## System Logs (Scheduler Events)
+
+### Browse all system events
+
+```bash
+curl -s "$API/logs/system?page=1&limit=20" | jq .
+```
+
+Query params: `event_type` (crawl_job, ai_job), `status` (ok, error, skipped), `since` (ISO datetime).
+
+Each entry: `id`, `event_type`, `started_at`, `finished_at`, `duration_ms`, `status`, `metadata` (job-specific JSON), `error_msg`.
+
+### Filter: only errors
+
+```bash
+curl -s "$API/logs/system?status=error" | jq .
+```
+
+### Filter: crawl jobs only
+
+```bash
+curl -s "$API/logs/system?event_type=crawl_job&limit=10" | jq .
+```
+
+### Summary by event type
+
+```bash
+curl -s "$API/logs/system/summary" | jq .
+```
+
+Returns per event_type: `total_runs`, `success_runs`, `error_runs`, `avg_duration_ms`, `max_duration_ms`, `last_run`.
+
+## API Request Logs
+
+### Browse all API requests
+
+```bash
+curl -s "$API/logs/api?page=1&limit=20" | jq .
+```
+
+Query params: `method` (GET, POST, PUT, DELETE), `path` (partial match), `status_code` (exact), `errors_only` (bool), `since` (ISO datetime).
+
+Each entry: `id`, `method`, `path`, `status_code`, `duration_ms`, `requested_at`, `error_msg`.
+
+### Filter: only errors (4xx/5xx)
+
+```bash
+curl -s "$API/logs/api?errors_only=true&limit=50" | jq .
+```
+
+### Filter: slow requests > 500ms (post-filter client-side)
+
+```bash
+curl -s "$API/logs/api/summary" | jq '[.endpoints[] | select(.avg_duration_ms > 500)]'
+```
+
+### Per-endpoint summary
+
+```bash
+curl -s "$API/logs/api/summary" | jq .
+```
+
+Returns per endpoint: `method`, `path`, `total_requests`, `success_count`, `error_count`, `error_rate`, `avg_duration_ms`, `max_duration_ms`, `last_request`.
+
 ## Webhooks
 
 ### List webhooks
@@ -403,6 +467,20 @@ curl -s -X POST $API/payload/preview \
 
 ## Troubleshooting Workflows
 
+### Scheduler jobs not running or crashing
+
+1. `curl -s "$API/logs/system?event_type=crawl_job&limit=5" | jq .` — recent crawl job executions
+2. `curl -s "$API/logs/system?status=error" | jq '.logs[] | {event_type,error_msg,started_at}'` — all job errors
+3. `curl -s "$API/logs/system/summary" | jq .` — overall job health (success/error ratio, avg duration)
+4. High `avg_duration_ms` → crawl batch is slow, reduce `sources_per_tick`
+5. Repeated `status=skipped` with `reason=no sources due` → all sources are in backoff, check crawl logs
+
+### API latency or errors
+
+1. `curl -s "$API/logs/api/summary" | jq '[.endpoints[] | select(.avg_duration_ms > 200)]'` — slow endpoints
+2. `curl -s "$API/logs/api?errors_only=true&limit=20" | jq .` — recent 4xx/5xx errors
+3. `curl -s "$API/logs/api?path=articles&limit=10" | jq .` — trace specific endpoint
+
 ### No new articles
 
 1. `curl -s $API/health | jq .` — check Redis is up
@@ -497,6 +575,10 @@ redis-cli DEL news:dedup:simhashes
 | GET | `/api/logs/crawl/domains?since=` | Per-domain stats (IP-ban detection) |
 | GET | `/api/logs/crawl/errors?since=` | Error breakdown by type |
 | GET | `/api/logs/crawl/timeline?hours=` | Hourly crawl performance |
+| GET | `/api/logs/system?event_type=&status=&since=` | Scheduler & system event logs |
+| GET | `/api/logs/system/summary` | Per event_type aggregated stats |
+| GET | `/api/logs/api?method=&path=&status_code=&errors_only=&since=` | API request logs |
+| GET | `/api/logs/api/summary` | Per-endpoint stats (latency, error rate) |
 | GET | `/api/telegram` | List Telegram channels |
 | POST | `/api/telegram` | Add Telegram channel |
 | PUT | `/api/telegram/{id}` | Update Telegram channel |

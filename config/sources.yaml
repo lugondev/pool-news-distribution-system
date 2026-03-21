@@ -19,14 +19,14 @@ sources:
   type: rss
   lang: en
   category: world
-  enabled: true
+  enabled: false
 - id: hnews
   name: Hacker News
   url: https://hnrss.org/frontpage
   type: rss
   lang: en
   category: tech
-  enabled: true
+  enabled: false
 - id: nhk_world
   name: NHK World
   url: https://www3.nhk.or.jp/rss/news/cat0.xml
@@ -61,22 +61,6 @@ sources:
   type: rss
   lang: vi
   category: world
-  enabled: true
-
-# ── US: Finance, Economy & Markets ──────────────────────────
-- id: reuters_business
-  name: Reuters Business & Finance
-  url: https://www.reutersagency.com/feed/?best-topics=business-finance&post_type=best
-  type: rss
-  lang: en
-  category: finance
-  enabled: true
-- id: reuters_economy
-  name: Reuters Economy
-  url: https://www.reutersagency.com/feed/?best-sectors=economy&post_type=best
-  type: rss
-  lang: en
-  category: finance
   enabled: true
 - id: cnbc_economy
   name: CNBC Economy
@@ -126,14 +110,14 @@ sources:
   type: rss
   lang: en
   category: finance
-  enabled: true
+  enabled: false
 - id: wsj_world
   name: WSJ World News
   url: https://feeds.a.dj.com/rss/RSSWorldNews.xml
   type: rss
   lang: en
   category: world
-  enabled: true
+  enabled: false
 - id: ft_economy
   name: Financial Times Global Economy
   url: https://www.ft.com/global-economy?format=rss
@@ -162,24 +146,6 @@ sources:
   lang: en
   category: finance
   enabled: true
-
-# ── Middle East: Geopolitics & Economy ──────────────────────
-- id: aljazeera_economy
-  name: Al Jazeera Economy
-  url: https://www.aljazeera.com/xml/rss/economy.xml
-  type: rss
-  lang: en
-  category: finance
-  enabled: true
-- id: aljazeera_middleeast
-  name: Al Jazeera Middle East
-  url: https://www.aljazeera.com/xml/rss/middleeast.xml
-  type: rss
-  lang: en
-  category: world
-  enabled: true
-
-# ── Europe: Finance & Economy ───────────────────────────────
 - id: ecb_press
   name: ECB Press Releases
   url: https://www.ecb.europa.eu/rss/press.html
@@ -201,31 +167,6 @@ sources:
   lang: en
   category: world
   enabled: true
-
-# ── Japan: Finance & Economy ────────────────────────────────
-- id: nikkei_economy
-  name: Nikkei Asia Economy
-  url: https://asia.nikkei.com/rss/feed/Economy
-  type: rss
-  lang: en
-  category: finance
-  enabled: true
-- id: nikkei_markets
-  name: Nikkei Asia Markets
-  url: https://asia.nikkei.com/rss/feed/Markets
-  type: rss
-  lang: en
-  category: finance
-  enabled: true
-- id: nikkei_business
-  name: Nikkei Asia Business
-  url: https://asia.nikkei.com/rss/feed/Business
-  type: rss
-  lang: en
-  category: finance
-  enabled: true
-
-# ── Korea: Finance & Economy ────────────────────────────────
 - id: koreaherald
   name: Korea Herald
   url: https://koreaherald.com/rss_xml.php
@@ -240,8 +181,6 @@ sources:
   lang: en
   category: world
   enabled: true
-
-# ── Singapore: Finance & Economy ────────────────────────────
 - id: cna_business
   name: CNA Business (Singapore)
   url: https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=6936
@@ -270,8 +209,6 @@ sources:
   lang: en
   category: finance
   enabled: true
-
-# ── Technology (EN) ─────────────────────────────────────────
 - id: theverge
   name: The Verge
   url: https://www.theverge.com/rss/index.xml
@@ -313,22 +250,13 @@ sources:
   type: rss
   lang: en
   category: tech
-  enabled: true
+  enabled: false
 - id: guardian_tech
   name: The Guardian Technology
   url: https://www.theguardian.com/uk/technology/rss
   type: rss
   lang: en
   category: tech
-  enabled: true
-
-# ── Finance & Economy (EN, additional) ──────────────────────
-- id: forbes_finance
-  name: Forbes Finance
-  url: https://www.forbes.com/money/feed/
-  type: rss
-  lang: en
-  category: finance
   enabled: true
 - id: forbes_tech
   name: Forbes Technology
@@ -343,14 +271,14 @@ sources:
   type: rss
   lang: en
   category: finance
-  enabled: true
+  enabled: false
 - id: worldbank
   name: World Bank News
   url: https://feeds.worldbank.org/worldbank/blogs/all
   type: rss
   lang: en
   category: finance
-  enabled: true
+  enabled: false
 - id: economist_world
   name: The Economist World
   url: https://www.economist.com/the-world-this-week/rss.xml
@@ -365,8 +293,6 @@ sources:
   lang: en
   category: finance
   enabled: true
-
-# ── Society (EN) ─────────────────────────────────────────────
 - id: guardian_society
   name: The Guardian Society
   url: https://www.theguardian.com/society/rss
@@ -395,21 +321,12 @@ sources:
   lang: en
   category: society
   enabled: true
-
-# ── Vietnam: Tài chính, Kinh tế, Xã hội, Công nghệ ─────────
 - id: vnexpress_kinh_te
   name: VnExpress Kinh Doanh
   url: https://vnexpress.net/rss/kinh-doanh.rss
   type: rss
   lang: vi
   category: finance
-  enabled: true
-- id: vnexpress_xa_hoi
-  name: VnExpress Xã Hội
-  url: https://vnexpress.net/rss/xa-hoi.rss
-  type: rss
-  lang: vi
-  category: society
   enabled: true
 - id: vnexpress_cong_nghe
   name: VnExpress Công Nghệ
@@ -418,57 +335,6 @@ sources:
   lang: vi
   category: tech
   enabled: true
-- id: tuoitre
-  name: Tuổi Trẻ
-  url: https://tuoitre.vn/rss/tin-moi-nhat.rss
-  type: rss
-  lang: vi
-  category: world
-  enabled: true
-- id: tuoitre_kinh_te
-  name: Tuổi Trẻ Kinh Tế
-  url: https://tuoitre.vn/rss/kinh-te.rss
-  type: rss
-  lang: vi
-  category: finance
-  enabled: true
-- id: thanhnien
-  name: Thanh Niên
-  url: https://thanhnien.vn/rss/home.rss
-  type: rss
-  lang: vi
-  category: world
-  enabled: true
-- id: dantri
-  name: Dân Trí
-  url: https://dantri.com.vn/rss/home.rss
-  type: rss
-  lang: vi
-  category: society
-  enabled: true
-- id: cafef
-  name: CafeF
-  url: https://cafef.vn/rss/home.rss
-  type: rss
-  lang: vi
-  category: finance
-  enabled: true
-- id: vietnamnet
-  name: VietnamNet
-  url: https://vietnamnet.vn/rss/home.rss
-  type: rss
-  lang: vi
-  category: world
-  enabled: true
-- id: baomoi
-  name: Báo Mới
-  url: https://baomoi.com/rss.epi
-  type: rss
-  lang: vi
-  category: world
-  enabled: true
-
-# ── Science (EN) ─────────────────────────────────────────────
 - id: nasa_breaking
   name: NASA Breaking News
   url: https://www.nasa.gov/rss/dyn/breaking_news.rss
@@ -539,8 +405,6 @@ sources:
   lang: en
   category: science
   enabled: true
-
-# ── Business (EN) ─────────────────────────────────────────────
 - id: hbr
   name: Harvard Business Review
   url: https://feeds.hbr.org/harvardbusiness
@@ -604,8 +468,6 @@ sources:
   lang: en
   category: business
   enabled: true
-
-# ── Japan: Tech & Society ────────────────────────────────────
 - id: japantimes
   name: Japan Times
   url: https://www.japantimes.co.jp/feed/
@@ -619,9 +481,7 @@ sources:
   type: rss
   lang: en
   category: finance
-  enabled: true
-
-# ── Korea: Tech & Society ────────────────────────────────────
+  enabled: false
 - id: kbs_economy
   name: KBS World Economy
   url: https://world.kbs.co.kr/rss/rss_economy.htm
@@ -629,3 +489,507 @@ sources:
   lang: en
   category: finance
   enabled: true
+- id: engadget
+  name: Engadget
+  url: https://www.engadget.com/rss.xml
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: 9to5mac
+  name: 9to5Mac
+  url: https://9to5mac.com/feed/
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: 9to5google
+  name: 9to5Google
+  url: https://9to5google.com/feed/
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: zdnet
+  name: ZDNet
+  url: https://www.zdnet.com/news/rss.xml
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: axios_tech
+  name: Axios Tech
+  url: https://api.axios.com/feed/technology/
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: quartz
+  name: Quartz
+  url: https://qz.com/rss
+  type: rss
+  lang: en
+  category: business
+  enabled: true
+- id: axios_business
+  name: Axios Business
+  url: https://api.axios.com/feed/business/
+  type: rss
+  lang: en
+  category: business
+  enabled: true
+- id: popsci
+  name: Popular Science
+  url: https://www.popsci.com/feed/
+  type: rss
+  lang: en
+  category: science
+  enabled: true
+- id: livescience
+  name: Live Science
+  url: https://www.livescience.com/feeds/all
+  type: rss
+  lang: en
+  category: science
+  enabled: true
+- id: space_com
+  name: Space.com
+  url: https://www.space.com/feeds/all
+  type: rss
+  lang: en
+  category: science
+  enabled: true
+- id: discover_magazine
+  name: Discover Magazine
+  url: https://www.discovermagazine.com/rss/latest-news
+  type: rss
+  lang: en
+  category: science
+  enabled: true
+- id: the_register
+  name: The Register
+  url: https://www.theregister.com/headlines.atom
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: cityam
+  name: City A.M.
+  url: https://www.cityam.com/feed/
+  type: rss
+  lang: en
+  category: business
+  enabled: true
+- id: thisismoney
+  name: This Is Money (UK)
+  url: https://www.thisismoney.co.uk/money/index.rss
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: zdnet_fr
+  name: ZDNet France
+  url: https://www.zdnet.fr/feeds/rss/actualites/
+  type: rss
+  lang: fr
+  category: tech
+  enabled: true
+- id: 01net_fr
+  name: 01net France
+  url: https://www.01net.com/rss/actualites/
+  type: rss
+  lang: fr
+  category: tech
+  enabled: true
+- id: lesechos
+  name: Les Echos
+  url: https://www.lesechos.fr/rss/rss_une.xml
+  type: rss
+  lang: fr
+  category: finance
+  enabled: true
+- id: bfm_business
+  name: BFM Business
+  url: https://bfmbusiness.bfmtv.com/rss/alaune/
+  type: rss
+  lang: fr
+  category: finance
+  enabled: true
+- id: sciences_avenir
+  name: Sciences et Avenir
+  url: https://www.sciencesetavenir.fr/rss.xml
+  type: rss
+  lang: fr
+  category: science
+  enabled: true
+- id: itmedia
+  name: ITmedia News
+  url: https://rss.itmedia.co.jp/rss/2.0/news_bursts.xml
+  type: rss
+  lang: ja
+  category: tech
+  enabled: true
+- id: engadget_jp
+  name: Engadget Japan
+  url: https://japanese.engadget.com/rss.xml
+  type: rss
+  lang: ja
+  category: tech
+  enabled: true
+- id: nikkei_tech
+  name: Nikkei Asia Technology
+  url: https://asia.nikkei.com/rss/feed/Technology
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: etnews
+  name: ETNews (전자신문)
+  url: https://www.etnews.com/rss/all.xml
+  type: rss
+  lang: ko
+  category: tech
+  enabled: true
+- id: zdnet_kr
+  name: ZDNet Korea
+  url: https://zdnet.co.kr/rss/news/
+  type: rss
+  lang: ko
+  category: tech
+  enabled: true
+- id: ked_global
+  name: Korea Economic Daily Global
+  url: https://www.kedglobal.com/rss/
+  type: rss
+  lang: en
+  category: business
+  enabled: true
+- id: theinvestor_kr
+  name: The Investor (Korea)
+  url: https://www.theinvestor.co.kr/rss_xml.php
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: sbr
+  name: Singapore Business Review
+  url: https://sbr.com.sg/rss.xml
+  type: rss
+  lang: en
+  category: business
+  enabled: true
+- id: businesstimes_sg
+  name: The Business Times (Singapore)
+  url: https://www.businesstimes.com.sg/rss/all-news
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: eu_startups
+  name: EU-Startups
+  url: https://www.eu-startups.com/feed/
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: silicon_republic
+  name: Silicon Republic
+  url: https://www.siliconrepublic.com/feed
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: euronews_business
+  name: Euronews Business
+  url: https://www.euronews.com/rss?level=topic&name=business
+  type: rss
+  lang: en
+  category: business
+  enabled: true
+- id: politico_eu
+  name: POLITICO Europe
+  url: https://www.politico.eu/feed/
+  type: rss
+  lang: en
+  category: world
+  enabled: true
+- id: technode
+  name: TechNode (China Tech)
+  url: https://technode.com/feed/
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: krasia
+  name: KrASIA (Asia Tech)
+  url: https://kr-asia.com/feed
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: caixin_global
+  name: Caixin Global
+  url: https://www.caixinglobal.com/rss/caixin_en.xml
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: chinadaily_biz
+  name: China Daily Business
+  url: https://www.chinadaily.com.cn/rss/bizchina_rss.xml
+  type: rss
+  lang: en
+  category: business
+  enabled: true
+- id: scmp_tech
+  name: South China Morning Post Tech
+  url: https://www.scmp.com/rss/5/feed
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: scmp_economy
+  name: South China Morning Post Economy
+  url: https://www.scmp.com/rss/91/feed
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: nyt_world
+  name: NYT World News
+  url: https://rss.nytimes.com/services/xml/rss/nyt/World.xml
+  type: rss
+  lang: en
+  category: world
+  enabled: true
+- id: nyt_tech
+  name: NYT Technology
+  url: https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: nyt_business
+  name: NYT Business
+  url: https://rss.nytimes.com/services/xml/rss/nyt/Business.xml
+  type: rss
+  lang: en
+  category: business
+  enabled: true
+- id: nyt_science
+  name: NYT Science
+  url: https://rss.nytimes.com/services/xml/rss/nyt/Science.xml
+  type: rss
+  lang: en
+  category: science
+  enabled: true
+- id: nyt_politics
+  name: NYT Politics
+  url: https://rss.nytimes.com/services/xml/rss/nyt/Politics.xml
+  type: rss
+  lang: en
+  category: politics
+  enabled: true
+- id: yahoo_finance
+  name: Yahoo Finance
+  url: https://finance.yahoo.com/news/rssindex
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: politico_us
+  name: Politico US Politics
+  url: https://rss.politico.com/politics-news.xml
+  type: rss
+  lang: en
+  category: politics
+  enabled: true
+- id: mashable_tech
+  name: Mashable Tech
+  url: https://mashable.com/feeds/rss/tech
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: coindesk
+  name: CoinDesk
+  url: https://www.coindesk.com/arc/outboundfeeds/rss/
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: cointelegraph
+  name: Cointelegraph
+  url: https://cointelegraph.com/rss
+  type: rss
+  lang: en
+  category: finance
+  enabled: true
+- id: the_hill
+  name: The Hill (Politics)
+  url: https://thehill.com/feed/
+  type: rss
+  lang: en
+  category: politics
+  enabled: true
+- id: huffpost_politics
+  name: HuffPost Politics
+  url: https://www.huffpost.com/section/politics/feed
+  type: rss
+  lang: en
+  category: politics
+  enabled: true
+- id: reuters_politics
+  name: Reuters Politics
+  url: https://www.reutersagency.com/feed/?best-topics=political-general&post_type=best
+  type: rss
+  lang: en
+  category: politics
+  enabled: true
+- id: tnw
+  name: The Next Web
+  url: https://thenextweb.com/feed
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: gizmodo
+  name: Gizmodo
+  url: https://gizmodo.com/feed
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: hackaday
+  name: Hackaday (Deep Tech)
+  url: https://hackaday.com/blog/feed/
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: quanta_magazine
+  name: Quanta Magazine
+  url: https://api.quantamagazine.org/feed/
+  type: rss
+  lang: en
+  category: science
+  enabled: true
+- id: wired_science
+  name: Wired Science
+  url: https://www.wired.com/feed/category/science/latest/rss
+  type: rss
+  lang: en
+  category: science
+  enabled: true
+- id: un_news
+  name: UN News (LHQ)
+  url: https://news.un.org/feed/subscribe/en/news/all/rss.xml
+  type: rss
+  lang: en
+  category: world
+  enabled: true
+- id: npr_world
+  name: NPR World
+  url: https://feeds.npr.org/1004/rss.xml
+  type: rss
+  lang: en
+  category: world
+  enabled: true
+- id: cnbc_top
+  name: CNBC Top News
+  url: https://www.cnbc.com/id/100003114/device/rss/rss.html
+  type: rss
+  lang: en
+  category: business
+  enabled: true
+- id: fortune_tech
+  name: Fortune Tech & Biz
+  url: https://fortune.com/section/tech/feed/
+  type: rss
+  lang: en
+  category: business
+  enabled: true
+- id: ai_news
+  name: Artificial Intelligence News
+  url: https://www.artificialintelligence-news.com/feed/
+  type: rss
+  lang: en
+  category: ai
+  enabled: true
+- id: kdnuggets
+  name: KDnuggets (Data & AI)
+  url: https://www.kdnuggets.com/feed
+  type: rss
+  lang: en
+  category: ai
+  enabled: true
+- id: marktechpost
+  name: MarkTechPost (AI Research)
+  url: https://www.marktechpost.com/feed/
+  type: rss
+  lang: en
+  category: ai
+  enabled: true
+- id: mit_ai
+  name: MIT Tech Review AI
+  url: https://www.technologyreview.com/topic/artificial-intelligence/feed/
+  type: rss
+  lang: en
+  category: ai
+  enabled: true
+- id: ign_games
+  name: IGN Games
+  url: https://feeds.ign.com/ign/games-all
+  type: rss
+  lang: en
+  category: gaming
+  enabled: true
+- id: polygon
+  name: Polygon
+  url: https://www.polygon.com/rss/index.xml
+  type: rss
+  lang: en
+  category: gaming
+  enabled: true
+- id: pcgamer
+  name: PC Gamer
+  url: https://www.pcgamer.com/rss/
+  type: rss
+  lang: en
+  category: gaming
+  enabled: true
+- id: kotaku
+  name: Kotaku
+  url: https://kotaku.com/rss
+  type: rss
+  lang: en
+  category: gaming
+  enabled: true
+- id: gamespot
+  name: GameSpot
+  url: https://www.gamespot.com/feeds/mashup/
+  type: rss
+  lang: en
+  category: gaming
+  enabled: true
+- id: baomoi
+  name: Bao Moi
+  url: https://baomoi.com/rss
+  type: rss
+  lang: vi
+  category: world
+  enabled: false
+- id: tuoitre
+  name: Tuoi Tre
+  url: https://tuoitre.vn/rss
+  type: rss
+  lang: vi
+  category: world
+  enabled: false
+- id: tuoitre_kinh_te
+  name: Tuoi Tre Kinh Te
+  url: https://tuoitre.vn/rss/kinh-doanh
+  type: rss
+  lang: vi
+  category: finance
+  enabled: false
