@@ -90,8 +90,6 @@ def build_payload(article: dict, config: dict) -> dict | str:
 
     if mode == "fields":
         fields = config.get("payload_fields", [])
-        if not fields:
-            return build_full_payload(article)
         return build_fields_payload(article, fields)
 
     if mode == "template":

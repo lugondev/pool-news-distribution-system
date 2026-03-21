@@ -54,16 +54,13 @@ def _default_format(article: dict, lang: str = "both") -> str:
 
 
 def _fields_format(article: dict, fields: list[str]) -> str:
-    """Build text from selected fields."""
+    """Build text from selected fields only — no auto-additions."""
     lines = []
     for f in fields:
         val = article.get(f, "")
         if val:
             label = f.replace("_", " ").title()
             lines.append(f"<b>{label}:</b> {_escape(str(val))}")
-    url = article.get("url", "")
-    if url and "url" not in fields:
-        lines.append(f"\n\U0001f517 <a href=\"{url}\">Link</a>")
     return "\n".join(lines) if lines else "(empty)"
 
 
@@ -77,8 +74,7 @@ def build_telegram_text(article: dict, channel_config: dict) -> str:
 
     if mode == "fields":
         fields = channel_config.get("payload_fields", [])
-        if fields:
-            return _fields_format(article, fields)
+        return _fields_format(article, fields)
 
     return _default_format(article, channel_config.get("lang", "both"))
 
