@@ -1,0 +1,110 @@
+app:
+  name: News Aggregator
+  debug: false
+
+crawler:
+  tick_interval_seconds: 30
+  sources_per_tick: 3
+  default_crawl_interval_minutes: 10
+  backoff_429_minutes: 30
+  backoff_403_minutes: 120
+  request_timeout_seconds: 15
+  max_articles_per_source: 50
+  domain_delay_min: 0.5
+  domain_delay_max: 1.5
+
+categories:
+- id: world
+  name: World News
+  enabled: true
+- id: tech
+  name: Technology
+  enabled: true
+- id: business
+  name: Business
+  enabled: true
+- id: science
+  name: Science
+  enabled: true
+- id: politics
+  name: Politics
+  enabled: true
+- id: finance
+  name: Finance
+  enabled: true
+- id: ai
+  name: Artificial Intelligence
+  enabled: true
+- id: gaming
+  name: Gaming
+  enabled: true
+
+dedup:
+  simhash_distance_threshold: 3
+  title_min_length: 10
+  ai_simhash_distance_threshold: 6
+
+storage:
+  redis_ttl_hours: 12
+  redis_feed_key: news:feed
+  redis_dedup_key: news:dedup:simhashes
+
+ai:
+  enabled: true
+  api_key: YOUR_OPENAI_COMPATIBLE_API_KEY   # e.g. sk-or-v1-... (OpenRouter) or sk-... (OpenAI)
+  base_url: https://openrouter.ai/api/v1    # or https://api.openai.com/v1
+  model: openai/gpt-4.1-nano               # model ID as accepted by the provider
+  tone: formal                              # formal | casual | general
+  interval_minutes: 2
+  temperature: 0.3
+  batch_size: 10
+  max_tokens_summary: 300
+  retry_attempts: 3
+  output_languages:
+  - vi
+  - en
+
+webhook:
+  endpoints:
+  - id: example
+    name: Example Webhook
+    url: https://your-webhook-url.com/news
+    enabled: false
+    retry_attempts: 3
+    retry_delay_seconds: 5
+    timeout_seconds: 10
+    payload_mode: full          # full | fields | template
+    payload_fields: []          # used when payload_mode: fields
+    payload_template: ''        # Jinja2 template string, used when payload_mode: template
+    filter_categories_mode: all # all | include | exclude
+    filter_categories: []
+    filter_sources_mode: all    # all | include | exclude
+    filter_sources: []
+    rate_limit_max: 0           # 0 = unlimited
+    rate_limit_window_minutes: 60
+
+telegram:
+  channels:
+  - id: my-channel
+    name: My Channel
+    bot_token: YOUR_TELEGRAM_BOT_TOKEN   # get from @BotFather
+    chat_id: 'YOUR_CHAT_ID'             # e.g. -1001234567890 for supergroups
+    lang: vi                             # vi | en | both
+    enabled: false
+    retry_attempts: 3
+    timeout_seconds: 10
+    payload_mode: fields        # full | fields | template
+    payload_fields:
+    - ai_summary_vi
+    payload_template: ''
+    filter_categories_mode: all
+    filter_categories: []
+    filter_sources_mode: all
+    filter_sources: []
+    rate_limit_max: 0
+    rate_limit_window_minutes: 60
+
+dashboard:
+  host: 0.0.0.0
+  port: 8000
+  auto_refresh_seconds: 30
