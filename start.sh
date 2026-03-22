@@ -4,6 +4,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# ── Args ───────────────────────────────────────────────────────────────────────
+DEV_MODE=0
+for arg in "$@"; do
+    case "$arg" in
+        --dev) DEV_MODE=1 ;;
+    esac
+done
+
 # ── Colors ────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
@@ -50,5 +58,10 @@ if [ ! -f ".env" ] && [ -f ".env.example" ]; then
 fi
 
 # ── Start ─────────────────────────────────────────────────────────────────────
+if [ "$DEV_MODE" = "1" ]; then
+    warn "DEV MODE — crawler/AI scheduler disabled. Dashboard only (port 8001)."
+    export DEV_MODE=1
+    export DEV_PORT=8001
+fi
 info "Starting News Aggregator on http://0.0.0.0:8000 ..."
 exec python main.py

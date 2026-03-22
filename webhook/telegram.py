@@ -18,6 +18,8 @@ TELEGRAM_API = "https://api.telegram.org/bot{token}/sendMessage"
 CATEGORY_EMOJI = {
     "finance": "\U0001f4b0", "world": "\U0001f30d", "tech": "\U0001f4bb",
     "business": "\U0001f4bc", "politics": "\U0001f3db", "science": "\U0001f52c",
+    "ai": "\U0001f916", "gaming": "\U0001f3ae", "sports": "\U000026bd",
+    "esports": "\U0001f3f9", "entertainment": "\U0001f3ac", "music": "\U0001f3b5",
 }
 
 

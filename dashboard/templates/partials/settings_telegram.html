@@ -123,7 +123,7 @@ function loadFilterOptions() {
         </button>
         <button class="btn btn-sm btn-edit"
                 hx-post="/telegram/{{ ch.id }}/test"
-                hx-target="#tg-test-result-{{ ch.id }}"
+                hx-target="next .tg-test-result"
                 hx-swap="innerHTML">
           Test
         </button>
@@ -145,7 +145,7 @@ function loadFilterOptions() {
       {% if src_mode != 'all' and ch.filter_sources %} · Src {{ src_mode }}: <b>{{ ch.filter_sources|join(', ') }}</b>{% endif %}
       {% if ch.rate_limit_max %} · Rate: <b>{{ ch.rate_limit_max }}/{{ ch.rate_limit_window_minutes or 60 }}min</b>{% endif %}
     </div>
-    <div id="tg-test-result-{{ ch.id }}" style="margin-top:4px;font-size:11px"></div>
+    <div class="tg-test-result" style="margin-top:4px;font-size:11px"></div>
 
     <form class="wh-edit-form" id="tg-edit-{{ ch.id }}" style="display:none"
           hx-put="/telegram/{{ ch.id }}"
@@ -253,11 +253,11 @@ function loadFilterOptions() {
       </div>
       <div class="form-group">
         <label>Bot Token <span class="hint">— from @BotFather</span></label>
-        <input type="text" name="bot_token" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" required>
+        <input type="text" id="tg-add-bot-token" name="bot_token" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" required>
       </div>
       <div class="form-group">
         <label>Chat ID <span class="hint">— channel: -100xxx, group: -xxx, user: positive number</span></label>
-        <input type="text" name="chat_id" placeholder="-1001234567890" required>
+        <input type="text" id="tg-add-chat-id" name="chat_id" placeholder="-1001234567890" required>
       </div>
       <div class="form-row-3">
         <div class="form-group">
@@ -321,8 +321,16 @@ function loadFilterOptions() {
           </div>
         </div>
       </div>
-      <div class="form-actions" style="margin-top:10px">
+      <div class="form-actions" style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button type="submit" class="btn btn-primary">Add Channel</button>
+        <button type="button" class="btn btn-outline"
+                hx-post="/telegram/test-connection"
+                hx-target="#tg-add-test-result"
+                hx-swap="innerHTML"
+                hx-include="#tg-add-bot-token, #tg-add-chat-id">
+          Test Connection
+        </button>
+        <span id="tg-add-test-result" style="font-size:12px"></span>
       </div>
     </form>
   </div>

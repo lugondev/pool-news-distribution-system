@@ -1099,3 +1099,217 @@ sources:
   lang: en
   category: science
   enabled: true
+# --- SPORTS ---
+- id: espn
+  name: ESPN
+  url: https://www.espn.com/espn/rss/news
+  type: rss
+  lang: en
+  category: sports
+  enabled: true
+- id: yahoo_sports
+  name: Yahoo Sports
+  url: https://sports.yahoo.com/rss/
+  type: rss
+  lang: en
+  category: sports
+  enabled: true
+- id: bbc_sport
+  name: BBC Sport
+  url: http://feeds.bbci.co.uk/sport/rss.xml
+  type: rss
+  lang: en
+  category: sports
+  enabled: true
+- id: sky_sports
+  name: Sky Sports
+  url: http://feeds.skynews.com/feeds/rss/sports.xml
+  type: rss
+  lang: en
+  category: sports
+  enabled: true
+- id: sportskeeda
+  name: Sportskeeda
+  url: https://www.sportskeeda.com/feed
+  type: rss
+  lang: en
+  category: sports
+  enabled: true
+- id: goal_com
+  name: Goal.com Football
+  url: https://www.goal.com/feeds/en/news
+  type: rss
+  lang: en
+  category: sports
+  enabled: true
+- id: fourfourtwo
+  name: FourFourTwo (Football)
+  url: https://www.fourfourtwo.com/rss
+  type: rss
+  lang: en
+  category: sports
+  enabled: true
+- id: cbs_sports
+  name: CBS Sports
+  url: https://www.cbssports.com/rss/headlines/
+  type: rss
+  lang: en
+  category: sports
+  enabled: true
+# --- ESPORTS ---
+- id: dot_esports
+  name: Dot Esports
+  url: https://dotesports.com/feed
+  type: rss
+  lang: en
+  category: esports
+  enabled: true
+- id: esports_insider
+  name: Esports Insider
+  url: https://esportsinsider.com/feed
+  type: rss
+  lang: en
+  category: esports
+  enabled: true
+- id: dexerto
+  name: Dexerto
+  url: https://www.dexerto.com/feed/
+  type: rss
+  lang: en
+  category: esports
+  enabled: true
+# --- ENTERTAINMENT ---
+- id: variety
+  name: Variety
+  url: https://variety.com/feed/
+  type: rss
+  lang: en
+  category: entertainment
+  enabled: true
+- id: hollywood_reporter
+  name: Hollywood Reporter
+  url: https://www.hollywoodreporter.com/feed
+  type: rss
+  lang: en
+  category: entertainment
+  enabled: true
+- id: entertainment_weekly
+  name: Entertainment Weekly
+  url: https://ew.com/feed
+  type: rss
+  lang: en
+  category: entertainment
+  enabled: true
+- id: guardian_entertainment
+  name: The Guardian Entertainment
+  url: https://www.theguardian.com/tv-and-radio/entertainment/rss
+  type: rss
+  lang: en
+  category: entertainment
+  enabled: true
+- id: indiewire
+  name: IndieWire
+  url: https://www.indiewire.com/feed
+  type: rss
+  lang: en
+  category: entertainment
+  enabled: true
+- id: deadline
+  name: Deadline Hollywood
+  url: https://deadline.com/feed/
+  type: rss
+  lang: en
+  category: entertainment
+  enabled: true
+- id: screen_rant
+  name: Screen Rant
+  url: https://screenrant.com/feed/
+  type: rss
+  lang: en
+  category: entertainment
+  enabled: true
+- id: soompi
+  name: Soompi (Kpop / K-drama)
+  url: https://www.soompi.com/feed
+  type: rss
+  lang: en
+  category: entertainment
+  enabled: true
+- id: koreaboo
+  name: Koreaboo
+  url: https://www.koreaboo.com/feed/
+  type: rss
+  lang: en
+  category: entertainment
+  enabled: true
+- id: oricon_news
+  name: Oricon News (Japan)
+  url: https://www.oricon.co.jp/rss/news.xml
+  type: rss
+  lang: ja
+  category: entertainment
+  enabled: true
+- id: anime_news_network
+  name: Anime News Network
+  url: https://www.animenewsnetwork.com/all/rss.xml
+  type: rss
+  lang: en
+  category: entertainment
+  enabled: true
+- id: jaynestars
+  name: JayneStars (C-drama / HK)
+  url: https://www.jaynestars.com/feed
+  type: rss
+  lang: en
+  category: entertainment
+  enabled: true
+# --- MUSIC ---
+- id: billboard
+  name: Billboard
+  url: https://www.billboard.com/feed/
+  type: rss
+  lang: en
+  category: music
+  enabled: true
+- id: rolling_stone_music
+  name: Rolling Stone Music
+  url: https://www.rollingstone.com/music/music-news/feed/
+  type: rss
+  lang: en
+  category: music
+  enabled: true
+- id: pitchfork
+  name: Pitchfork
+  url: https://pitchfork.com/feed/rss/
+  type: rss
+  lang: en
+  category: music
+  enabled: true
+- id: nme
+  name: NME
+  url: http://feeds.feedburner.com/nmecom/rss/newsxml
+  type: rss
+  lang: en
+  category: music
+  enabled: true
+- id: resident_advisor
+  name: Resident Advisor (EDM)
+  url: https://ra.co/rss/news
+  type: rss
+  lang: en
+  category: music
+  enabled: true
+- id: consequence_of_sound
+  name: Consequence of Sound
+  url: https://consequenceofsound.net/feed
+  type: rss
+  lang: en
+  category: music
+  enabled: true
+- id: stereogum
+  name: Stereogum
+  url: https://www.stereogum.com/feed/
+  type: rss
+  lang: en
+  category: music
+  enabled: true

@@ -721,6 +721,27 @@ async def telegram_logs_partial(request: Request, page: int = 1, channel_id: str
     })
 
 
+@app.post("/telegram/test-connection", response_class=HTMLResponse)
+async def telegram_test_connection(
+    bot_token: str = Form(...),
+    chat_id: str = Form(...),
+):
+    from webhook.telegram import send_telegram
+    if not bot_token.strip() or not chat_id.strip():
+        return HTMLResponse('<span style="color:var(--red)">Bot token and Chat ID are required</span>')
+    text = (
+        "\u2705 <b>News Aggregator — Test Message</b>\n\n"
+        "If you see this, your Telegram integration is working!"
+    )
+    try:
+        status, ok, error = await send_telegram(bot_token.strip(), chat_id.strip(), text, timeout=10)
+        if ok:
+            return HTMLResponse('<span style="color:var(--green);font-weight:600">&#10003; Test sent!</span>')
+        return HTMLResponse(f'<span style="color:var(--red)">{error}</span>')
+    except Exception as e:
+        return HTMLResponse(f'<span style="color:var(--red)">{e}</span>')
+
+
 @app.post("/telegram/add", response_class=HTMLResponse)
 async def telegram_add(
     request: Request,

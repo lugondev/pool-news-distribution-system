@@ -27,41 +27,49 @@ from storage.sqlite_stats import init_db
 from webhook.dispatcher import dispatch_worker
 
 
+DEV_MODE = os.environ.get("DEV_MODE", "0") == "1"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting News Aggregator...")
+    logger.info("Starting News Aggregator%s...", " [DEV MODE]" if DEV_MODE else "")
     await init_db()
     logger.info("SQLite initialized")
 
     redis = get_redis()
-    with open("config/settings.yaml") as f:
-        _cfg = yaml.safe_load(f)
-    _cr = _cfg.get("crawler", {})
-    _ai = _cfg.get("ai", {})
-    scheduler = get_scheduler(redis)
-    scheduler.start()
-    ci = _cr.get("fetch_interval_minutes", 3)
-    sg = _cr.get("stagger_groups", 3)
-    aim = _ai.get("interval_minutes", 2)
-    logger.info(
-        f"Scheduler started — crawl every {ci}min ({sg} groups, full cycle ~{ci*sg}min), "
-        f"AI every {aim}min (batch {_ai.get('batch_size', 10)})"
-    )
 
-    # Trigger crawl ngay khi start
-    scheduler.get_job("crawl_all").modify(next_run_time=__import__("datetime").datetime.now())
+    _dispatch_task = None
+    scheduler = None
 
-    # Dispatch worker: dequeues webhook/Telegram jobs independently of AI loop
-    _dispatch_task = asyncio.create_task(dispatch_worker())
+    if not DEV_MODE:
+        with open("config/settings.yaml") as f:
+            _cfg = yaml.safe_load(f)
+        _cr = _cfg.get("crawler", {})
+        _ai = _cfg.get("ai", {})
+        scheduler = get_scheduler(redis)
+        scheduler.start()
+        ci = _cr.get("fetch_interval_minutes", 3)
+        sg = _cr.get("stagger_groups", 3)
+        aim = _ai.get("interval_minutes", 2)
+        logger.info(
+            f"Scheduler started — crawl every {ci}min ({sg} groups, full cycle ~{ci*sg}min), "
+            f"AI every {aim}min (batch {_ai.get('batch_size', 10)})"
+        )
+        scheduler.get_job("crawl_all").modify(next_run_time=__import__("datetime").datetime.now())
+        _dispatch_task = asyncio.create_task(dispatch_worker())
+    else:
+        logger.info("DEV MODE: scheduler and dispatch worker skipped")
 
     yield
 
-    _dispatch_task.cancel()
-    try:
-        await _dispatch_task
-    except asyncio.CancelledError:
-        pass
-    scheduler.shutdown(wait=False)
+    if _dispatch_task:
+        _dispatch_task.cancel()
+        try:
+            await _dispatch_task
+        except asyncio.CancelledError:
+            pass
+    if scheduler:
+        scheduler.shutdown(wait=False)
     await redis.aclose()
     logger.info("Shutdown complete")
 
@@ -75,10 +83,11 @@ if __name__ == "__main__":
         cfg = yaml.safe_load(f)
     dash_cfg = cfg.get("dashboard", {})
 
+    port = int(os.environ.get("DEV_PORT", dash_cfg.get("port", 8000)))
     uvicorn.run(
         "main:dashboard_app",
         host=dash_cfg.get("host", "0.0.0.0"),
-        port=dash_cfg.get("port", 8000),
+        port=port,
         reload=False,
         log_level="info",
     )
