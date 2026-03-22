@@ -993,3 +993,109 @@ sources:
   lang: vi
   category: finance
   enabled: false
+# --- NEW: Tech / Gaming / AI (added 2026-03-22) ---
+- id: techmeme
+  name: Techmeme
+  url: https://www.techmeme.com/feed.xml
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: techxplore_ai
+  name: TechXplore AI
+  url: https://techxplore.com/rss-feed/ai-news/
+  type: rss
+  lang: en
+  category: ai
+  enabled: true
+- id: sifted
+  name: Sifted (EU Startups)
+  url: https://sifted.eu/feed
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: bbc_tech
+  name: BBC Technology
+  url: http://feeds.bbci.co.uk/news/technology/rss.xml
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: gamesindustry
+  name: GamesIndustry.biz
+  url: https://www.gamesindustry.biz/rss
+  type: rss
+  lang: en
+  category: gaming
+  enabled: true
+- id: asiatimes
+  name: Asia Times
+  url: https://asiatimes.com/feed
+  type: rss
+  lang: en
+  category: world
+  enabled: true
+- id: e27
+  name: e27 (Startup Asia)
+  url: https://e27.co/feed
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: akihabara_news
+  name: Akihabara News
+  url: https://akihabaranews.com/feed
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: touchlab_jp
+  name: Touch Lab (Apple Japan)
+  url: https://touchlab.jp/feed
+  type: rss
+  lang: ja
+  category: tech
+  enabled: true
+- id: korea_it_news
+  name: Korea IT News
+  url: http://www.koreaitnews.com/rss.xml
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: inven_kr
+  name: Inven (Gaming Korea)
+  url: https://www.inven.co.kr/webzine/rss/
+  type: rss
+  lang: ko
+  category: gaming
+  enabled: true
+- id: pandaily
+  name: Pandaily (China Startup/AI)
+  url: https://pandaily.com/feed
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: pingwest
+  name: PingWest
+  url: https://en.pingwest.com/feed
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: chinatechnews
+  name: ChinaTechNews
+  url: https://www.chinatechnews.com/feed
+  type: rss
+  lang: en
+  category: tech
+  enabled: true
+- id: science_japan
+  name: Science Japan (JST)
+  url: https://sj.jst.go.jp/feed/rss.xml
+  type: rss
+  lang: en
+  category: science
+  enabled: true
