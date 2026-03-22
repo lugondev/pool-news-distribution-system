@@ -3,8 +3,8 @@ app:
   debug: false
 
 crawler:
-  tick_interval_seconds: 30
-  sources_per_tick: 3
+  tick_interval_seconds: 20
+  sources_per_tick: 10
   default_crawl_interval_minutes: 10
   backoff_429_minutes: 30
   backoff_403_minutes: 120
