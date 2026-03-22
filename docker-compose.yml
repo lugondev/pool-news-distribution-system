@@ -1,0 +1,35 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      SQLITE_PATH: /app/data/stats.db
+    volumes:
+      # Persist SQLite DB
+      - ./data:/app/data
+      # Mount config so you can edit without rebuilding the image
+      - ./config:/app/config:ro
+      # Optional: mount .env if you use one
+      # - ./.env:/app/.env:ro
+
+volumes:
+  redis_data:
