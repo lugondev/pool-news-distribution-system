@@ -1,0 +1,10 @@
+{
+  "name": "news-aggregator-defuddle",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Node.js worker for defuddle content extraction",
+  "dependencies": {
+    "defuddle": "^0.14.0",
+    "jsdom": "^25.0.0"
+  }
+}

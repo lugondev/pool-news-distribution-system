@@ -98,6 +98,11 @@ async def get_article(redis: aioredis.Redis, article_id: str) -> dict | None:
     return {k.decode(): v.decode() for k, v in data.items()}
 
 
+async def update_article_content(redis: aioredis.Redis, article_id: str, content: str) -> None:
+    """Update content field for an existing article (used by defuddle enrichment)."""
+    await redis.hset(f"news:{article_id}", "content", content)
+
+
 async def update_article_ai(
     redis: aioredis.Redis,
     article_id: str,

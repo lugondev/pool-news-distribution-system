@@ -13,9 +13,10 @@ from urllib.parse import urlparse
 import httpx
 import redis.asyncio as aioredis
 
+from crawler.content_extractor import enrich_article_content, needs_enrichment
 from crawler.dedup import check_duplicate
-from crawler.rss_parser import Article, parse_rss_feed
-from storage.redis_store import save_article, set_source_next_crawl
+from crawler.rss_parser import Article, _make_article_id, parse_rss_feed
+from storage.redis_store import get_article, save_article, set_source_next_crawl, update_article_content
 from storage.sqlite_stats import log_crawl_result
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,7 @@ async def fetch_source(
     dedup_threshold: int = 3,
     max_articles: int = 50,
     domain_delay: tuple[float, float] = (1.0, 3.0),
+    enrich_content: bool = True,
 ) -> dict:
     """
     Crawl 1 source: per-domain lock → random delay → fetch → parse → dedup → save.
@@ -107,7 +109,22 @@ async def fetch_source(
                 result = await check_duplicate(redis, article.title, threshold=dedup_threshold)
                 if result.is_duplicate:
                     stats["duplicates"] += 1
+                    # Enrich existing Redis article if its content is still thin
+                    if enrich_content and needs_enrichment(article.content, article.summary):
+                        article_id = _make_article_id(source["id"], article.url)
+                        existing = await get_article(redis, article_id)
+                        if existing and needs_enrichment(existing.get("content", ""), existing.get("summary", "")):
+                            enriched = await enrich_article_content(
+                                article.url, existing.get("content", ""), existing.get("summary", ""), client
+                            )
+                            if enriched != existing.get("content", ""):
+                                await update_article_content(redis, article_id, enriched)
                     continue
+
+                if enrich_content:
+                    article.content = await enrich_article_content(
+                        article.url, article.content, article.summary, client
+                    )
 
                 await save_article(redis, article)
                 stats["saved"] += 1
