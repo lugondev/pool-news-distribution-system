@@ -88,8 +88,9 @@ function loadFilterOptions() {
 <div class="panel-inner">
   <h3>Webhook Delivery</h3>
   <p class="desc">
-    After AI summarization, each processed article is POSTed as JSON to all enabled webhook endpoints.
-    Each endpoint has its own URL, retry, and timeout config.
+    After AI summarization, each processed article is sent to all enabled webhook endpoints.
+    <b>POST</b> sends JSON body (or raw text for template mode). <b>GET</b> sends query params.
+    Configure method, retry, timeout, and payload format per endpoint.
   </p>
 
   {% if success %}
@@ -115,6 +116,7 @@ function loadFilterOptions() {
         {% endif %}
       </div>
       <div class="wh-actions">
+        <button class="btn btn-sm btn-test" onclick="testWebhook('{{ ep.id }}')">Test</button>
         <button class="btn btn-sm btn-toggle"
                 hx-post="/webhooks/{{ ep.id }}/toggle"
                 hx-target="#tab-panel-webhook" hx-swap="innerHTML">
@@ -130,8 +132,12 @@ function loadFilterOptions() {
       </div>
     </div>
     <div class="wh-url">{{ ep.url }}</div>
+    
+    <!-- Test result (initially hidden) -->
+    <div id="test-result-{{ ep.id }}" class="test-result" style="display:none;margin-top:8px;padding:8px;border-radius:4px;font-size:12px"></div>
+    
     <div class="wh-meta">
-      Retry: {{ ep.retry_attempts or 3 }}x · Delay: {{ ep.retry_delay_seconds or 5 }}s · Timeout: {{ ep.timeout_seconds or 10 }}s
+      Method: <b>{{ ep.http_method or 'POST' }}</b> · Retry: {{ ep.retry_attempts or 3 }}x · Delay: {{ ep.retry_delay_seconds or 5 }}s · Timeout: {{ ep.timeout_seconds or 10 }}s
       · Payload: <b>{{ ep.payload_mode or 'full' }}</b>{% if ep.payload_mode == 'fields' and ep.payload_fields %} ({{ ep.payload_fields|join(', ') }}){% endif %}
       {% set cat_mode = ep.filter_categories_mode or 'all' %}{% set src_mode = ep.filter_sources_mode or 'all' %}
       {% if cat_mode != 'all' and ep.filter_categories %} · Cat {{ cat_mode }}: <b>{{ ep.filter_categories|join(', ') }}</b>{% endif %}
@@ -149,9 +155,24 @@ function loadFilterOptions() {
           <input type="text" name="name" value="{{ ep.name }}" required>
         </div>
         <div class="form-group">
-          <label>URL</label>
-          <input type="url" name="url" value="{{ ep.url }}" required>
+          <label>HTTP Method</label>
+          <select name="http_method">
+            <option value="POST" {{ 'selected' if (ep.http_method or 'POST') == 'POST' }}>POST</option>
+            <option value="GET" {{ 'selected' if ep.http_method == 'GET' }}>GET</option>
+          </select>
         </div>
+        <div class="form-group">
+          <label>Content-Type</label>
+          <select name="content_type">
+            <option value="application/json" {{ 'selected' if (ep.content_type or 'application/json') == 'application/json' }}>application/json</option>
+            <option value="text/plain" {{ 'selected' if ep.content_type == 'text/plain' }}>text/plain</option>
+            <option value="application/x-www-form-urlencoded" {{ 'selected' if ep.content_type == 'application/x-www-form-urlencoded' }}>application/x-www-form-urlencoded</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>URL</label>
+        <input type="url" name="url" value="{{ ep.url }}" required>
       </div>
       <div class="form-row-3">
         <div class="form-group">
@@ -237,9 +258,26 @@ function loadFilterOptions() {
           <input type="text" name="name" placeholder="e.g. Slack Alerts" required>
         </div>
       </div>
-      <div class="form-group">
-        <label>URL</label>
-        <input type="url" name="url" placeholder="https://hooks.slack.com/services/..." required>
+      <div class="form-row-3">
+        <div class="form-group">
+          <label>URL</label>
+          <input type="url" name="url" placeholder="https://hooks.slack.com/services/..." required>
+        </div>
+        <div class="form-group">
+          <label>HTTP Method</label>
+          <select name="http_method">
+            <option value="POST" selected>POST</option>
+            <option value="GET">GET</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Content-Type</label>
+          <select name="content_type">
+            <option value="application/json" selected>application/json</option>
+            <option value="text/plain">text/plain</option>
+            <option value="application/x-www-form-urlencoded">application/x-www-form-urlencoded</option>
+          </select>
+        </div>
       </div>
       <div class="form-row-3">
         <div class="form-group">
@@ -310,7 +348,7 @@ function loadFilterOptions() {
   <!-- Payload format -->
   <p class="section-title">Payload Format</p>
   <div class="payload-box">
-    <span class="comment">// POST to each enabled endpoint | Content-Type: application/json</span><br>
+    <span class="comment">// POST mode: Content-Type: application/json (default)</span><br>
     {<br>
     &nbsp;&nbsp;<span class="key">"id"</span>: <span class="str">"a1b2c3d4e5f6..."</span>,<br>
     &nbsp;&nbsp;<span class="key">"source_id"</span>: <span class="str">"techcrunch"</span>,<br>
@@ -325,7 +363,9 @@ function loadFilterOptions() {
     &nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"en"</span>: <span class="str">"English summary..."</span><br>
     &nbsp;&nbsp;},<br>
     &nbsp;&nbsp;<span class="key">"sent_at"</span>: <span class="str">"2026-03-20T10:35:00+00:00"</span><br>
-    }
+    }<br><br>
+    <span class="comment">// GET mode: sends as query parameters</span><br>
+    <span class="comment">// Template mode: renders custom Jinja2 template (POST = raw text body, GET = ?message=...)</span><br>
   </div>
 
 </div>
@@ -349,5 +389,100 @@ function loadFilterOptions() {
     if (fc) fc.style.display = mode === 'fields' ? '' : 'none';
     if (tc) tc.style.display = mode === 'template' ? '' : 'none';
   }
+  
+  function testWebhook(id) {
+    var resultDiv = document.getElementById('test-result-' + id);
+    var btn = event.target;
+    
+    // Show loading state
+    btn.disabled = true;
+    btn.textContent = 'Testing...';
+    resultDiv.style.display = '';
+    resultDiv.style.background = '#2a2d3e';
+    resultDiv.style.color = '#94a3b8';
+    resultDiv.style.border = '1px solid #3a3d4e';
+    resultDiv.innerHTML = '⏳ Sending test request...';
+    
+    // Send test request
+    fetch('/api/webhooks/' + id + '/test', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'}
+    })
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+      btn.disabled = false;
+      btn.textContent = 'Test';
+      
+      if (data.ok) {
+        resultDiv.style.background = '#10403b';
+        resultDiv.style.color = '#34d399';
+        resultDiv.style.border = '1px solid #065f46';
+        var html = '<strong>' + data.message + '</strong>';
+        html += '<div style="margin-top:8px;font-size:11px;color:#94a3b8">';
+        html += '<div><strong>Request:</strong> ' + data.method + ' → ' + data.url + '</div>';
+        html += '<div><strong>Content-Type:</strong> ' + data.content_type + ' | <strong>Payload Mode:</strong> ' + data.payload_mode + '</div>';
+        html += '<div><strong>Status:</strong> ' + data.status_code + ' | <strong>Time:</strong> ' + data.elapsed_ms + 'ms</div>';
+        if (data.payload) {
+          html += '<details style="margin-top:6px"><summary style="cursor:pointer;color:#60a5fa">📄 Payload Sent</summary>';
+          html += '<pre style="background:#1e2130;padding:8px;border-radius:4px;font-size:10px;margin-top:4px;overflow-x:auto;max-height:200px">' + escapeHtml(data.payload) + '</pre></details>';
+        }
+        if (data.response_body) {
+          html += '<details style="margin-top:6px"><summary style="cursor:pointer;color:#60a5fa">📩 Response Body</summary>';
+          html += '<pre style="background:#1e2130;padding:8px;border-radius:4px;font-size:10px;margin-top:4px;overflow-x:auto;max-height:200px">' + escapeHtml(data.response_body) + '</pre></details>';
+        }
+        html += '</div>';
+        resultDiv.innerHTML = html;
+      } else {
+        resultDiv.style.background = '#3e1010';
+        resultDiv.style.color = '#f87171';
+        resultDiv.style.border = '1px solid #7f1d1d';
+        var html = '<strong>' + data.message + '</strong>';
+        html += '<div style="margin-top:8px;font-size:11px;color:#fca5a5">';
+        if (data.method && data.url) {
+          html += '<div><strong>Request:</strong> ' + data.method + ' → ' + data.url + '</div>';
+        }
+        if (data.status_code) {
+          html += '<div><strong>Status:</strong> ' + data.status_code + ' | <strong>Time:</strong> ' + data.elapsed_ms + 'ms</div>';
+        }
+        if (data.error) {
+          html += '<div style="margin-top:6px"><strong>Error:</strong> ' + escapeHtml(data.error) + '</div>';
+        }
+        if (data.payload) {
+          html += '<details style="margin-top:6px"><summary style="cursor:pointer;color:#fca5a5">📄 Payload Sent</summary>';
+          html += '<pre style="background:#1e2130;padding:8px;border-radius:4px;font-size:10px;margin-top:4px;overflow-x:auto;max-height:200px">' + escapeHtml(data.payload) + '</pre></details>';
+        }
+        if (data.response_body) {
+          html += '<details style="margin-top:6px"><summary style="cursor:pointer;color:#fca5a5">📩 Response Body</summary>';
+          html += '<pre style="background:#1e2130;padding:8px;border-radius:4px;font-size:10px;margin-top:4px;overflow-x:auto;max-height:200px">' + escapeHtml(data.response_body) + '</pre></details>';
+        }
+        html += '</div>';
+        resultDiv.innerHTML = html;
+      }
+      
+      // Auto-hide after 15 seconds
+      setTimeout(function() {
+        resultDiv.style.display = 'none';
+      }, 15000);
+    })
+    .catch(function(error) {
+      btn.disabled = false;
+      btn.textContent = 'Test';
+      resultDiv.style.background = '#3e1010';
+      resultDiv.style.color = '#f87171';
+      resultDiv.style.border = '1px solid #7f1d1d';
+      resultDiv.innerHTML = '✗ Test failed: ' + error.message;
+      
+      setTimeout(function() {
+        resultDiv.style.display = 'none';
+      }, 10000);
+    });
+  }
+
+  function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+  
   loadFilterOptions();
 </script>

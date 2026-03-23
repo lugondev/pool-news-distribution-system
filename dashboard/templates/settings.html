@@ -158,6 +158,9 @@
     .wh-add { background: var(--bg); border: 1px dashed var(--border); border-radius: 6px; padding: 16px; margin-top: 12px; }
 
     .btn-sm { padding: 4px 10px; font-size: 11px; border-radius: 4px; }
+    .btn-test { background: transparent; border: 1px solid var(--yellow); color: var(--yellow); cursor: pointer; transition: all .15s; }
+    .btn-test:hover { background: var(--yellow); color: var(--bg); }
+    .btn-test:disabled { opacity: 0.5; cursor: not-allowed; }
     .btn-toggle { background: transparent; border: 1px solid var(--border); color: var(--muted); cursor: pointer; transition: all .15s; }
     .btn-toggle:hover { border-color: var(--accent); color: var(--accent); }
     .btn-edit { background: transparent; border: 1px solid var(--accent); color: var(--accent); cursor: pointer; transition: all .15s; }
@@ -168,6 +171,8 @@
     .btn-save:hover { opacity: 0.85; }
     .btn-cancel { background: transparent; border: 1px solid var(--border); color: var(--muted); cursor: pointer; transition: all .15s; }
     .btn-cancel:hover { border-color: var(--text); color: var(--text); }
+    
+    .test-result { transition: all .3s; }
 
     /* Log pagination */
     .log-pagination { display: flex; align-items: center; justify-content: space-between; margin-top: 12px;
@@ -199,7 +204,12 @@
 
   <div class="container">
     <div class="tabs" id="settings-tabs">
-      <button class="tab active" id="tab-ai"
+      <button class="tab active" id="tab-general"
+              onclick="switchTab('general')">
+        General
+        <span class="tab-indicator" id="tab-general-dot"></span>
+      </button>
+      <button class="tab" id="tab-ai"
               onclick="switchTab('ai')">
         AI Summarization
         <span class="tab-indicator" id="tab-ai-dot"></span>
@@ -217,9 +227,16 @@
     </div>
 
     <div class="tab-content">
-      <div id="tab-panel-ai"
-           hx-get="/partials/settings-ai"
+      <div id="tab-panel-general"
+           hx-get="/partials/settings-general"
            hx-trigger="load once"
+           hx-swap="innerHTML">
+        <div class="panel-inner"><p style="color:var(--muted);font-size:12px">Loading general settings...</p></div>
+      </div>
+
+      <div id="tab-panel-ai" style="display:none"
+           hx-get="/partials/settings-ai"
+           hx-trigger="revealed once"
            hx-swap="innerHTML">
         <div class="panel-inner"><p style="color:var(--muted);font-size:12px">Loading AI settings...</p></div>
       </div>
@@ -241,7 +258,7 @@
   </div>
 
   <script>
-    var tabNames = ['ai', 'webhook', 'telegram'];
+    var tabNames = ['general', 'ai', 'webhook', 'telegram'];
     function switchTab(name) {
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
       document.getElementById('tab-' + name).classList.add('active');
@@ -254,9 +271,9 @@
     // Restore last active tab on load
     (function() {
       var saved = localStorage.getItem('settings_tab');
-      if (saved && tabNames.indexOf(saved) !== -1 && saved !== 'ai') {
-        document.getElementById('tab-ai').classList.remove('active');
-        document.getElementById('tab-panel-ai').style.display = 'none';
+      if (saved && tabNames.indexOf(saved) !== -1 && saved !== 'general') {
+        document.getElementById('tab-general').classList.remove('active');
+        document.getElementById('tab-panel-general').style.display = 'none';
         document.getElementById('tab-' + saved).classList.add('active');
         var panel = document.getElementById('tab-panel-' + saved);
         panel.style.display = '';

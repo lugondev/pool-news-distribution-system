@@ -24,8 +24,8 @@ services:
     volumes:
       # Persist SQLite DB
       - ./data:/app/data
-      # Mount config so you can edit without rebuilding the image
-      - ./config:/app/config:ro
+      # Mount config (read-write) so the app can update settings from UI
+      - ./config:/app/config
       # Optional: mount .env if you use one
       # - ./.env:/app/.env:ro
 

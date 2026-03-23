@@ -1,6 +1,8 @@
 """
 JSON API router — full CRUD for sources, categories, webhooks, AI settings, logs, and health.
 """
+
+import json
 import logging
 import math
 import os
@@ -50,7 +52,13 @@ def _read_sources() -> list[dict]:
 
 def _write_sources(sources: list[dict]) -> None:
     with open(SOURCES_PATH, "w") as f:
-        yaml.dump({"sources": sources}, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        yaml.dump(
+            {"sources": sources},
+            f,
+            default_flow_style=False,
+            allow_unicode=True,
+            sort_keys=False,
+        )
 
 
 def _read_settings() -> dict:
@@ -79,6 +87,7 @@ def _get_redis() -> aioredis.Redis:
 
 # ── Health ───────────────────────────────────────────────────────────────────
 
+
 @router.get("/health")
 async def health():
     r = _get_redis()
@@ -91,6 +100,7 @@ async def health():
 
 
 # ── Articles ─────────────────────────────────────────────────────────────────
+
 
 def _format_article(a: dict) -> dict:
     """Normalize and expose both time fields clearly."""
@@ -145,7 +155,7 @@ async def list_news(
     if lang or ai_status:
         slice_offset = (page - 1) * limit
         total = len(articles)
-        articles = articles[slice_offset: slice_offset + limit]
+        articles = articles[slice_offset : slice_offset + limit]
     else:
         total_pages = max(1, math.ceil(total / limit))
 
@@ -171,11 +181,16 @@ async def list_news(
 
 
 @router.get("/articles")
-async def list_articles(limit: int = 50, offset: int = 0, source: str = None, category: str = None):
+async def list_articles(
+    limit: int = 50, offset: int = 0, source: str = None, category: str = None
+):
     """Legacy endpoint — prefer /api/news for new integrations."""
     articles, total = await get_latest_articles(
-        _get_redis(), limit=min(limit, 200), offset=offset,
-        source_id=source or None, category=category or None,
+        _get_redis(),
+        limit=min(limit, 200),
+        offset=offset,
+        source_id=source or None,
+        category=category or None,
     )
     return {"articles": articles, "count": len(articles), "total": total}
 
@@ -196,6 +211,7 @@ async def list_pending_articles(limit: int = 20):
 
 # ── Stats ────────────────────────────────────────────────────────────────────
 
+
 @router.get("/stats")
 async def stats():
     redis_stats = await get_feed_stats(_get_redis())
@@ -211,6 +227,7 @@ async def dedup_stats():
 
 
 # ── Sources ──────────────────────────────────────────────────────────────────
+
 
 class SourceIn(BaseModel):
     id: str
@@ -237,10 +254,17 @@ async def add_source(body: SourceIn):
     sources = _read_sources()
     if any(s["id"] == body.id for s in sources):
         raise HTTPException(409, f"Source '{body.id}' already exists")
-    sources.append({
-        "id": body.id, "name": body.name, "url": body.url,
-        "type": "rss", "lang": body.lang, "category": body.category, "enabled": True,
-    })
+    sources.append(
+        {
+            "id": body.id,
+            "name": body.name,
+            "url": body.url,
+            "type": "rss",
+            "lang": body.lang,
+            "category": body.category,
+            "enabled": True,
+        }
+    )
     _write_sources(sources)
     logger.info(f"API: source added: {body.id}")
     return {"ok": True, "source": sources[-1]}
@@ -284,6 +308,7 @@ async def delete_source(source_id: str):
 
 
 # ── Categories ───────────────────────────────────────────────────────────────
+
 
 class CategoryIn(BaseModel):
     id: str
@@ -334,6 +359,7 @@ async def delete_category(cat_id: str):
 
 # ── AI Settings ──────────────────────────────────────────────────────────────
 
+
 class AISettingsIn(BaseModel):
     enabled: bool | None = None
     model: str | None = None
@@ -375,22 +401,28 @@ async def update_ai_settings(body: AISettingsIn):
 
 # ── AI Logs ──────────────────────────────────────────────────────────────────
 
+
 @router.get("/logs/ai")
 async def list_ai_logs(page: int = 1, limit: int = LOG_PAGE_SIZE):
     offset = (page - 1) * limit
     logs, total = await get_recent_ai_logs(limit=limit, offset=offset)
     return {
-        "logs": logs, "total": total,
-        "page": page, "total_pages": max(1, math.ceil(total / limit)),
+        "logs": logs,
+        "total": total,
+        "page": page,
+        "total_pages": max(1, math.ceil(total / limit)),
     }
 
 
 # ── Webhooks ─────────────────────────────────────────────────────────────────
 
+
 class WebhookIn(BaseModel):
     id: str
     name: str
     url: str
+    http_method: str = "POST"
+    content_type: str = "application/json"
     retry_attempts: int = 3
     retry_delay_seconds: int = 5
     timeout_seconds: int = 10
@@ -408,6 +440,8 @@ class WebhookIn(BaseModel):
 class WebhookUpdate(BaseModel):
     name: str | None = None
     url: str | None = None
+    http_method: str | None = None
+    content_type: str | None = None
     retry_attempts: int | None = None
     retry_delay_seconds: int | None = None
     timeout_seconds: int | None = None
@@ -443,7 +477,12 @@ async def add_webhook(body: WebhookIn):
     if any(ep["id"] == body.id for ep in endpoints):
         raise HTTPException(409, f"Webhook '{body.id}' already exists")
     ep = {
-        "id": body.id, "name": body.name, "url": body.url, "enabled": True,
+        "id": body.id,
+        "name": body.name,
+        "url": body.url,
+        "enabled": True,
+        "http_method": body.http_method.upper() if body.http_method else "POST",
+        "content_type": body.content_type or "application/json",
         "retry_attempts": max(1, min(body.retry_attempts, 10)),
         "retry_delay_seconds": max(1, min(body.retry_delay_seconds, 60)),
         "timeout_seconds": max(1, min(body.timeout_seconds, 60)),
@@ -469,14 +508,30 @@ async def update_webhook(wh_id: str, body: WebhookUpdate):
     target = next((ep for ep in endpoints if ep["id"] == wh_id), None)
     if not target:
         raise HTTPException(404, "Webhook not found")
-    for field in ("name", "url", "retry_attempts", "retry_delay_seconds", "timeout_seconds",
-                  "payload_mode", "payload_fields", "payload_template",
-                  "filter_categories_mode", "filter_categories",
-                  "filter_sources_mode", "filter_sources",
-                  "rate_limit_max", "rate_limit_window_minutes"):
+    for field in (
+        "name",
+        "url",
+        "http_method",
+        "content_type",
+        "retry_attempts",
+        "retry_delay_seconds",
+        "timeout_seconds",
+        "payload_mode",
+        "payload_fields",
+        "payload_template",
+        "filter_categories_mode",
+        "filter_categories",
+        "filter_sources_mode",
+        "filter_sources",
+        "rate_limit_max",
+        "rate_limit_window_minutes",
+    ):
         val = getattr(body, field, None)
         if val is not None:
-            target[field] = val
+            if field == "http_method":
+                target[field] = val.upper()
+            else:
+                target[field] = val
     _save_webhook_endpoints(endpoints)
     logger.info(f"API: webhook updated: {wh_id}")
     return {"ok": True, "endpoint": target}
@@ -504,19 +559,152 @@ async def delete_webhook(wh_id: str):
     return {"ok": True}
 
 
+@router.post("/webhooks/{wh_id}/test")
+async def test_webhook(wh_id: str):
+    """Test webhook by sending real HTTP request with mock data and return detailed result."""
+    endpoints = _get_webhook_endpoints()
+    target = next((ep for ep in endpoints if ep["id"] == wh_id), None)
+    if not target:
+        raise HTTPException(404, "Webhook not found")
+
+    import time
+    import httpx
+    from webhook.payload import build_payload
+    from webhook.filters import passes_filter
+
+    # Create mock article data with all available fields from real news articles
+    mock_article = {
+        "id": "test_" + str(int(time.time())),
+        "source_id": "bbc-world",
+        "source_name": "BBC World News",
+        "url": "https://www.bbc.com/news/world-test-article-12345",
+        "title": "Global Leaders Meet to Discuss Climate Change Action Plan - Breaking News Update",
+        "summary": "World leaders gathered today at the International Summit to discuss comprehensive measures addressing climate change impacts and sustainable development goals.",
+        "content": "In a historic gathering, representatives from over 150 countries convened to address the pressing challenges of climate change. The summit featured keynote speeches from prominent environmental scientists and policy makers, emphasizing the urgent need for coordinated global action. Key topics included renewable energy adoption, carbon emission reduction targets, and financial support for developing nations.",
+        "lang": "en",
+        "declared_lang": "en",
+        "category": "world",
+        "published_at": "2026-03-24T10:30:00+00:00",
+        "fetched_at": "2026-03-24T10:35:00+00:00",
+        "ai_summary_vi": "Các nhà lãnh đạo thế giới đã họp tại Hội nghị Quốc tế để thảo luận về các biện pháp toàn diện nhằm giải quyết tác động của biến đổi khí hậu và các mục tiêu phát triển bền vững. Hội nghị thượng đỉnh có các bài phát biểu quan trọng từ các nhà khoa học môi trường và nhà hoạch định chính sách nổi tiếng.",
+        "ai_summary_en": "World leaders convened at the International Summit to discuss comprehensive measures addressing climate change impacts and sustainable development goals. The summit featured keynote speeches from prominent environmental scientists and policy makers, emphasizing urgent global action.",
+        "ai_status": "completed",
+    }
+
+    url = target.get("url", "")
+    if not url:
+        raise HTTPException(400, "Webhook URL is empty")
+
+    # Check if article passes filters
+    if not passes_filter(mock_article, target):
+        return {
+            "ok": False,
+            "message": f"✗ Test article filtered out by webhook rules (category or source filter)",
+            "method": target.get("http_method", "POST"),
+            "url": url,
+            "payload_mode": target.get("payload_mode", "full"),
+            "filter_categories_mode": target.get("filter_categories_mode"),
+            "filter_categories": target.get("filter_categories", []),
+            "filter_sources_mode": target.get("filter_sources_mode"),
+            "filter_sources": target.get("filter_sources", []),
+            "article_category": mock_article.get("category"),
+            "article_source": mock_article.get("source_id"),
+        }
+
+    # Build payload
+    payload = build_payload(mock_article, target)
+    method = target.get("http_method", "POST").upper()
+    content_type = target.get("content_type", "application/json")
+    timeout = target.get("timeout_seconds", 10)
+
+    # Log what we're about to send
+    logger.info(f"TEST webhook {wh_id}: {method} {url}")
+    logger.info(
+        f"TEST payload_mode: {target.get('payload_mode')}, content_type: {content_type}"
+    )
+    logger.info(f"TEST payload preview: {str(payload)[:200]}...")
+
+    # Send real HTTP request and wait for response
+    start_time = time.time()
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            if method == "GET":
+                if isinstance(payload, dict):
+                    params = {k: str(v) for k, v in payload.items()}
+                else:
+                    params = {"message": str(payload)}
+                resp = await client.get(url, params=params)
+            else:  # POST
+                if isinstance(payload, str):
+                    resp = await client.post(
+                        url,
+                        content=payload,
+                        headers={"Content-Type": content_type},
+                    )
+                else:
+                    resp = await client.post(url, json=payload)
+
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        success = resp.status_code < 400
+
+        # Get response body (limit to 500 chars)
+        try:
+            response_body = resp.text[:500]
+        except:
+            response_body = "(binary data)"
+
+        logger.info(f"TEST webhook response: {resp.status_code} in {elapsed_ms}ms")
+
+        return {
+            "ok": success,
+            "elapsed_ms": elapsed_ms,
+            "message": f"{'✓' if success else '✗'} Test completed in {elapsed_ms}ms",
+            "method": method,
+            "url": url,
+            "content_type": content_type,
+            "payload_mode": target.get("payload_mode", "full"),
+            "payload": payload
+            if isinstance(payload, str)
+            else json.dumps(payload, ensure_ascii=False)[:500],
+            "status_code": resp.status_code,
+            "response_body": response_body,
+        }
+
+    except Exception as e:
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        logger.error(f"TEST webhook error: {str(e)}")
+        return {
+            "ok": False,
+            "elapsed_ms": elapsed_ms,
+            "message": f"✗ Test failed: {str(e)}",
+            "method": method,
+            "url": url,
+            "content_type": content_type,
+            "payload_mode": target.get("payload_mode", "full"),
+            "payload": payload
+            if isinstance(payload, str)
+            else json.dumps(payload, ensure_ascii=False)[:500],
+            "error": str(e),
+        }
+
+
 # ── Webhook Logs ─────────────────────────────────────────────────────────────
+
 
 @router.get("/logs/webhooks")
 async def list_webhook_logs(page: int = 1, limit: int = LOG_PAGE_SIZE):
     offset = (page - 1) * limit
     logs, total = await get_recent_webhook_logs(limit=limit, offset=offset)
     return {
-        "logs": logs, "total": total,
-        "page": page, "total_pages": max(1, math.ceil(total / limit)),
+        "logs": logs,
+        "total": total,
+        "page": page,
+        "total_pages": max(1, math.ceil(total / limit)),
     }
 
 
 # ── Crawl Logs & Tracing ────────────────────────────────────────────────────
+
 
 @router.get("/logs/crawl")
 async def list_crawl_logs(
@@ -531,13 +719,19 @@ async def list_crawl_logs(
     """Browse crawl logs with flexible filters."""
     offset = (page - 1) * limit
     logs, total = await get_crawl_logs(
-        limit=limit, offset=offset,
-        source_id=source, domain=domain,
-        errors_only=errors_only, http_status=http_status, since=since,
+        limit=limit,
+        offset=offset,
+        source_id=source,
+        domain=domain,
+        errors_only=errors_only,
+        http_status=http_status,
+        since=since,
     )
     return {
-        "logs": logs, "total": total,
-        "page": page, "total_pages": max(1, math.ceil(total / limit)),
+        "logs": logs,
+        "total": total,
+        "page": page,
+        "total_pages": max(1, math.ceil(total / limit)),
     }
 
 
@@ -550,15 +744,19 @@ async def crawl_source_summary(since: str | None = None):
 
 @router.get("/logs/crawl/sources/{source_id}")
 async def crawl_source_detail(
-    source_id: str, page: int = 1, limit: int = LOG_PAGE_SIZE,
+    source_id: str,
+    page: int = 1,
+    limit: int = LOG_PAGE_SIZE,
 ):
     """All crawl logs for a specific source."""
     offset = (page - 1) * limit
     logs, total = await get_crawl_logs(limit=limit, offset=offset, source_id=source_id)
     return {
         "source_id": source_id,
-        "logs": logs, "total": total,
-        "page": page, "total_pages": max(1, math.ceil(total / limit)),
+        "logs": logs,
+        "total": total,
+        "page": page,
+        "total_pages": max(1, math.ceil(total / limit)),
     }
 
 
@@ -584,6 +782,7 @@ async def crawl_timeline(hours: int = 24):
 
 
 # ── Telegram Channels ────────────────────────────────────────────────────────
+
 
 class TelegramChannelIn(BaseModel):
     id: str
@@ -643,9 +842,12 @@ async def add_telegram_channel(body: TelegramChannelIn):
     if any(ch["id"] == body.id for ch in channels):
         raise HTTPException(409, f"Telegram channel '{body.id}' already exists")
     ch = {
-        "id": body.id, "name": body.name,
-        "bot_token": body.bot_token, "chat_id": body.chat_id,
-        "lang": body.lang, "enabled": True,
+        "id": body.id,
+        "name": body.name,
+        "bot_token": body.bot_token,
+        "chat_id": body.chat_id,
+        "lang": body.lang,
+        "enabled": True,
         "retry_attempts": max(1, min(body.retry_attempts, 10)),
         "timeout_seconds": max(1, min(body.timeout_seconds, 60)),
         "payload_mode": body.payload_mode,
@@ -670,11 +872,23 @@ async def update_telegram_channel(ch_id: str, body: TelegramChannelUpdate):
     target = next((ch for ch in channels if ch["id"] == ch_id), None)
     if not target:
         raise HTTPException(404, "Telegram channel not found")
-    for field in ("name", "bot_token", "chat_id", "lang", "retry_attempts", "timeout_seconds",
-                  "payload_mode", "payload_fields", "payload_template",
-                  "filter_categories_mode", "filter_categories",
-                  "filter_sources_mode", "filter_sources",
-                  "rate_limit_max", "rate_limit_window_minutes"):
+    for field in (
+        "name",
+        "bot_token",
+        "chat_id",
+        "lang",
+        "retry_attempts",
+        "timeout_seconds",
+        "payload_mode",
+        "payload_fields",
+        "payload_template",
+        "filter_categories_mode",
+        "filter_categories",
+        "filter_sources_mode",
+        "filter_sources",
+        "rate_limit_max",
+        "rate_limit_window_minutes",
+    ):
         val = getattr(body, field, None)
         if val is not None:
             target[field] = val
@@ -709,6 +923,7 @@ async def delete_telegram_channel(ch_id: str):
 async def test_telegram_channel(ch_id: str):
     """Send a test message to verify bot_token + chat_id work."""
     from webhook.telegram import send_telegram
+
     channels = _get_telegram_channels()
     target = next((ch for ch in channels if ch["id"] == ch_id), None)
     if not target:
@@ -721,7 +936,9 @@ async def test_telegram_channel(ch_id: str):
         "If you see this, your Telegram integration is working!"
     )
     status, ok, error = await send_telegram(
-        target["bot_token"], target["chat_id"], text,
+        target["bot_token"],
+        target["chat_id"],
+        text,
         timeout=target.get("timeout_seconds", 10),
     )
     if ok:
@@ -730,6 +947,7 @@ async def test_telegram_channel(ch_id: str):
 
 
 # ── System Logs ──────────────────────────────────────────────────────────────
+
 
 @router.get("/logs/system")
 async def list_system_logs(
@@ -749,12 +967,17 @@ async def list_system_logs(
     """
     offset = (page - 1) * limit
     logs, total = await get_system_logs(
-        limit=limit, offset=offset,
-        event_type=event_type, status=status, since=since,
+        limit=limit,
+        offset=offset,
+        event_type=event_type,
+        status=status,
+        since=since,
     )
     return {
-        "logs": logs, "total": total,
-        "page": page, "total_pages": max(1, math.ceil(total / limit)),
+        "logs": logs,
+        "total": total,
+        "page": page,
+        "total_pages": max(1, math.ceil(total / limit)),
     }
 
 
@@ -766,6 +989,7 @@ async def system_log_summary(since: str | None = None):
 
 
 # ── API Request Logs ──────────────────────────────────────────────────────────
+
 
 @router.get("/logs/api")
 async def list_api_logs(
@@ -789,13 +1013,19 @@ async def list_api_logs(
     """
     offset = (page - 1) * limit
     logs, total = await get_api_logs(
-        limit=limit, offset=offset,
-        method=method, path=path,
-        status_code=status_code, errors_only=errors_only, since=since,
+        limit=limit,
+        offset=offset,
+        method=method,
+        path=path,
+        status_code=status_code,
+        errors_only=errors_only,
+        since=since,
     )
     return {
-        "logs": logs, "total": total,
-        "page": page, "total_pages": max(1, math.ceil(total / limit)),
+        "logs": logs,
+        "total": total,
+        "page": page,
+        "total_pages": max(1, math.ceil(total / limit)),
     }
 
 
@@ -808,8 +1038,10 @@ async def api_log_summary(since: str | None = None):
 
 # ── Payload Template Validation & Preview ────────────────────────────────────
 
+
 class TemplateValidateIn(BaseModel):
     template: str
+
 
 SAMPLE_ARTICLE = {
     "id": "a1b2c3d4e5f67890",
@@ -834,6 +1066,7 @@ SAMPLE_ARTICLE = {
 async def validate_payload_template(body: TemplateValidateIn):
     """Validate a Jinja2 template and return preview with sample data."""
     from webhook.payload import validate_template, render_template
+
     ok, error = validate_template(body.template)
     if not ok:
         return {"ok": False, "error": error}
@@ -853,14 +1086,27 @@ async def get_filter_options(q: str = ""):
     with open(SOURCES_PATH) as f:
         raw_sources = yaml.safe_load(f).get("sources", [])
     sources = [
-        {"id": s["id"], "name": s.get("name", s["id"]), "category": s.get("category", ""), "lang": s.get("lang", "")}
+        {
+            "id": s["id"],
+            "name": s.get("name", s["id"]),
+            "category": s.get("category", ""),
+            "lang": s.get("lang", ""),
+        }
         for s in raw_sources
         if s.get("enabled", True)
     ]
     if q:
         q_low = q.lower()
-        categories = [c for c in categories if q_low in c["id"] or q_low in c["name"].lower()]
-        sources = [s for s in sources if q_low in s["id"] or q_low in s["name"].lower() or q_low in s.get("category", "")]
+        categories = [
+            c for c in categories if q_low in c["id"] or q_low in c["name"].lower()
+        ]
+        sources = [
+            s
+            for s in sources
+            if q_low in s["id"]
+            or q_low in s["name"].lower()
+            or q_low in s.get("category", "")
+        ]
     return {"categories": categories, "sources": sources}
 
 
@@ -868,13 +1114,17 @@ async def get_filter_options(q: str = ""):
 async def list_payload_fields():
     """List all available fields for payload_mode=fields."""
     from webhook.payload import ALL_FIELDS
+
     return {"fields": ALL_FIELDS}
 
 
-@router.get("/SKILL.md", response_class=__import__("fastapi").responses.PlainTextResponse)
+@router.get(
+    "/SKILL.md", response_class=__import__("fastapi").responses.PlainTextResponse
+)
 async def serve_skill_md(request: __import__("fastapi").Request):
     """Serve SKILL.md with $API and localhost URL replaced by the actual request base URL."""
     import pathlib
+
     skill_path = pathlib.Path(_BASE_DIR) / "SKILL.md"
     content = skill_path.read_text(encoding="utf-8")
 
@@ -891,6 +1141,7 @@ async def serve_skill_md(request: __import__("fastapi").Request):
 async def preview_payload(body: dict = Body(...)):
     """Preview payload output for any mode config."""
     from webhook.payload import build_payload
+
     mode = body.get("payload_mode", "full")
     config = {
         "payload_mode": mode,

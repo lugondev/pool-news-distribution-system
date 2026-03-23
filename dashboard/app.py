@@ -1,36 +1,58 @@
 """
 FastAPI dashboard với htmx real-time updates + source/category management.
 """
+
 import logging
 import math
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import redis.asyncio as aioredis
 import yaml
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.routing import APIRoute
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from storage.redis_store import get_latest_articles, get_feed_stats, get_article
-from storage.sqlite_stats import get_dashboard_stats, get_recent_webhook_logs, get_recent_ai_logs, get_recent_telegram_logs, init_db, log_api_request
+from storage.sqlite_stats import (
+    get_dashboard_stats,
+    get_recent_webhook_logs,
+    get_recent_ai_logs,
+    get_recent_telegram_logs,
+    init_db,
+    log_api_request,
+)
 from dashboard.api_router import router as api_router, set_redis as api_set_redis
 
 logger = logging.getLogger(__name__)
-templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
+templates = Jinja2Templates(
+    directory=os.path.join(os.path.dirname(__file__), "templates")
+)
+
+
+def _get_app_tz() -> ZoneInfo:
+    """Return configured app timezone, falling back to UTC."""
+    try:
+        cfg = _read_settings()
+        tz_name = cfg.get("app", {}).get("timezone", "UTC")
+        return ZoneInfo(tz_name)
+    except Exception:
+        return ZoneInfo("UTC")
 
 
 def _fmt_dt(iso_str: str, fmt: str = "%Y-%m-%d %H:%M") -> str:
-    """Format ISO datetime string for display (UTC)."""
+    """Format ISO datetime string for display in the configured app timezone."""
     if not iso_str:
         return "—"
     try:
         dt = datetime.fromisoformat(iso_str)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.astimezone(_get_app_tz())
         return dt.strftime(fmt)
     except Exception:
         return iso_str[:16].replace("T", " ")
@@ -88,7 +110,13 @@ def _read_sources() -> list[dict]:
 
 def _write_sources(sources: list[dict]) -> None:
     with open(SOURCES_PATH, "w") as f:
-        yaml.dump({"sources": sources}, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        yaml.dump(
+            {"sources": sources},
+            f,
+            default_flow_style=False,
+            allow_unicode=True,
+            sort_keys=False,
+        )
 
 
 def _read_settings() -> dict:
@@ -119,6 +147,7 @@ async def lifespan(app: FastAPI):
 
 _API_PREFIX = "/api/"
 
+
 class _APIRequestLogger(BaseHTTPMiddleware):
     """Log method, path, status_code and latency for all /api/* requests."""
 
@@ -129,7 +158,9 @@ class _APIRequestLogger(BaseHTTPMiddleware):
         t0 = started.timestamp()
         response = await call_next(request)
         duration_ms = int((datetime.now(timezone.utc).timestamp() - t0) * 1000)
-        error_msg = None if response.status_code < 400 else f"HTTP {response.status_code}"
+        error_msg = (
+            None if response.status_code < 400 else f"HTTP {response.status_code}"
+        )
         try:
             await log_api_request(
                 method=request.method,
@@ -161,38 +192,50 @@ async def stats_partial(request: Request):
     redis = get_redis()
     redis_stats = await get_feed_stats(redis)
     db_stats = await get_dashboard_stats()
-    return templates.TemplateResponse("partials/stats.html", {
-        "request": request,
-        "redis": redis_stats,
-        "db": db_stats,
-    })
+    return templates.TemplateResponse(
+        "partials/stats.html",
+        {
+            "request": request,
+            "redis": redis_stats,
+            "db": db_stats,
+        },
+    )
 
 
 @app.get("/partials/feed", response_class=HTMLResponse)
-async def feed_partial(request: Request, page: int = 1, source: str = None, category: str = None):
+async def feed_partial(
+    request: Request, page: int = 1, source: str = None, category: str = None
+):
     redis = get_redis()
     offset = (page - 1) * PAGE_SIZE
     articles, total = await get_latest_articles(
-        redis, limit=PAGE_SIZE, offset=offset,
-        source_id=source or None, category=category or None,
+        redis,
+        limit=PAGE_SIZE,
+        offset=offset,
+        source_id=source or None,
+        category=category or None,
     )
     total_pages = max(1, math.ceil(total / PAGE_SIZE))
     sources = _read_sources()
     categories = _get_categories()
-    return templates.TemplateResponse("partials/feed.html", {
-        "request": request,
-        "articles": articles,
-        "page": page,
-        "total_pages": total_pages,
-        "total": total,
-        "source": source or "",
-        "category": category or "",
-        "sources": sources,
-        "categories": categories,
-    })
+    return templates.TemplateResponse(
+        "partials/feed.html",
+        {
+            "request": request,
+            "articles": articles,
+            "page": page,
+            "total_pages": total_pages,
+            "total": total,
+            "source": source or "",
+            "category": category or "",
+            "sources": sources,
+            "categories": categories,
+        },
+    )
 
 
 # --- Source management ---
+
 
 @app.get("/sources", response_class=HTMLResponse)
 async def sources_page(request: Request):
@@ -202,10 +245,13 @@ async def sources_page(request: Request):
 @app.get("/partials/sources", response_class=HTMLResponse)
 async def sources_partial(request: Request):
     sources = _read_sources()
-    return templates.TemplateResponse("partials/sources.html", {
-        "request": request,
-        "sources": sources,
-    })
+    return templates.TemplateResponse(
+        "partials/sources.html",
+        {
+            "request": request,
+            "sources": sources,
+        },
+    )
 
 
 @app.post("/sources/add", response_class=HTMLResponse)
@@ -220,22 +266,35 @@ async def source_add(
     sources = _read_sources()
     if any(s["id"] == id for s in sources):
         sources = _read_sources()
-        return templates.TemplateResponse("partials/sources.html", {
-            "request": request,
-            "sources": sources,
-            "error": f"Source '{id}' already exists",
-        })
-    sources.append({
-        "id": id, "name": name, "url": url,
-        "type": "rss", "lang": lang, "category": category, "enabled": True,
-    })
+        return templates.TemplateResponse(
+            "partials/sources.html",
+            {
+                "request": request,
+                "sources": sources,
+                "error": f"Source '{id}' already exists",
+            },
+        )
+    sources.append(
+        {
+            "id": id,
+            "name": name,
+            "url": url,
+            "type": "rss",
+            "lang": lang,
+            "category": category,
+            "enabled": True,
+        }
+    )
     _write_sources(sources)
     logger.info(f"Source added: {id}")
-    return templates.TemplateResponse("partials/sources.html", {
-        "request": request,
-        "sources": sources,
-        "success": f"Source '{name}' added",
-    })
+    return templates.TemplateResponse(
+        "partials/sources.html",
+        {
+            "request": request,
+            "sources": sources,
+            "success": f"Source '{name}' added",
+        },
+    )
 
 
 @app.post("/sources/{source_id}/toggle", response_class=HTMLResponse)
@@ -246,10 +305,13 @@ async def source_toggle(request: Request, source_id: str):
             s["enabled"] = not s.get("enabled", True)
             break
     _write_sources(sources)
-    return templates.TemplateResponse("partials/sources.html", {
-        "request": request,
-        "sources": sources,
-    })
+    return templates.TemplateResponse(
+        "partials/sources.html",
+        {
+            "request": request,
+            "sources": sources,
+        },
+    )
 
 
 @app.delete("/sources/{source_id}", response_class=HTMLResponse)
@@ -258,22 +320,29 @@ async def source_delete(request: Request, source_id: str):
     sources = [s for s in sources if s["id"] != source_id]
     _write_sources(sources)
     logger.info(f"Source deleted: {source_id}")
-    return templates.TemplateResponse("partials/sources.html", {
-        "request": request,
-        "sources": sources,
-        "success": f"Source '{source_id}' deleted",
-    })
+    return templates.TemplateResponse(
+        "partials/sources.html",
+        {
+            "request": request,
+            "sources": sources,
+            "success": f"Source '{source_id}' deleted",
+        },
+    )
 
 
 # --- Category management ---
 
+
 @app.get("/partials/categories", response_class=HTMLResponse)
 async def categories_partial(request: Request):
     categories = _get_categories()
-    return templates.TemplateResponse("partials/categories.html", {
-        "request": request,
-        "categories": categories,
-    })
+    return templates.TemplateResponse(
+        "partials/categories.html",
+        {
+            "request": request,
+            "categories": categories,
+        },
+    )
 
 
 @app.post("/categories/add", response_class=HTMLResponse)
@@ -285,19 +354,25 @@ async def category_add(
     cfg = _read_settings()
     cats = cfg.get("categories", [])
     if any(c["id"] == id for c in cats):
-        return templates.TemplateResponse("partials/categories.html", {
-            "request": request,
-            "categories": cats,
-            "error": f"Category '{id}' already exists",
-        })
+        return templates.TemplateResponse(
+            "partials/categories.html",
+            {
+                "request": request,
+                "categories": cats,
+                "error": f"Category '{id}' already exists",
+            },
+        )
     cats.append({"id": id, "name": name, "enabled": True})
     cfg["categories"] = cats
     _write_settings(cfg)
-    return templates.TemplateResponse("partials/categories.html", {
-        "request": request,
-        "categories": cats,
-        "success": f"Category '{name}' added",
-    })
+    return templates.TemplateResponse(
+        "partials/categories.html",
+        {
+            "request": request,
+            "categories": cats,
+            "success": f"Category '{name}' added",
+        },
+    )
 
 
 @app.post("/categories/{cat_id}/toggle", response_class=HTMLResponse)
@@ -310,10 +385,13 @@ async def category_toggle(request: Request, cat_id: str):
             break
     cfg["categories"] = cats
     _write_settings(cfg)
-    return templates.TemplateResponse("partials/categories.html", {
-        "request": request,
-        "categories": cats,
-    })
+    return templates.TemplateResponse(
+        "partials/categories.html",
+        {
+            "request": request,
+            "categories": cats,
+        },
+    )
 
 
 @app.delete("/categories/{cat_id}", response_class=HTMLResponse)
@@ -322,11 +400,14 @@ async def category_delete(request: Request, cat_id: str):
     cats = [c for c in cfg.get("categories", []) if c["id"] != cat_id]
     cfg["categories"] = cats
     _write_settings(cfg)
-    return templates.TemplateResponse("partials/categories.html", {
-        "request": request,
-        "categories": cats,
-        "success": f"Category '{cat_id}' deleted",
-    })
+    return templates.TemplateResponse(
+        "partials/categories.html",
+        {
+            "request": request,
+            "categories": cats,
+            "success": f"Category '{cat_id}' deleted",
+        },
+    )
 
 
 @app.get("/partials/category-options", response_class=HTMLResponse)
@@ -342,10 +423,13 @@ async def source_edit_form(request: Request, source_id: str):
     source = next((s for s in sources if s["id"] == source_id), None)
     if not source:
         return HTMLResponse("<tr><td colspan='6'>Source not found</td></tr>")
-    return templates.TemplateResponse("partials/source_edit_row.html", {
-        "request": request,
-        "s": source,
-    })
+    return templates.TemplateResponse(
+        "partials/source_edit_row.html",
+        {
+            "request": request,
+            "s": source,
+        },
+    )
 
 
 @app.put("/sources/{source_id}", response_class=HTMLResponse)
@@ -367,11 +451,14 @@ async def source_update(
             break
     _write_sources(sources)
     logger.info(f"Source updated: {source_id}")
-    return templates.TemplateResponse("partials/sources.html", {
-        "request": request,
-        "sources": sources,
-        "success": f"Source '{name}' updated",
-    })
+    return templates.TemplateResponse(
+        "partials/sources.html",
+        {
+            "request": request,
+            "sources": sources,
+            "success": f"Source '{name}' updated",
+        },
+    )
 
 
 # --- Settings page ---
@@ -404,6 +491,41 @@ async def settings_page(request: Request):
     return templates.TemplateResponse("settings.html", {"request": request})
 
 
+@app.get("/partials/settings-general", response_class=HTMLResponse)
+async def settings_general_partial(request: Request):
+    cfg = _read_settings()
+    return templates.TemplateResponse(
+        "partials/settings_general.html",
+        {
+            "request": request,
+            "app_cfg": cfg.get("app", {}),
+        },
+    )
+
+
+@app.post("/settings/general", response_class=HTMLResponse)
+async def settings_general_update(
+    request: Request,
+    tz_name: str = Form("Asia/Ho_Chi_Minh", alias="timezone"),
+):
+    try:
+        ZoneInfo(tz_name)
+    except ZoneInfoNotFoundError:
+        tz_name = "Asia/Ho_Chi_Minh"
+    cfg = _read_settings()
+    cfg.setdefault("app", {})["timezone"] = tz_name
+    _write_settings(cfg)
+    logger.info(f"General settings updated: timezone={tz_name}")
+    return templates.TemplateResponse(
+        "partials/settings_general.html",
+        {
+            "request": request,
+            "app_cfg": cfg.get("app", {}),
+            "success": "Settings saved.",
+        },
+    )
+
+
 @app.get("/logs", response_class=HTMLResponse)
 async def logs_page(request: Request):
     return templates.TemplateResponse("logs.html", {"request": request})
@@ -412,16 +534,26 @@ async def logs_page(request: Request):
 @app.get("/partials/settings-ai", response_class=HTMLResponse)
 async def settings_ai_partial(request: Request):
     from ai.rewriter import TONE_PROMPTS, SUMMARIZE_PROMPT
+
     cfg = _read_settings()
     ai_cfg = cfg.get("ai", {})
-    length_guidance = f"at most {ai_cfg.get('output_limit_chars') or 250} characters" if ai_cfg.get("output_limit_enabled") else "2-3 sentences"
-    return templates.TemplateResponse("partials/settings_ai.html", {
-        "request": request,
-        "ai": ai_cfg,
-        "crawler": cfg.get("crawler", {}),
-        "builtin_tone_prompts": TONE_PROMPTS,
-        "builtin_prompt_template": SUMMARIZE_PROMPT.replace("{length_guidance}", length_guidance),
-    })
+    length_guidance = (
+        f"at most {ai_cfg.get('output_limit_chars') or 250} characters"
+        if ai_cfg.get("output_limit_enabled")
+        else "2-3 sentences"
+    )
+    return templates.TemplateResponse(
+        "partials/settings_ai.html",
+        {
+            "request": request,
+            "ai": ai_cfg,
+            "crawler": cfg.get("crawler", {}),
+            "builtin_tone_prompts": TONE_PROMPTS,
+            "builtin_prompt_template": SUMMARIZE_PROMPT.replace(
+                "{length_guidance}", length_guidance
+            ),
+        },
+    )
 
 
 @app.post("/settings/ai", response_class=HTMLResponse)
@@ -452,7 +584,11 @@ async def settings_ai_update(
     delay_parts = domain_delay.replace(" ", "").split("-")
     try:
         delay_min = max(0.1, float(delay_parts[0]))
-        delay_max = max(delay_min, float(delay_parts[1])) if len(delay_parts) > 1 else delay_min + 1.0
+        delay_max = (
+            max(delay_min, float(delay_parts[1]))
+            if len(delay_parts) > 1
+            else delay_min + 1.0
+        )
     except (ValueError, IndexError):
         delay_min, delay_max = 0.5, 1.5
 
@@ -468,38 +604,53 @@ async def settings_ai_update(
         "batch_size": max(1, min(batch_size, 50)),
         "max_tokens_summary": max(100, min(max_tokens, 1000)),
         "retry_attempts": max(1, min(retry_attempts, 10)),
-        "output_languages": [l.strip() for l in output_languages.split(",") if l.strip()],
+        "output_languages": [
+            l.strip() for l in output_languages.split(",") if l.strip()
+        ],
         "prompt_system": prompt_system.strip(),
         "prompt_template": prompt_template.strip(),
         "output_limit_enabled": output_limit_enabled == "on",
         "output_limit_chars": max(50, min(output_limit_chars, 2000)),
     }
-    cfg.setdefault("crawler", {}).update({
-        "fetch_interval_minutes": max(1, min(crawl_interval, 60)),
-        "stagger_groups": max(1, min(stagger_groups, 10)),
-        "domain_delay_min": delay_min,
-        "domain_delay_max": delay_max,
-    })
+    cfg.setdefault("crawler", {}).update(
+        {
+            "fetch_interval_minutes": max(1, min(crawl_interval, 60)),
+            "stagger_groups": max(1, min(stagger_groups, 10)),
+            "domain_delay_min": delay_min,
+            "domain_delay_max": delay_max,
+        }
+    )
     _write_settings(cfg)
     logger.info(
         f"Settings updated: model={cfg['ai']['model']}, tone={resolved_tone}, "
         f"crawl={crawl_interval}min×{stagger_groups}groups, ai={ai_interval}min"
     )
     from ai.rewriter import TONE_PROMPTS, SUMMARIZE_PROMPT
-    length_guidance = f"at most {cfg['ai'].get('output_limit_chars') or 250} characters" if cfg['ai'].get("output_limit_enabled") else "2-3 sentences"
-    return templates.TemplateResponse("partials/settings_ai.html", {
-        "request": request,
-        "ai": cfg["ai"],
-        "crawler": cfg["crawler"],
-        "builtin_tone_prompts": TONE_PROMPTS,
-        "builtin_prompt_template": SUMMARIZE_PROMPT.replace("{length_guidance}", length_guidance),
-        "success": "Settings saved. Restart app to apply interval changes.",
-    })
+
+    length_guidance = (
+        f"at most {cfg['ai'].get('output_limit_chars') or 250} characters"
+        if cfg["ai"].get("output_limit_enabled")
+        else "2-3 sentences"
+    )
+    return templates.TemplateResponse(
+        "partials/settings_ai.html",
+        {
+            "request": request,
+            "ai": cfg["ai"],
+            "crawler": cfg["crawler"],
+            "builtin_tone_prompts": TONE_PROMPTS,
+            "builtin_prompt_template": SUMMARIZE_PROMPT.replace(
+                "{length_guidance}", length_guidance
+            ),
+            "success": "Settings saved. Restart app to apply interval changes.",
+        },
+    )
 
 
 @app.post("/settings/ai/test", response_class=HTMLResponse)
 async def settings_ai_test(request: Request):
     from ai.rewriter import test_ai_connection
+
     cfg = _read_settings().get("ai", {})
     result = await test_ai_connection(
         api_key=cfg.get("api_key"),
@@ -507,10 +658,13 @@ async def settings_ai_test(request: Request):
         model=cfg.get("model"),
         tone=cfg.get("tone", "general"),
     )
-    return templates.TemplateResponse("partials/ai_test_result.html", {
-        "request": request,
-        "result": result,
-    })
+    return templates.TemplateResponse(
+        "partials/ai_test_result.html",
+        {
+            "request": request,
+            "result": result,
+        },
+    )
 
 
 @app.get("/partials/ai-logs", response_class=HTMLResponse)
@@ -518,13 +672,16 @@ async def ai_logs_partial(request: Request, page: int = 1):
     offset = (page - 1) * LOG_PAGE_SIZE
     logs, total = await get_recent_ai_logs(limit=LOG_PAGE_SIZE, offset=offset)
     logs = await _enrich_logs(logs, full=True)
-    return templates.TemplateResponse("partials/ai_logs_table.html", {
-        "request": request,
-        "logs": logs,
-        "log_page": page,
-        "log_total_pages": max(1, math.ceil(total / LOG_PAGE_SIZE)),
-        "log_total": total,
-    })
+    return templates.TemplateResponse(
+        "partials/ai_logs_table.html",
+        {
+            "request": request,
+            "logs": logs,
+            "log_page": page,
+            "log_total_pages": max(1, math.ceil(total / LOG_PAGE_SIZE)),
+            "log_total": total,
+        },
+    )
 
 
 def _get_webhook_endpoints() -> list[dict]:
@@ -584,6 +741,8 @@ async def webhook_add(
     id: str = Form(...),
     name: str = Form(...),
     url: str = Form(...),
+    http_method: str = Form("POST"),
+    content_type: str = Form("application/json"),
     retry_attempts: int = Form(3),
     retry_delay: int = Form(5),
     timeout: int = Form(10),
@@ -601,25 +760,43 @@ async def webhook_add(
     if any(ep["id"] == id for ep in endpoints):
         ctx = await _webhook_ctx(request, error=f"Webhook '{id}' already exists")
         return templates.TemplateResponse("partials/settings_webhook.html", ctx)
-    fields_list = [f.strip() for f in payload_fields.split(",") if f.strip()] if payload_fields else []
-    cat_list = [c.strip() for c in filter_categories.split(",") if c.strip()] if filter_categories else []
-    src_list = [s.strip() for s in filter_sources.split(",") if s.strip()] if filter_sources else []
-    endpoints.append({
-        "id": id.strip(), "name": name.strip(), "url": url.strip(),
-        "enabled": True,
-        "retry_attempts": max(1, min(retry_attempts, 10)),
-        "retry_delay_seconds": max(1, min(retry_delay, 60)),
-        "timeout_seconds": max(1, min(timeout, 60)),
-        "payload_mode": payload_mode,
-        "payload_fields": fields_list,
-        "payload_template": payload_template,
-        "filter_categories_mode": filter_categories_mode,
-        "filter_categories": cat_list,
-        "filter_sources_mode": filter_sources_mode,
-        "filter_sources": src_list,
-        "rate_limit_max": max(0, rate_limit_max),
-        "rate_limit_window_minutes": max(1, rate_limit_window_minutes),
-    })
+    fields_list = (
+        [f.strip() for f in payload_fields.split(",") if f.strip()]
+        if payload_fields
+        else []
+    )
+    cat_list = (
+        [c.strip() for c in filter_categories.split(",") if c.strip()]
+        if filter_categories
+        else []
+    )
+    src_list = (
+        [s.strip() for s in filter_sources.split(",") if s.strip()]
+        if filter_sources
+        else []
+    )
+    endpoints.append(
+        {
+            "id": id.strip(),
+            "name": name.strip(),
+            "url": url.strip(),
+            "enabled": True,
+            "http_method": http_method.upper(),
+            "content_type": content_type.strip(),
+            "retry_attempts": max(1, min(retry_attempts, 10)),
+            "retry_delay_seconds": max(1, min(retry_delay, 60)),
+            "timeout_seconds": max(1, min(timeout, 60)),
+            "payload_mode": payload_mode,
+            "payload_fields": fields_list,
+            "payload_template": payload_template,
+            "filter_categories_mode": filter_categories_mode,
+            "filter_categories": cat_list,
+            "filter_sources_mode": filter_sources_mode,
+            "filter_sources": src_list,
+            "rate_limit_max": max(0, rate_limit_max),
+            "rate_limit_window_minutes": max(1, rate_limit_window_minutes),
+        }
+    )
     _save_webhook_endpoints(endpoints)
     logger.info(f"Webhook added: {id}")
     ctx = await _webhook_ctx(request, success=f"Webhook '{name}' added")
@@ -644,6 +821,8 @@ async def webhook_update(
     wh_id: str,
     name: str = Form(...),
     url: str = Form(...),
+    http_method: str = Form("POST"),
+    content_type: str = Form("application/json"),
     retry_attempts: int = Form(3),
     retry_delay: int = Form(5),
     timeout: int = Form(10),
@@ -658,13 +837,27 @@ async def webhook_update(
     rate_limit_window_minutes: int = Form(60),
 ):
     endpoints = _get_webhook_endpoints()
-    fields_list = [f.strip() for f in payload_fields.split(",") if f.strip()] if payload_fields else []
-    cat_list = [c.strip() for c in filter_categories.split(",") if c.strip()] if filter_categories else []
-    src_list = [s.strip() for s in filter_sources.split(",") if s.strip()] if filter_sources else []
+    fields_list = (
+        [f.strip() for f in payload_fields.split(",") if f.strip()]
+        if payload_fields
+        else []
+    )
+    cat_list = (
+        [c.strip() for c in filter_categories.split(",") if c.strip()]
+        if filter_categories
+        else []
+    )
+    src_list = (
+        [s.strip() for s in filter_sources.split(",") if s.strip()]
+        if filter_sources
+        else []
+    )
     for ep in endpoints:
         if ep["id"] == wh_id:
             ep["name"] = name.strip()
             ep["url"] = url.strip()
+            ep["http_method"] = http_method.upper()
+            ep["content_type"] = content_type.strip()
             ep["retry_attempts"] = max(1, min(retry_attempts, 10))
             ep["retry_delay_seconds"] = max(1, min(retry_delay, 60))
             ep["timeout_seconds"] = max(1, min(timeout, 60))
@@ -696,6 +889,7 @@ async def webhook_delete(request: Request, wh_id: str):
 
 # --- Telegram channel management ---
 
+
 def _get_telegram_channels() -> list[dict]:
     return _read_settings().get("telegram", {}).get("channels", [])
 
@@ -725,17 +919,24 @@ async def settings_telegram_partial(request: Request):
 
 
 @app.get("/partials/telegram-logs", response_class=HTMLResponse)
-async def telegram_logs_partial(request: Request, page: int = 1, channel_id: str | None = None):
+async def telegram_logs_partial(
+    request: Request, page: int = 1, channel_id: str | None = None
+):
     offset = (page - 1) * LOG_PAGE_SIZE
-    logs, total = await get_recent_telegram_logs(limit=LOG_PAGE_SIZE, offset=offset, channel_id=channel_id)
+    logs, total = await get_recent_telegram_logs(
+        limit=LOG_PAGE_SIZE, offset=offset, channel_id=channel_id
+    )
     logs = await _enrich_logs(logs, full=True)
-    return templates.TemplateResponse("partials/telegram_logs_table.html", {
-        "request": request,
-        "logs": logs,
-        "tg_log_page": page,
-        "tg_log_total_pages": max(1, math.ceil(total / LOG_PAGE_SIZE)),
-        "tg_log_total": total,
-    })
+    return templates.TemplateResponse(
+        "partials/telegram_logs_table.html",
+        {
+            "request": request,
+            "logs": logs,
+            "tg_log_page": page,
+            "tg_log_total_pages": max(1, math.ceil(total / LOG_PAGE_SIZE)),
+            "tg_log_total": total,
+        },
+    )
 
 
 @app.post("/telegram/test-connection", response_class=HTMLResponse)
@@ -744,16 +945,23 @@ async def telegram_test_connection(
     chat_id: str = Form(...),
 ):
     from webhook.telegram import send_telegram
+
     if not bot_token.strip() or not chat_id.strip():
-        return HTMLResponse('<span style="color:var(--red)">Bot token and Chat ID are required</span>')
+        return HTMLResponse(
+            '<span style="color:var(--red)">Bot token and Chat ID are required</span>'
+        )
     text = (
         "\u2705 <b>News Aggregator — Test Message</b>\n\n"
         "If you see this, your Telegram integration is working!"
     )
     try:
-        status, ok, error = await send_telegram(bot_token.strip(), chat_id.strip(), text, timeout=10)
+        status, ok, error = await send_telegram(
+            bot_token.strip(), chat_id.strip(), text, timeout=10
+        )
         if ok:
-            return HTMLResponse('<span style="color:var(--green);font-weight:600">&#10003; Test sent!</span>')
+            return HTMLResponse(
+                '<span style="color:var(--green);font-weight:600">&#10003; Test sent!</span>'
+            )
         return HTMLResponse(f'<span style="color:var(--red)">{error}</span>')
     except Exception as e:
         return HTMLResponse(f'<span style="color:var(--red)">{e}</span>')
@@ -785,25 +993,42 @@ async def telegram_add(
             "partials/settings_telegram.html",
             _telegram_ctx(request, error=f"Channel '{id}' already exists"),
         )
-    fields_list = [f.strip() for f in payload_fields.split(",") if f.strip()] if payload_fields else []
-    cat_list = [c.strip() for c in filter_categories.split(",") if c.strip()] if filter_categories else []
-    src_list = [s.strip() for s in filter_sources.split(",") if s.strip()] if filter_sources else []
-    channels.append({
-        "id": id.strip(), "name": name.strip(),
-        "bot_token": bot_token.strip(), "chat_id": chat_id.strip(),
-        "lang": lang, "enabled": True,
-        "retry_attempts": max(1, min(retry_attempts, 10)),
-        "timeout_seconds": max(1, min(timeout, 60)),
-        "payload_mode": payload_mode,
-        "payload_fields": fields_list,
-        "payload_template": payload_template,
-        "filter_categories_mode": filter_categories_mode,
-        "filter_categories": cat_list,
-        "filter_sources_mode": filter_sources_mode,
-        "filter_sources": src_list,
-        "rate_limit_max": max(0, rate_limit_max),
-        "rate_limit_window_minutes": max(1, rate_limit_window_minutes),
-    })
+    fields_list = (
+        [f.strip() for f in payload_fields.split(",") if f.strip()]
+        if payload_fields
+        else []
+    )
+    cat_list = (
+        [c.strip() for c in filter_categories.split(",") if c.strip()]
+        if filter_categories
+        else []
+    )
+    src_list = (
+        [s.strip() for s in filter_sources.split(",") if s.strip()]
+        if filter_sources
+        else []
+    )
+    channels.append(
+        {
+            "id": id.strip(),
+            "name": name.strip(),
+            "bot_token": bot_token.strip(),
+            "chat_id": chat_id.strip(),
+            "lang": lang,
+            "enabled": True,
+            "retry_attempts": max(1, min(retry_attempts, 10)),
+            "timeout_seconds": max(1, min(timeout, 60)),
+            "payload_mode": payload_mode,
+            "payload_fields": fields_list,
+            "payload_template": payload_template,
+            "filter_categories_mode": filter_categories_mode,
+            "filter_categories": cat_list,
+            "filter_sources_mode": filter_sources_mode,
+            "filter_sources": src_list,
+            "rate_limit_max": max(0, rate_limit_max),
+            "rate_limit_window_minutes": max(1, rate_limit_window_minutes),
+        }
+    )
     _save_telegram_channels(channels)
     logger.info(f"Telegram channel added: {id}")
     return templates.TemplateResponse(
@@ -846,9 +1071,21 @@ async def telegram_update(
     rate_limit_window_minutes: int = Form(60),
 ):
     channels = _get_telegram_channels()
-    fields_list = [f.strip() for f in payload_fields.split(",") if f.strip()] if payload_fields else []
-    cat_list = [c.strip() for c in filter_categories.split(",") if c.strip()] if filter_categories else []
-    src_list = [s.strip() for s in filter_sources.split(",") if s.strip()] if filter_sources else []
+    fields_list = (
+        [f.strip() for f in payload_fields.split(",") if f.strip()]
+        if payload_fields
+        else []
+    )
+    cat_list = (
+        [c.strip() for c in filter_categories.split(",") if c.strip()]
+        if filter_categories
+        else []
+    )
+    src_list = (
+        [s.strip() for s in filter_sources.split(",") if s.strip()]
+        if filter_sources
+        else []
+    )
     for ch in channels:
         if ch["id"] == ch_id:
             ch["name"] = name.strip()
@@ -890,6 +1127,7 @@ async def telegram_delete(request: Request, ch_id: str):
 @app.post("/telegram/{ch_id}/test", response_class=HTMLResponse)
 async def telegram_test(request: Request, ch_id: str):
     from webhook.telegram import send_telegram
+
     channels = _get_telegram_channels()
     target = next((ch for ch in channels if ch["id"] == ch_id), None)
     if not target:
@@ -903,13 +1141,15 @@ async def telegram_test(request: Request, ch_id: str):
     )
     try:
         status, ok, error = await send_telegram(
-            target["bot_token"], target["chat_id"], text,
+            target["bot_token"],
+            target["chat_id"],
+            text,
             timeout=target.get("timeout_seconds", 10),
         )
         if ok:
-            return HTMLResponse('<span style="color:var(--green);font-weight:600">&#10003; Test sent!</span>')
+            return HTMLResponse(
+                '<span style="color:var(--green);font-weight:600">&#10003; Test sent!</span>'
+            )
         return HTMLResponse(f'<span style="color:var(--red)">{error}</span>')
     except Exception as e:
         return HTMLResponse(f'<span style="color:var(--red)">{e}</span>')
-
-

@@ -1,0 +1,51 @@
+<div class="panel-inner">
+  <h3>General</h3>
+  <p class="desc">System-wide settings that affect the entire application.</p>
+
+  {% if success %}
+  <div class="alert alert-success">{{ success }}</div>
+  {% endif %}
+</div>
+
+<div class="panel-inner" style="padding-top:20px">
+  <form hx-post="/settings/general" hx-target="#tab-panel-general" hx-swap="innerHTML">
+    <p class="section-title">Display</p>
+    <div class="form-row-2">
+      <div class="form-group">
+        <label>Timezone</label>
+        <select name="timezone">
+          {% set tz = app_cfg.get('timezone', 'Asia/Ho_Chi_Minh') %}
+          <optgroup label="Asia">
+            <option value="Asia/Ho_Chi_Minh" {% if tz == 'Asia/Ho_Chi_Minh' %}selected{% endif %}>Asia/Ho_Chi_Minh (GMT+7)</option>
+            <option value="Asia/Bangkok"     {% if tz == 'Asia/Bangkok' %}selected{% endif %}>Asia/Bangkok (GMT+7)</option>
+            <option value="Asia/Jakarta"     {% if tz == 'Asia/Jakarta' %}selected{% endif %}>Asia/Jakarta (GMT+7)</option>
+            <option value="Asia/Singapore"   {% if tz == 'Asia/Singapore' %}selected{% endif %}>Asia/Singapore (GMT+8)</option>
+            <option value="Asia/Shanghai"    {% if tz == 'Asia/Shanghai' %}selected{% endif %}>Asia/Shanghai (GMT+8)</option>
+            <option value="Asia/Tokyo"       {% if tz == 'Asia/Tokyo' %}selected{% endif %}>Asia/Tokyo (GMT+9)</option>
+            <option value="Asia/Seoul"       {% if tz == 'Asia/Seoul' %}selected{% endif %}>Asia/Seoul (GMT+9)</option>
+            <option value="Asia/Kolkata"     {% if tz == 'Asia/Kolkata' %}selected{% endif %}>Asia/Kolkata (GMT+5:30)</option>
+            <option value="Asia/Dubai"       {% if tz == 'Asia/Dubai' %}selected{% endif %}>Asia/Dubai (GMT+4)</option>
+          </optgroup>
+          <optgroup label="Europe">
+            <option value="Europe/London"    {% if tz == 'Europe/London' %}selected{% endif %}>Europe/London (GMT+0/+1)</option>
+            <option value="Europe/Paris"     {% if tz == 'Europe/Paris' %}selected{% endif %}>Europe/Paris (GMT+1/+2)</option>
+            <option value="Europe/Berlin"    {% if tz == 'Europe/Berlin' %}selected{% endif %}>Europe/Berlin (GMT+1/+2)</option>
+          </optgroup>
+          <optgroup label="Americas">
+            <option value="America/New_York"    {% if tz == 'America/New_York' %}selected{% endif %}>America/New_York (GMT-5/-4)</option>
+            <option value="America/Chicago"     {% if tz == 'America/Chicago' %}selected{% endif %}>America/Chicago (GMT-6/-5)</option>
+            <option value="America/Los_Angeles" {% if tz == 'America/Los_Angeles' %}selected{% endif %}>America/Los_Angeles (GMT-8/-7)</option>
+          </optgroup>
+          <optgroup label="Other">
+            <option value="UTC" {% if tz == 'UTC' %}selected{% endif %}>UTC (GMT+0)</option>
+          </optgroup>
+        </select>
+        <p class="field-hint">All timestamps in the dashboard will be displayed in this timezone.</p>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">Save Settings</button>
+    </div>
+  </form>
+</div>
