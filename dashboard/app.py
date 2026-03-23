@@ -413,12 +413,14 @@ async def logs_page(request: Request):
 async def settings_ai_partial(request: Request):
     from ai.rewriter import TONE_PROMPTS, SUMMARIZE_PROMPT
     cfg = _read_settings()
+    ai_cfg = cfg.get("ai", {})
+    length_guidance = f"at most {ai_cfg.get('output_limit_chars') or 250} characters" if ai_cfg.get("output_limit_enabled") else "2-3 sentences"
     return templates.TemplateResponse("partials/settings_ai.html", {
         "request": request,
-        "ai": cfg.get("ai", {}),
+        "ai": ai_cfg,
         "crawler": cfg.get("crawler", {}),
         "builtin_tone_prompts": TONE_PROMPTS,
-        "builtin_prompt_template": SUMMARIZE_PROMPT,
+        "builtin_prompt_template": SUMMARIZE_PROMPT.replace("{length_guidance}", length_guidance),
     })
 
 
@@ -441,6 +443,8 @@ async def settings_ai_update(
     domain_delay: str = Form("0.5-1.5"),
     prompt_system: str = Form(""),
     prompt_template: str = Form(""),
+    output_limit_enabled: str = Form("off"),
+    output_limit_chars: int = Form(250),
 ):
     valid_tones = ("formal", "casual", "general")
     resolved_tone = tone if tone in valid_tones else "general"
@@ -467,6 +471,8 @@ async def settings_ai_update(
         "output_languages": [l.strip() for l in output_languages.split(",") if l.strip()],
         "prompt_system": prompt_system.strip(),
         "prompt_template": prompt_template.strip(),
+        "output_limit_enabled": output_limit_enabled == "on",
+        "output_limit_chars": max(50, min(output_limit_chars, 2000)),
     }
     cfg.setdefault("crawler", {}).update({
         "fetch_interval_minutes": max(1, min(crawl_interval, 60)),
@@ -480,12 +486,13 @@ async def settings_ai_update(
         f"crawl={crawl_interval}min×{stagger_groups}groups, ai={ai_interval}min"
     )
     from ai.rewriter import TONE_PROMPTS, SUMMARIZE_PROMPT
+    length_guidance = f"at most {cfg['ai'].get('output_limit_chars') or 250} characters" if cfg['ai'].get("output_limit_enabled") else "2-3 sentences"
     return templates.TemplateResponse("partials/settings_ai.html", {
         "request": request,
         "ai": cfg["ai"],
         "crawler": cfg["crawler"],
         "builtin_tone_prompts": TONE_PROMPTS,
-        "builtin_prompt_template": SUMMARIZE_PROMPT,
+        "builtin_prompt_template": SUMMARIZE_PROMPT.replace("{length_guidance}", length_guidance),
         "success": "Settings saved. Restart app to apply interval changes.",
     })
 

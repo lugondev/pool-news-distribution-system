@@ -130,6 +130,27 @@
       </div>
     </div>
 
+    <p class="section-title" style="margin-top:4px">Output Length Limit</p>
+    <div style="margin-bottom:14px">
+      <div class="toggle-row" style="margin-bottom:8px">
+        <input type="hidden" name="output_limit_enabled" value="off">
+        <input type="checkbox" name="output_limit_enabled" value="on" id="output-limit-enabled"
+               {% if ai.output_limit_enabled %}checked{% endif %}
+               style="accent-color:var(--accent)"
+               onchange="document.getElementById('output-limit-chars-wrap').style.display=this.checked?'':'none'">
+        <label for="output-limit-enabled" class="toggle-label">Limit summary length</label>
+        <span style="font-size:11px;color:var(--muted);margin-left:6px">— prompts AI to stay within X characters (Twitter-style count)</span>
+      </div>
+      <div id="output-limit-chars-wrap" style="display:{% if ai.output_limit_enabled %}''{% else %}none{% endif %}">
+        <div class="form-group" style="max-width:160px;margin-bottom:0">
+          <label>Max characters <span class="hint">— default 250</span></label>
+          <input type="number" name="output_limit_chars"
+                 value="{{ ai.output_limit_chars or 250 }}"
+                 min="50" max="2000" step="10">
+        </div>
+      </div>
+    </div>
+
     <p class="section-title" style="margin-top:4px">
       Custom Prompt
       <span class="hint">— leave blank to use built-in tone defaults</span>

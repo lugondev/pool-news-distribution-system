@@ -80,8 +80,8 @@ TONE_PROMPTS = {
 SUMMARIZE_PROMPT = """{tone_instruction}
 
 Given the following news article, provide:
-1. A concise Vietnamese summary (2-3 sentences, natural Vietnamese)
-2. A concise English summary (2-3 sentences)
+1. A concise Vietnamese summary ({length_guidance}, natural Vietnamese)
+2. A concise English summary ({length_guidance})
 
 Article title: {title}
 Article content: {content}
@@ -109,12 +109,22 @@ async def rewrite_article(
     custom_system = (cfg.get("prompt_system") or "").strip()
     custom_template = (cfg.get("prompt_template") or "").strip()
     tone_instruction = custom_system or TONE_PROMPTS.get(tone, TONE_PROMPTS["general"])
+    if cfg.get("output_limit_enabled"):
+        max_chars = int(cfg.get("output_limit_chars") or 250)
+        tone_instruction += (
+            f"\nIMPORTANT: Each summary (both vi and en) must be at most {max_chars} characters. "
+            "Count every character including spaces. URLs count as 23 characters (Twitter-style)."
+        )
+        length_guidance = f"at most {max_chars} characters"
+    else:
+        length_guidance = "2-3 sentences"
     prompt_template = custom_template or SUMMARIZE_PROMPT
     content = article.get("content") or article.get("summary") or ""
     title = article.get("title", "")
 
     prompt = prompt_template.format(
         tone_instruction=tone_instruction,
+        length_guidance=length_guidance,
         title=title,
         content=content[:1500],
     )
