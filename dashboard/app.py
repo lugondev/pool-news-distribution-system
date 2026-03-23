@@ -411,11 +411,14 @@ async def logs_page(request: Request):
 
 @app.get("/partials/settings-ai", response_class=HTMLResponse)
 async def settings_ai_partial(request: Request):
+    from ai.rewriter import TONE_PROMPTS, SUMMARIZE_PROMPT
     cfg = _read_settings()
     return templates.TemplateResponse("partials/settings_ai.html", {
         "request": request,
         "ai": cfg.get("ai", {}),
         "crawler": cfg.get("crawler", {}),
+        "builtin_tone_prompts": TONE_PROMPTS,
+        "builtin_prompt_template": SUMMARIZE_PROMPT,
     })
 
 
@@ -436,6 +439,8 @@ async def settings_ai_update(
     stagger_groups: int = Form(3),
     ai_interval: int = Form(2),
     domain_delay: str = Form("0.5-1.5"),
+    prompt_system: str = Form(""),
+    prompt_template: str = Form(""),
 ):
     valid_tones = ("formal", "casual", "general")
     resolved_tone = tone if tone in valid_tones else "general"
@@ -460,6 +465,8 @@ async def settings_ai_update(
         "max_tokens_summary": max(100, min(max_tokens, 1000)),
         "retry_attempts": max(1, min(retry_attempts, 10)),
         "output_languages": [l.strip() for l in output_languages.split(",") if l.strip()],
+        "prompt_system": prompt_system.strip(),
+        "prompt_template": prompt_template.strip(),
     }
     cfg.setdefault("crawler", {}).update({
         "fetch_interval_minutes": max(1, min(crawl_interval, 60)),
@@ -472,10 +479,13 @@ async def settings_ai_update(
         f"Settings updated: model={cfg['ai']['model']}, tone={resolved_tone}, "
         f"crawl={crawl_interval}min×{stagger_groups}groups, ai={ai_interval}min"
     )
+    from ai.rewriter import TONE_PROMPTS, SUMMARIZE_PROMPT
     return templates.TemplateResponse("partials/settings_ai.html", {
         "request": request,
         "ai": cfg["ai"],
         "crawler": cfg["crawler"],
+        "builtin_tone_prompts": TONE_PROMPTS,
+        "builtin_prompt_template": SUMMARIZE_PROMPT,
         "success": "Settings saved. Restart app to apply interval changes.",
     })
 

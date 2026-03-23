@@ -130,6 +130,55 @@
       </div>
     </div>
 
+    <p class="section-title" style="margin-top:4px">
+      Custom Prompt
+      <span class="hint">— leave blank to use built-in tone defaults</span>
+    </p>
+
+    {# System instruction #}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+      <div class="form-group" style="margin-bottom:0">
+        <label style="display:flex;justify-content:space-between;align-items:center">
+          <span>System Instruction <span class="hint">— your override</span></span>
+          <span style="font-size:10px;color:var(--accent);font-weight:600">CUSTOM</span>
+        </label>
+        <textarea name="prompt_system" rows="4"
+                  placeholder="Leave blank to use built-in tone below…"
+                  style="font-family:monospace;font-size:12px;width:100%;resize:vertical;box-sizing:border-box">{{ ai.prompt_system or '' }}</textarea>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label style="display:flex;justify-content:space-between;align-items:center">
+          <span>Built-in — <em>{{ ai.tone or 'general' }}</em> tone</span>
+          <span style="font-size:10px;color:var(--muted);font-weight:600">READ-ONLY</span>
+        </label>
+        <textarea rows="4" readonly
+                  style="font-family:monospace;font-size:12px;width:100%;resize:vertical;box-sizing:border-box;opacity:.55;cursor:default">{{ builtin_tone_prompts[ai.tone or 'general'] }}</textarea>
+      </div>
+    </div>
+
+    {# User prompt template #}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+      <div class="form-group" style="margin-bottom:0">
+        <label style="display:flex;justify-content:space-between;align-items:center">
+          <span>
+            Prompt Template <span class="hint">— use <code>{tone_instruction}</code>, <code>{title}</code>, <code>{content}</code></span>
+          </span>
+          <span style="font-size:10px;color:var(--accent);font-weight:600">CUSTOM</span>
+        </label>
+        <textarea name="prompt_template" rows="10"
+                  placeholder="Leave blank to use built-in template →"
+                  style="font-family:monospace;font-size:12px;width:100%;resize:vertical;box-sizing:border-box">{{ ai.prompt_template or '' }}</textarea>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label style="display:flex;justify-content:space-between;align-items:center">
+          <span>Built-in template</span>
+          <span style="font-size:10px;color:var(--muted);font-weight:600">READ-ONLY</span>
+        </label>
+        <textarea rows="10" readonly
+                  style="font-family:monospace;font-size:12px;width:100%;resize:vertical;box-sizing:border-box;opacity:.55;cursor:default">{{ builtin_prompt_template }}</textarea>
+      </div>
+    </div>
+
     <div class="form-actions">
       <button type="submit" class="btn btn-primary">Save Settings</button>
     </div>

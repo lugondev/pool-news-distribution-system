@@ -4,6 +4,7 @@ AI rewriter: tóm tắt + dịch bài sang VI/EN dùng OpenAI-compatible API.
 import asyncio
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import yaml
@@ -103,12 +104,16 @@ async def rewrite_article(
 ) -> tuple[str, str, int]:
     """Returns (vi_summary, en_summary, tokens_used)."""
     client = get_openai_client(api_key=api_key, base_url=base_url)
-    resolved_model = model or _load_ai_config().get("model", "gpt-4o-mini")
-    tone_instruction = TONE_PROMPTS.get(tone, TONE_PROMPTS["general"])
+    cfg = _load_ai_config()
+    resolved_model = model or cfg.get("model", "gpt-4o-mini")
+    custom_system = (cfg.get("prompt_system") or "").strip()
+    custom_template = (cfg.get("prompt_template") or "").strip()
+    tone_instruction = custom_system or TONE_PROMPTS.get(tone, TONE_PROMPTS["general"])
+    prompt_template = custom_template or SUMMARIZE_PROMPT
     content = article.get("content") or article.get("summary") or ""
     title = article.get("title", "")
 
-    prompt = SUMMARIZE_PROMPT.format(
+    prompt = prompt_template.format(
         tone_instruction=tone_instruction,
         title=title,
         content=content[:1500],
@@ -142,7 +147,8 @@ async def test_ai_connection(
     resolved_key = api_key or cfg.get("api_key", "")
     resolved_url = base_url or cfg.get("base_url", "https://api.openai.com/v1")
     resolved_model = model or cfg.get("model", "gpt-4o-mini")
-    tone_instruction = TONE_PROMPTS.get(tone, TONE_PROMPTS["general"])
+    custom_system = (cfg.get("prompt_system") or "").strip()
+    tone_instruction = custom_system or TONE_PROMPTS.get(tone, TONE_PROMPTS["general"])
 
     if not resolved_key:
         return {"ok": False, "error": "API key is empty", "ms": 0}
@@ -190,6 +196,57 @@ async def test_ai_connection(
         return {"ok": False, "error": str(e), "model": resolved_model, "base_url": resolved_url, "ms": ms}
 
 
+async def _get_category_counts(redis: aioredis.Redis, window_hours: float = 2.0) -> dict[str, int]:
+    """
+    Count articles per category fetched within the last `window_hours`.
+    Samples up to 500 recent entries from the main feed sorted set.
+    Used to distinguish high-volume ("busy") from low-volume ("quiet") categories.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=window_hours)).timestamp()
+    ids = await redis.zrangebyscore("news:feed", cutoff, "+inf", start=0, num=500)
+    if not ids:
+        return {}
+    pipe = redis.pipeline()
+    for aid in ids:
+        aid_str = aid.decode() if isinstance(aid, bytes) else aid
+        pipe.hget(f"news:{aid_str}", "category")
+    cats = await pipe.execute()
+    counts: dict[str, int] = {}
+    for c in cats:
+        if c:
+            key = c.decode() if isinstance(c, bytes) else c
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _max_age_for_category(cat: str, counts: dict[str, int]) -> int:
+    """
+    Return max article age (seconds) before it is skipped for AI processing.
+
+    Thresholds scale with category volume:
+      - busy   (top third by article count)  → 5 min  — plenty of fresh articles
+      - moderate (middle third)              → 10 min
+      - quiet  (bottom third / unknown)      → 15 min — rare topics, still worth translating
+
+    If no count data is available, defaults to 10 min.
+    """
+    if not counts:
+        return 10 * 60
+
+    sorted_vals = sorted(counts.values())
+    n = len(sorted_vals)
+    low_thresh = sorted_vals[n // 3]
+    high_thresh = sorted_vals[(n * 2) // 3]
+
+    cat_count = counts.get(cat, 0)
+    if cat_count >= high_thresh:
+        return 5 * 60
+    elif cat_count >= low_thresh:
+        return 10 * 60
+    else:
+        return 15 * 60
+
+
 async def process_pending_articles(
     redis: aioredis.Redis,
     model: str | None = None,
@@ -214,6 +271,9 @@ async def process_pending_articles(
     if not articles:
         return 0
 
+    # Sample category volumes once per batch to determine freshness thresholds.
+    category_counts = await _get_category_counts(redis)
+
     # inter_delay spaces out actual AI calls — computed against full batch size
     # so throughput matches the spread window even if some articles are dedup-skipped.
     inter_delay = spread_seconds / len(articles) if spread_seconds > 0 and len(articles) > 1 else 0
@@ -223,6 +283,27 @@ async def process_pending_articles(
 
     for article in articles:
         title = article.get("title", "")
+
+        # Age-based skip: avoid wasting quota on stale articles.
+        # Threshold scales with category volume — busy categories expire faster.
+        fetched_at_str = article.get("fetched_at", "")
+        if fetched_at_str:
+            try:
+                fetched_dt = datetime.fromisoformat(fetched_at_str)
+                if fetched_dt.tzinfo is None:
+                    fetched_dt = fetched_dt.replace(tzinfo=timezone.utc)
+                age_sec = (datetime.now(timezone.utc) - fetched_dt).total_seconds()
+                max_age = _max_age_for_category(article.get("category", ""), category_counts)
+                if age_sec > max_age:
+                    await redis.hset(f"news:{article['id']}", "ai_status", "age_skipped")
+                    logger.debug(
+                        f"Age-skipped {article['id']} "
+                        f"(age={age_sec:.0f}s > max={max_age}s, cat={article.get('category')})"
+                    )
+                    processed += 1
+                    continue
+            except (ValueError, TypeError):
+                pass
 
         # Pre-AI semantic dedup: check BEFORE sleeping to avoid wasted delay
         if ai_dedup_threshold > 0 and title:
