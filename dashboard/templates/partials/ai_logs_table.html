@@ -8,10 +8,9 @@
       <th style="width:20px"></th>
       <th>Time</th>
       <th>Article</th>
-      <th>Source</th>
-      <th>Model</th>
+      <th>Category / Source</th>
+      <th>Model / Tokens</th>
       <th style="text-align:center">Status</th>
-      <th style="text-align:right">Tokens</th>
     </tr>
   </thead>
   <tbody>
@@ -19,18 +18,37 @@
     <tr class="log-row-toggle" onclick="toggleLogDetail('ai-detail-{{ loop.index }}', this)">
       <td><span class="log-expand" id="arrow-ai-detail-{{ loop.index }}">&#9654;</span></td>
       <td class="mono">{{ log.created_at[:16].replace('T',' ') if log.created_at else '—' }}</td>
-      <td class="truncate" title="{{ log.article_title }}" style="max-width:200px">
-        {{ log.article_title[:45] }}{% if log.article_title|length > 45 %}...{% endif %}
+      <td>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="truncate" title="{{ log.article_title }}" style="flex:1;max-width:200px">
+            {{ log.article_title[:45] }}{% if log.article_title|length > 45 %}...{% endif %}
+          </span>
+          <button class="copy-btn" onclick="event.stopPropagation(); copyArticleContent(this, '{{ log.article_id }}')" title="Copy article content">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+          </button>
+        </div>
       </td>
       <td>
-        {% if log.source_name %}
-          <span class="log-source">{{ log.source_name }}</span>
-          <span class="log-lang">{{ log.lang or '?' }}</span>
+        {% if log.category or log.source_name %}
+          <div style="font-size:11px">
+            {% if log.category %}
+              <span style="color:var(--accent);font-weight:600">{{ log.category }}</span>
+            {% endif %}
+            {% if log.source_name %}
+              <div style="color:var(--muted);margin-top:2px">{{ log.source_name }}</div>
+            {% endif %}
+          </div>
         {% else %}
           <span style="color:var(--muted)">—</span>
         {% endif %}
       </td>
-      <td class="mono">{{ log.model or '—' }}</td>
+      <td class="mono" style="font-size:11px">
+        <div>{{ log.model or '—' }}</div>
+        <div style="color:var(--muted);margin-top:2px">{{ log.tokens_used or 0 }} tokens</div>
+      </td>
       <td style="text-align:center">
         {% if log.ai_status == 'done' %}
           <span class="log-status-done">DONE</span>
@@ -40,10 +58,9 @@
           <span style="color:var(--muted);font-size:10px">—</span>
         {% endif %}
       </td>
-      <td class="mono" style="text-align:right">{{ log.tokens_used or 0 }}</td>
     </tr>
     <tr class="log-row-detail" id="ai-detail-{{ loop.index }}">
-      <td colspan="7" class="log-detail-cell">
+      <td colspan="6" class="log-detail-cell">
         <div class="log-detail-inner">
           <div class="log-detail-block">
             <div class="lbl">Input — Article</div>

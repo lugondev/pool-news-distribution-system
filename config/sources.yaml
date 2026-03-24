@@ -54,7 +54,7 @@ sources:
   type: rss
   lang: ko
   category: world
-  enabled: true
+  enabled: false
 - id: vnexpress
   name: VnExpress
   url: https://vnexpress.net/rss/tin-moi-nhat.rss
@@ -993,7 +993,6 @@ sources:
   lang: vi
   category: finance
   enabled: false
-# --- NEW: Tech / Gaming / AI (added 2026-03-22) ---
 - id: techmeme
   name: Techmeme
   url: https://www.techmeme.com/feed.xml
@@ -1099,7 +1098,6 @@ sources:
   lang: en
   category: science
   enabled: true
-# --- SPORTS ---
 - id: espn
   name: ESPN
   url: https://www.espn.com/espn/rss/news
@@ -1156,7 +1154,6 @@ sources:
   lang: en
   category: sports
   enabled: true
-# --- ESPORTS ---
 - id: dot_esports
   name: Dot Esports
   url: https://dotesports.com/feed
@@ -1178,7 +1175,6 @@ sources:
   lang: en
   category: esports
   enabled: true
-# --- ENTERTAINMENT ---
 - id: variety
   name: Variety
   url: https://variety.com/feed/
@@ -1263,7 +1259,6 @@ sources:
   lang: en
   category: entertainment
   enabled: true
-# --- MUSIC ---
 - id: billboard
   name: Billboard
   url: https://www.billboard.com/feed/

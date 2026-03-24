@@ -102,6 +102,15 @@
       padding: 4px 12px; border-radius: 4px; font-size: 11px; cursor: pointer; transition: all .15s;
     }
     .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    .copy-btn {
+      background: transparent; border: 1px solid var(--border); color: var(--muted);
+      padding: 3px 5px; border-radius: 3px; cursor: pointer; transition: all .15s;
+      display: inline-flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .copy-btn.copied { border-color: var(--green); color: var(--green); }
   </style>
 </head>
 <body>
@@ -204,6 +213,63 @@
       var active = (saved && logTabNames.indexOf(saved) !== -1) ? saved : 'ai';
       switchLogTab(active);
     })();
+
+    // Copy article content to clipboard
+    async function copyArticleContent(btn, articleId) {
+      try {
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+        
+        const response = await fetch('/api/articles/' + articleId);
+        if (!response.ok) {
+          throw new Error('Failed to fetch article');
+        }
+        
+        const article = await response.json();
+        
+        // Build copy text
+        let text = '';
+        text += 'Title: ' + (article.title || '') + '\n\n';
+        text += 'URL: ' + (article.url || '') + '\n\n';
+        text += 'Source: ' + (article.source_name || article.source_id || '') + '\n';
+        text += 'Category: ' + (article.category || '') + '\n';
+        text += 'Language: ' + (article.lang || '') + '\n';
+        text += 'Published: ' + (article.published_at || '') + '\n\n';
+        
+        if (article.summary) {
+          text += 'Summary:\n' + article.summary + '\n\n';
+        }
+        
+        if (article.content) {
+          text += 'Content:\n' + article.content + '\n\n';
+        }
+        
+        if (article.ai_summary_en) {
+          text += 'AI Summary (EN):\n' + article.ai_summary_en + '\n\n';
+        }
+        
+        if (article.ai_summary_vi) {
+          text += 'AI Summary (VI):\n' + article.ai_summary_vi + '\n';
+        }
+        
+        // Copy to clipboard
+        await navigator.clipboard.writeText(text);
+        
+        // Visual feedback
+        btn.classList.add('copied');
+        setTimeout(function() {
+          btn.classList.remove('copied');
+          btn.disabled = false;
+          btn.style.opacity = '1';
+        }, 1500);
+        
+      } catch (error) {
+        console.error('Copy failed:', error);
+        alert('Failed to copy article content');
+        btn.disabled = false;
+        btn.style.opacity = '1';
+      }
+    }
   </script>
 </body>
 </html>

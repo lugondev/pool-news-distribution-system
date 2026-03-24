@@ -1,6 +1,7 @@
 """
 AI rewriter: tóm tắt + dịch bài sang VI/EN dùng OpenAI-compatible API.
 """
+
 import asyncio
 import json
 import logging
@@ -29,7 +30,9 @@ def _load_ai_config() -> dict:
     return cfg.get("ai", {})
 
 
-def get_openai_client(api_key: str | None = None, base_url: str | None = None) -> AsyncOpenAI:
+def get_openai_client(
+    api_key: str | None = None, base_url: str | None = None
+) -> AsyncOpenAI:
     """
     Return a cached AsyncOpenAI client. Recreates if connection params changed.
     All config comes from settings.yaml (managed via Settings UI).
@@ -79,17 +82,31 @@ TONE_PROMPTS = {
 
 SUMMARIZE_PROMPT = """{tone_instruction}
 
-Given the following news article, provide:
-1. A concise Vietnamese summary ({length_guidance}, natural Vietnamese)
-2. A concise English summary ({length_guidance})
+You are writing for readers who have NOT read the original article. Your goal is to deliver the complete information clearly and contextually so they understand the story immediately without needing to re-read.
+
+Given the following news article, create TWO reader-friendly summaries that answer:
+- WHAT happened (the core event/development)
+- WHO is involved (key people, organizations, countries)
+- WHERE/WHEN it occurred (location, timeframe if relevant)
+- WHY it matters (impact, significance, context)
+
+Structure each summary:
+1. Lead sentence: Most important information first (what + who)
+2. Context: Background or why this matters
+3. Impact/Outcome: What this means for readers or what happens next
+
+Requirements:
+- Write in clear, natural language — as if explaining to a friend
+- Each summary must be standalone and complete (no references to "the article")
+- Vietnamese: {length_guidance}, tiếng Việt tự nhiên, dễ hiểu
+- English: {length_guidance}, clear and conversational
+- NO marketing fluff, NO opinions — just facts with context
 
 Article title: {title}
 Article content: {content}
 
 Respond in JSON format:
-{{"vi": "Vietnamese summary here", "en": "English summary here"}}
-
-Do not add opinions."""
+{{"vi": "Vietnamese summary here", "en": "English summary here"}}"""
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
@@ -153,6 +170,7 @@ async def test_ai_connection(
 ) -> dict:
     """Send a short test prompt to verify AI connectivity. Returns result dict."""
     import time
+
     cfg = _load_ai_config()
     resolved_key = api_key or cfg.get("api_key", "")
     resolved_url = base_url or cfg.get("base_url", "https://api.openai.com/v1")
@@ -175,12 +193,17 @@ async def test_ai_connection(
         t0 = time.monotonic()
         response = await client.chat.completions.create(
             model=resolved_model,
-            messages=[{"role": "user", "content": (
-                f"{tone_instruction}\n\n"
-                "Summarize this test headline in JSON: "
-                '{"vi": "...", "en": "..."}\n\n'
-                "Headline: Global markets rally on trade deal optimism"
-            )}],
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"{tone_instruction}\n\n"
+                        "Summarize this test headline in JSON: "
+                        '{"vi": "...", "en": "..."}\n\n'
+                        "Headline: Global markets rally on trade deal optimism"
+                    ),
+                }
+            ],
             max_tokens=120,
             response_format={"type": "json_object"},
             temperature=0.3,
@@ -188,7 +211,13 @@ async def test_ai_connection(
         ms = int((time.monotonic() - t0) * 1000)
         content = response.choices[0].message.content if response.choices else None
         if not content:
-            return {"ok": False, "error": "Model returned empty content", "model": resolved_model, "base_url": resolved_url, "ms": ms}
+            return {
+                "ok": False,
+                "error": "Model returned empty content",
+                "model": resolved_model,
+                "base_url": resolved_url,
+                "ms": ms,
+            }
         tokens = response.usage.total_tokens if response.usage else 0
         result = json.loads(content)
         return {
@@ -203,10 +232,18 @@ async def test_ai_connection(
         }
     except Exception as e:
         ms = int((time.monotonic() - t0) * 1000) if "t0" in dir() else 0
-        return {"ok": False, "error": str(e), "model": resolved_model, "base_url": resolved_url, "ms": ms}
+        return {
+            "ok": False,
+            "error": str(e),
+            "model": resolved_model,
+            "base_url": resolved_url,
+            "ms": ms,
+        }
 
 
-async def _get_category_counts(redis: aioredis.Redis, window_hours: float = 2.0) -> dict[str, int]:
+async def _get_category_counts(
+    redis: aioredis.Redis, window_hours: float = 2.0
+) -> dict[str, int]:
     """
     Count articles per category fetched within the last `window_hours`.
     Samples up to 500 recent entries from the main feed sorted set.
@@ -286,7 +323,11 @@ async def process_pending_articles(
 
     # inter_delay spaces out actual AI calls — computed against full batch size
     # so throughput matches the spread window even if some articles are dedup-skipped.
-    inter_delay = spread_seconds / len(articles) if spread_seconds > 0 and len(articles) > 1 else 0
+    inter_delay = (
+        spread_seconds / len(articles)
+        if spread_seconds > 0 and len(articles) > 1
+        else 0
+    )
 
     processed = 0
     ai_call_count = 0  # tracks actual AI calls made (for rate limiting)
@@ -303,9 +344,13 @@ async def process_pending_articles(
                 if fetched_dt.tzinfo is None:
                     fetched_dt = fetched_dt.replace(tzinfo=timezone.utc)
                 age_sec = (datetime.now(timezone.utc) - fetched_dt).total_seconds()
-                max_age = _max_age_for_category(article.get("category", ""), category_counts)
+                max_age = _max_age_for_category(
+                    article.get("category", ""), category_counts
+                )
                 if age_sec > max_age:
-                    await redis.hset(f"news:{article['id']}", "ai_status", "age_skipped")
+                    await redis.hset(
+                        f"news:{article['id']}", "ai_status", "age_skipped"
+                    )
                     logger.debug(
                         f"Age-skipped {article['id']} "
                         f"(age={age_sec:.0f}s > max={max_age}s, cat={article.get('category')})"
@@ -317,10 +362,14 @@ async def process_pending_articles(
 
         # Pre-AI semantic dedup: check BEFORE sleeping to avoid wasted delay
         if ai_dedup_threshold > 0 and title:
-            ai_dup = await check_ai_duplicate(redis, title, threshold=ai_dedup_threshold)
+            ai_dup = await check_ai_duplicate(
+                redis, title, threshold=ai_dedup_threshold
+            )
             if ai_dup.is_duplicate:
                 await redis.hset(f"news:{article['id']}", "ai_status", "dedup_skipped")
-                logger.info(f"AI dedup skip {article['id']}: similar story already summarised")
+                logger.info(
+                    f"AI dedup skip {article['id']}: similar story already summarised"
+                )
                 processed += 1
                 continue
 
@@ -330,9 +379,13 @@ async def process_pending_articles(
 
         try:
             vi, en, tokens = await rewrite_article(
-                article, model=model, max_tokens=max_tokens,
-                temperature=temperature, tone=tone,
-                api_key=api_key, base_url=base_url,
+                article,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                tone=tone,
+                api_key=api_key,
+                base_url=base_url,
             )
         except Exception as e:
             # AI failed after tenacity retries — mark failed so it won't block the queue.

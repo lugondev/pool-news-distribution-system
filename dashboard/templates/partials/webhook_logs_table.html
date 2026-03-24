@@ -4,7 +4,7 @@
     <tr>
       <th>Time</th>
       <th>Article</th>
-      <th>Webhook URL</th>
+      <th>Webhook</th>
       <th>Status</th>
     </tr>
   </thead>
@@ -12,8 +12,20 @@
     {% for log in logs %}
     <tr>
       <td class="mono">{{ log.sent_at[:16].replace('T',' ') if log.sent_at else '—' }}</td>
-      <td class="truncate" title="{{ log.article_title }}">{{ log.article_title[:50] }}{% if log.article_title|length > 50 %}...{% endif %}</td>
-      <td class="url-cell" title="{{ log.webhook_url }}">{{ log.webhook_url }}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="truncate" title="{{ log.article_title }}" style="flex:1">
+            {{ log.article_title[:50] }}{% if log.article_title|length > 50 %}...{% endif %}
+          </span>
+          <button class="copy-btn" onclick="copyArticleContent(this, '{{ log.article_id }}')" title="Copy article content">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+          </button>
+        </div>
+      </td>
+      <td style="font-size:11px">{{ log.webhook_name }}</td>
       <td>
         {% if log.success %}
           <span class="status-ok">{{ log.status_code }}</span>

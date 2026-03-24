@@ -244,8 +244,15 @@ function loadFilterOptions() {
   <div class="empty-state" style="margin-bottom:16px">No webhook endpoints configured.</div>
   {% endif %}
 
+  <!-- Add button (show when there are existing endpoints) -->
+  {% if endpoints %}
+  <div style="margin-top:16px">
+    <button class="btn btn-outline" onclick="toggleAddForm('wh')">+ Add Endpoint</button>
+  </div>
+  {% endif %}
+
   <!-- Add new endpoint -->
-  <div class="wh-add">
+  <div class="wh-add" id="wh-add-form" style="{{ 'display:none' if endpoints else '' }}">
     <p class="section-title">Add Endpoint</p>
     <form hx-post="/webhooks/add" hx-target="#tab-panel-webhook" hx-swap="innerHTML">
       <div class="form-row-2">
@@ -339,6 +346,9 @@ function loadFilterOptions() {
       </div>
       <div class="form-actions" style="margin-top:10px">
         <button type="submit" class="btn btn-primary">Add Webhook</button>
+        {% if endpoints %}
+        <button type="button" class="btn btn-cancel" onclick="toggleAddForm('wh')">Cancel</button>
+        {% endif %}
       </div>
     </form>
   </div>
@@ -482,6 +492,13 @@ function loadFilterOptions() {
     var div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+  
+  function toggleAddForm(type) {
+    var form = document.getElementById(type + '-add-form');
+    if (form) {
+      form.style.display = form.style.display === 'none' ? '' : 'none';
+    }
   }
   
   loadFilterOptions();

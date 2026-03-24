@@ -238,7 +238,14 @@ function loadFilterOptions() {
   <div class="empty-state" style="margin-bottom:16px">No Telegram channels configured.</div>
   {% endif %}
 
-  <div class="wh-add">
+  <!-- Add button (show when there are existing channels) -->
+  {% if channels %}
+  <div style="margin-top:16px">
+    <button class="btn btn-outline" onclick="toggleAddForm('tg')">+ Add Channel</button>
+  </div>
+  {% endif %}
+
+  <div class="wh-add" id="tg-add-form" style="{{ 'display:none' if channels else '' }}">
     <p class="section-title">Add Channel</p>
     <form hx-post="/telegram/add" hx-target="#tab-panel-telegram" hx-swap="innerHTML">
       <div class="form-row-2">
@@ -331,6 +338,9 @@ function loadFilterOptions() {
           Test Connection
         </button>
         <span id="tg-add-test-result" style="font-size:12px"></span>
+        {% if channels %}
+        <button type="button" class="btn btn-cancel" onclick="toggleAddForm('tg')">Cancel</button>
+        {% endif %}
       </div>
     </form>
   </div>
@@ -377,6 +387,12 @@ function loadFilterOptions() {
     var tc = document.getElementById(prefix + '-tpl-cfg');
     if (fc) fc.style.display = mode === 'fields' ? '' : 'none';
     if (tc) tc.style.display = mode === 'template' ? '' : 'none';
+  }
+  function toggleAddForm(type) {
+    var form = document.getElementById(type + '-add-form');
+    if (form) {
+      form.style.display = form.style.display === 'none' ? '' : 'none';
+    }
   }
   loadFilterOptions();
 </script>

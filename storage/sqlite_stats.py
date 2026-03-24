@@ -2,6 +2,7 @@
 SQLite statistics — crawl logs, webhook logs, AI logs, system events, API requests.
 Dùng aiosqlite để không block event loop.
 """
+
 import json
 import os
 from datetime import datetime, timezone
@@ -50,6 +51,7 @@ async def init_db() -> None:
             CREATE TABLE IF NOT EXISTS webhook_logs (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 article_id  TEXT NOT NULL,
+                webhook_id  TEXT,
                 webhook_url TEXT NOT NULL,
                 sent_at     TEXT NOT NULL,
                 status_code INTEGER,
@@ -124,7 +126,9 @@ async def init_db() -> None:
             ("idx_crawl_http", "http_status"),
         ]:
             try:
-                await db.execute(f"CREATE INDEX IF NOT EXISTS {idx} ON crawl_logs({col})")
+                await db.execute(
+                    f"CREATE INDEX IF NOT EXISTS {idx} ON crawl_logs({col})"
+                )
             except Exception:
                 pass
 
@@ -157,12 +161,27 @@ async def log_crawl_result(source_id: str, stats: dict, started_at: datetime) ->
         await db.commit()
 
 
-async def log_webhook(article_id: str, webhook_url: str, status_code: int, success: bool, error_msg: str = None) -> None:
+async def log_webhook(
+    article_id: str,
+    webhook_url: str,
+    status_code: int,
+    success: bool,
+    error_msg: str = None,
+    webhook_id: str = None,
+) -> None:
     async with aiosqlite.connect(_db_path()) as db:
         await db.execute(
-            """INSERT INTO webhook_logs (article_id, webhook_url, sent_at, status_code, success, error_msg)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (article_id, webhook_url, datetime.now(timezone.utc).isoformat(), status_code, int(success), error_msg),
+            """INSERT INTO webhook_logs (article_id, webhook_id, webhook_url, sent_at, status_code, success, error_msg)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                article_id,
+                webhook_id,
+                webhook_url,
+                datetime.now(timezone.utc).isoformat(),
+                status_code,
+                int(success),
+                error_msg,
+            ),
         )
         await db.commit()
 
@@ -253,20 +272,26 @@ async def get_dashboard_stats() -> dict:
         }
 
 
-async def get_recent_webhook_logs(limit: int = 20, offset: int = 0) -> tuple[list[dict], int]:
+async def get_recent_webhook_logs(
+    limit: int = 20, offset: int = 0
+) -> tuple[list[dict], int]:
     async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
-        total_row = await db.execute_fetchall("SELECT COUNT(*) as cnt FROM webhook_logs")
+        total_row = await db.execute_fetchall(
+            "SELECT COUNT(*) as cnt FROM webhook_logs"
+        )
         total = total_row[0]["cnt"] if total_row else 0
         rows = await db.execute_fetchall(
-            "SELECT article_id, webhook_url, sent_at, status_code, success, error_msg "
+            "SELECT article_id, webhook_id, webhook_url, sent_at, status_code, success, error_msg "
             "FROM webhook_logs ORDER BY sent_at DESC LIMIT ? OFFSET ?",
             (limit, offset),
         )
         return [dict(r) for r in rows], total
 
 
-async def get_recent_ai_logs(limit: int = 20, offset: int = 0) -> tuple[list[dict], int]:
+async def get_recent_ai_logs(
+    limit: int = 20, offset: int = 0
+) -> tuple[list[dict], int]:
     async with aiosqlite.connect(_db_path()) as db:
         db.row_factory = aiosqlite.Row
         total_row = await db.execute_fetchall("SELECT COUNT(*) as cnt FROM ai_logs")
@@ -316,6 +341,7 @@ async def get_telegram_stats() -> dict:
 
 
 # ── Crawl log queries for tracing & optimization ─────────────────────────────
+
 
 async def get_crawl_logs(
     limit: int = 50,
@@ -483,7 +509,14 @@ async def log_api_request(
         await db.execute(
             """INSERT INTO api_logs (method, path, status_code, duration_ms, requested_at, error_msg)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            (method, path, status_code, duration_ms, requested_at.isoformat(), error_msg),
+            (
+                method,
+                path,
+                status_code,
+                duration_ms,
+                requested_at.isoformat(),
+                error_msg,
+            ),
         )
         await db.commit()
 

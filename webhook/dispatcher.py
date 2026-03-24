@@ -132,6 +132,7 @@ async def dispatch_article(
 
         await _dispatch_to_url(
             article_id=article["id"],
+            webhook_id=ep.get("id", ""),
             url=url,
             payload=payload,
             method=method,
@@ -147,6 +148,7 @@ async def dispatch_article(
 
 async def _dispatch_to_url(
     article_id: str,
+    webhook_id: str,
     url: str,
     payload: dict | str,
     method: str,
@@ -163,7 +165,9 @@ async def _dispatch_to_url(
             status_code, success = await _send_webhook(
                 url, payload, method, timeout, content_type
             )
-            await log_webhook(article_id, url, status_code, success)
+            await log_webhook(
+                article_id, url, status_code, success, webhook_id=webhook_id
+            )
             if success:
                 logger.info(
                     f"Webhook {method} OK [{status_code}] → {url} (article {article_id})"
@@ -179,5 +183,7 @@ async def _dispatch_to_url(
                 f"Webhook {method} error → {url}, attempt {attempt + 1}: {e}"
             )
 
-    await log_webhook(article_id, url, 0, False, error_msg=last_error)
+    await log_webhook(
+        article_id, url, 0, False, error_msg=last_error, webhook_id=webhook_id
+    )
     logger.error(f"Webhook {method} permanently failed → {url} (article {article_id})")

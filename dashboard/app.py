@@ -466,7 +466,9 @@ async def source_update(
 LOG_PAGE_SIZE = 15
 
 
-async def _enrich_logs(logs: list[dict], full: bool = False) -> list[dict]:
+async def _enrich_logs(
+    logs: list[dict], full: bool = False, include_content: bool = False
+) -> list[dict]:
     """Attach article data to each log entry from Redis."""
     redis = get_redis()
     for log in logs:
@@ -481,6 +483,9 @@ async def _enrich_logs(logs: list[dict], full: bool = False) -> list[dict]:
                 log["ai_summary_vi"] = article.get("ai_summary_vi", "")
                 log["ai_summary_en"] = article.get("ai_summary_en", "")
                 log["ai_status"] = article.get("ai_status", "")
+            if include_content:
+                log["article_content"] = article.get("content", "")
+                log["article_summary"] = article.get("summary", "")
         else:
             log["article_title"] = "—"
     return logs
@@ -671,7 +676,7 @@ async def settings_ai_test(request: Request):
 async def ai_logs_partial(request: Request, page: int = 1):
     offset = (page - 1) * LOG_PAGE_SIZE
     logs, total = await get_recent_ai_logs(limit=LOG_PAGE_SIZE, offset=offset)
-    logs = await _enrich_logs(logs, full=True)
+    logs = await _enrich_logs(logs, full=True, include_content=True)
     return templates.TemplateResponse(
         "partials/ai_logs_table.html",
         {
@@ -708,10 +713,27 @@ def _get_all_source_ids() -> list[str]:
 async def _webhook_ctx(request, page=1, **extra) -> dict:
     offset = (page - 1) * LOG_PAGE_SIZE
     logs, total = await get_recent_webhook_logs(limit=LOG_PAGE_SIZE, offset=offset)
-    logs = await _enrich_logs(logs)
+    logs = await _enrich_logs(logs, include_content=True)
+
+    # Map webhook ID to name (fallback to URL if ID not found)
+    endpoints = _get_webhook_endpoints()
+    id_to_name = {ep["id"]: ep["name"] for ep in endpoints}
+    url_to_name = {ep["url"]: ep["name"] for ep in endpoints}
+
+    for log in logs:
+        webhook_id = log.get("webhook_id")
+        webhook_url = log.get("webhook_url", "—")
+
+        if webhook_id and webhook_id in id_to_name:
+            log["webhook_name"] = id_to_name[webhook_id]
+        elif webhook_url in url_to_name:
+            log["webhook_name"] = url_to_name[webhook_url]
+        else:
+            log["webhook_name"] = webhook_url
+
     ctx = {
         "request": request,
-        "endpoints": _get_webhook_endpoints(),
+        "endpoints": endpoints,
         "logs": logs,
         "log_page": page,
         "log_total_pages": max(1, math.ceil(total / LOG_PAGE_SIZE)),
@@ -926,7 +948,16 @@ async def telegram_logs_partial(
     logs, total = await get_recent_telegram_logs(
         limit=LOG_PAGE_SIZE, offset=offset, channel_id=channel_id
     )
-    logs = await _enrich_logs(logs, full=True)
+    logs = await _enrich_logs(logs, full=True, include_content=True)
+
+    # Map channel_id to name
+    channels = _get_telegram_channels()
+    id_to_name = {ch["id"]: ch["name"] for ch in channels}
+    for log in logs:
+        log["channel_name"] = id_to_name.get(
+            log.get("channel_id"), log.get("channel_id", "—")
+        )
+
     return templates.TemplateResponse(
         "partials/telegram_logs_table.html",
         {
