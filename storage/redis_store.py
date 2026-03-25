@@ -9,6 +9,7 @@ Key structure:
   news:feed:{YYYYMMDDHH}     → Sorted Set hourly
   news:source:{source_id}    → Sorted Set per source
 """
+
 import json
 from datetime import datetime, timezone
 
@@ -24,7 +25,11 @@ CRAWL_SCHEDULE_KEY = "news:crawl:schedule"
 
 
 def _ts(dt: datetime) -> float:
-    return dt.replace(tzinfo=timezone.utc).timestamp() if dt.tzinfo is None else dt.timestamp()
+    return (
+        dt.replace(tzinfo=timezone.utc).timestamp()
+        if dt.tzinfo is None
+        else dt.timestamp()
+    )
 
 
 def _article_to_hash(article: Article) -> dict:
@@ -44,6 +49,7 @@ def _article_to_hash(article: Article) -> dict:
         "ai_summary_vi": article.ai_summary_vi,
         "ai_summary_en": article.ai_summary_en,
         "ai_status": article.ai_status,
+        "type": article.type,  # NEW: article type (original/synthetic)
     }
 
 
@@ -98,7 +104,9 @@ async def get_article(redis: aioredis.Redis, article_id: str) -> dict | None:
     return {k.decode(): v.decode() for k, v in data.items()}
 
 
-async def update_article_content(redis: aioredis.Redis, article_id: str, content: str) -> None:
+async def update_article_content(
+    redis: aioredis.Redis, article_id: str, content: str
+) -> None:
     """Update content field for an existing article (used by defuddle enrichment)."""
     await redis.hset(f"news:{article_id}", "content", content)
 
@@ -109,11 +117,14 @@ async def update_article_ai(
     ai_summary_vi: str,
     ai_summary_en: str,
 ) -> None:
-    await redis.hset(f"news:{article_id}", mapping={
-        "ai_summary_vi": ai_summary_vi,
-        "ai_summary_en": ai_summary_en,
-        "ai_status": "done",
-    })
+    await redis.hset(
+        f"news:{article_id}",
+        mapping={
+            "ai_summary_vi": ai_summary_vi,
+            "ai_summary_en": ai_summary_en,
+            "ai_status": "done",
+        },
+    )
 
 
 async def get_latest_articles(
@@ -122,14 +133,22 @@ async def get_latest_articles(
     offset: int = 0,
     source_id: str | None = None,
     category: str | None = None,
+    article_type: str | None = None,  # NEW: "original", "synthetic", or None (all)
 ) -> tuple[list[dict], int]:
     """Lấy tin mới nhất (score DESC = newest first). Returns (articles, total_count)."""
     if source_id:
         feed_key = f"news:source:{source_id}"
     elif category:
-        feed_key = f"news:cat:{category}"
+        # If filtering by type, use type-specific feed
+        if article_type == "synthetic":
+            feed_key = f"news:synth:cat:{category}"
+        else:
+            feed_key = f"news:cat:{category}"
+    elif article_type == "synthetic":
+        feed_key = "news:synth:feed"
     else:
         feed_key = "news:feed"
+
     total = await redis.zcard(feed_key)
     ids = await redis.zrevrange(feed_key, offset, offset + limit - 1)
     if not ids:
@@ -143,7 +162,11 @@ async def get_latest_articles(
     articles = []
     for raw in results:
         if raw:
-            articles.append({k.decode(): v.decode() for k, v in raw.items()})
+            article = {k.decode(): v.decode() for k, v in raw.items()}
+            # Apply type filter if specified and not using type-specific feed
+            if article_type == "original" and article.get("type") == "synthetic":
+                continue
+            articles.append(article)
     return articles, total
 
 
@@ -203,7 +226,9 @@ async def get_due_source_ids(
     now = datetime.now(timezone.utc).timestamp()
 
     # Sources already scheduled and overdue
-    raw_due = await redis.zrangebyscore(CRAWL_SCHEDULE_KEY, 0, now, start=0, num=limit * 2)
+    raw_due = await redis.zrangebyscore(
+        CRAWL_SCHEDULE_KEY, 0, now, start=0, num=limit * 2
+    )
     due = [b.decode() if isinstance(b, bytes) else b for b in raw_due]
 
     # Sources never scheduled (brand new or after Redis flush)
@@ -214,7 +239,9 @@ async def get_due_source_ids(
     return (due + unscheduled)[:limit]
 
 
-async def set_source_next_crawl(redis: aioredis.Redis, source_id: str, next_ts: float) -> None:
+async def set_source_next_crawl(
+    redis: aioredis.Redis, source_id: str, next_ts: float
+) -> None:
     """Schedule a source's next crawl at the given Unix timestamp."""
     await redis.zadd(CRAWL_SCHEDULE_KEY, {source_id: next_ts})
 
@@ -227,8 +254,26 @@ async def get_feed_stats(redis: aioredis.Redis) -> dict:
     hour_key = now.strftime("%Y%m%d%H")
     today = await redis.zcard(f"news:feed:{date_key}")
     this_hour = await redis.zcard(f"news:feed:{hour_key}")
+
+    # Synthetic articles stats
+    synthetic_total = await redis.zcard("news:synth:feed")
+    synthetic_today = 0
+    if synthetic_total > 0:
+        # Count synthetic articles created today by checking timestamp
+        today_start = (
+            datetime.now(timezone.utc)
+            .replace(hour=0, minute=0, second=0, microsecond=0)
+            .timestamp()
+        )
+        synthetic_ids = await redis.zrangebyscore(
+            "news:synth:feed", today_start, "+inf"
+        )
+        synthetic_today = len(synthetic_ids)
+
     return {
         "total_in_redis": total,
         "today": today,
         "this_hour": this_hour,
+        "synthetic_total": synthetic_total,
+        "synthetic_today": synthetic_today,
     }

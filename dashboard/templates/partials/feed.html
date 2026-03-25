@@ -1,13 +1,27 @@
+<!-- Article type filter bar (NEW) -->
+<div class="filter-bar" style="margin-bottom:8px">
+  <span class="filter-label">Type:</span>
+  <button class="filter-chip {% if not article_type %}active{% endif %}"
+          hx-get="/partials/feed?page=1{% if category %}&category={{ category }}{% endif %}{% if source %}&source={{ source }}{% endif %}"
+          hx-target="#feed" hx-swap="innerHTML">All Articles</button>
+  <button class="filter-chip {% if article_type == 'original' %}active{% endif %}"
+          hx-get="/partials/feed?page=1&article_type=original{% if category %}&category={{ category }}{% endif %}{% if source %}&source={{ source }}{% endif %}"
+          hx-target="#feed" hx-swap="innerHTML">📰 Original (RSS)</button>
+  <button class="filter-chip {% if article_type == 'synthetic' %}active{% endif %}"
+          hx-get="/partials/feed?page=1&article_type=synthetic{% if category %}&category={{ category }}{% endif %}{% if source %}&source={{ source }}{% endif %}"
+          hx-target="#feed" hx-swap="innerHTML">✨ Synthetic (AI)</button>
+</div>
+
 <!-- Category filter bar -->
 <div class="filter-bar" style="margin-bottom:8px">
   <span class="filter-label">Category:</span>
   <button class="filter-chip {% if not category %}active{% endif %}"
-          hx-get="/partials/feed?page=1{% if source %}&source={{ source }}{% endif %}"
+          hx-get="/partials/feed?page=1{% if article_type %}&article_type={{ article_type }}{% endif %}{% if source %}&source={{ source }}{% endif %}"
           hx-target="#feed" hx-swap="innerHTML">All</button>
   {% for c in categories %}
   {% if c.enabled %}
   <button class="filter-chip {% if category == c.id %}active{% endif %}"
-          hx-get="/partials/feed?page=1&category={{ c.id }}{% if source %}&source={{ source }}{% endif %}"
+          hx-get="/partials/feed?page=1&category={{ c.id }}{% if article_type %}&article_type={{ article_type }}{% endif %}{% if source %}&source={{ source }}{% endif %}"
           hx-target="#feed" hx-swap="innerHTML">{{ c.name }}</button>
   {% endif %}
   {% endfor %}
@@ -17,21 +31,23 @@
 <div class="filter-bar">
   <span class="filter-label">Source:</span>
   <button class="filter-chip {% if not source %}active{% endif %}"
-          hx-get="/partials/feed?page=1{% if category %}&category={{ category }}{% endif %}"
+          hx-get="/partials/feed?page=1{% if article_type %}&article_type={{ article_type }}{% endif %}{% if category %}&category={{ category }}{% endif %}"
           hx-target="#feed" hx-swap="innerHTML">All</button>
   {% for s in sources %}
   {% if s.enabled %}
   <button class="filter-chip {% if source == s.id %}active{% endif %}"
-          hx-get="/partials/feed?page=1&source={{ s.id }}{% if category %}&category={{ category }}{% endif %}"
+          hx-get="/partials/feed?page=1&source={{ s.id }}{% if article_type %}&article_type={{ article_type }}{% endif %}{% if category %}&category={{ category }}{% endif %}"
           hx-target="#feed" hx-swap="innerHTML">{{ s.name }}</button>
   {% endif %}
   {% endfor %}
 </div>
 
-{% if source or category %}
+{% if source or category or article_type %}
 <div class="filter-active">
+  {% if article_type %}Type: <strong>{{ article_type }}</strong>{% endif %}
+  {% if article_type and category %} · {% endif %}
   {% if category %}Category: <strong>{{ category }}</strong>{% endif %}
-  {% if source and category %} · {% endif %}
+  {% if (article_type or category) and source %} · {% endif %}
   {% if source %}Source: <strong>{{ source }}</strong>{% endif %}
   <button class="filter-clear"
           hx-get="/partials/feed?page=1"
@@ -40,54 +56,90 @@
 {% endif %}
 
 {% for article in articles %}
-<div class="article-card">
+<div class="article-card{% if article.type == 'synthetic' %} synthetic-card{% endif %}">
   <div class="meta">
-    <span class="source source-link"
-          hx-get="/partials/feed?page=1&source={{ article.source_id }}{% if category %}&category={{ category }}{% endif %}"
-          hx-target="#feed" hx-swap="innerHTML">{{ article.source_name }}</span>
-    <span class="lang">{{ article.lang }}</span>
+    {% if article.type == 'synthetic' %}
+      <span class="ai-badge" style="background:linear-gradient(135deg, var(--accent), #818cf8);color:white;font-weight:600;padding:2px 8px">
+        ✨ AI Synthetic
+      </span>
+      <span class="cat-badge" style="background:rgba(99,102,241,0.1);color:var(--accent);border:1px solid var(--accent)"
+            title="Angle: {{ article.angle or 'summary' }}">
+        {{ article.angle or 'summary' }}
+      </span>
+    {% else %}
+      <span class="source source-link"
+            hx-get="/partials/feed?page=1&source={{ article.source_id }}{% if category %}&category={{ category }}{% endif %}"
+            hx-target="#feed" hx-swap="innerHTML">{{ article.source_name }}</span>
+      <span class="lang">{{ article.lang }}</span>
+    {% endif %}
     <span class="cat-badge"
           hx-get="/partials/feed?page=1&category={{ article.category }}{% if source %}&source={{ source }}{% endif %}"
           hx-target="#feed" hx-swap="innerHTML">{{ article.category }}</span>
-    {% if article.ai_status == 'done' %}
-      <span class="ai-badge ai-done">AI ✓</span>
-    {% elif article.ai_status == 'dedup_skipped' %}
-      <span class="ai-badge" style="background:rgba(99,102,241,0.15);color:#818cf8">AI skip</span>
-    {% elif article.ai_status == 'failed' %}
-      <span class="ai-badge" style="background:rgba(239,68,68,0.15);color:#ef4444">AI ✗</span>
-    {% else %}
-      <span class="ai-badge ai-pending">AI …</span>
+    {% if article.type != 'synthetic' %}
+      {% if article.ai_status == 'done' %}
+        <span class="ai-badge ai-done">AI ✓</span>
+      {% elif article.ai_status == 'dedup_skipped' %}
+        <span class="ai-badge" style="background:rgba(99,102,241,0.15);color:#818cf8">AI skip</span>
+      {% elif article.ai_status == 'failed' %}
+        <span class="ai-badge" style="background:rgba(239,68,68,0.15);color:#ef4444">AI ✗</span>
+      {% else %}
+        <span class="ai-badge ai-pending">AI …</span>
+      {% endif %}
     {% endif %}
     <span class="time">
-      {% if article.published_at %}
-        <span title="Published: {{ article.published_at | fmt_dt }}">
-          📰 {{ article.published_at | fmt_dt("%d/%m %H:%M") }}
+      {% if article.type == 'synthetic' %}
+        <span title="Created: {{ article.created_at or article.fetched_at | fmt_dt }}">
+          🤖 {{ article.created_at or article.fetched_at | fmt_dt("%d/%m %H:%M") }}
         </span>
-      {% endif %}
-      {% if article.fetched_at %}
-        {% set lag = article.fetched_at | dt_lag(article.published_at) %}
-        <span title="Fetched at: {{ article.fetched_at | fmt_dt }}" style="opacity:0.65">
-          · ⬇{{ article.fetched_at | fmt_dt("%H:%M") }}{% if lag %} <span style="opacity:0.7">({{ lag }})</span>{% endif %}
-        </span>
+        {% if article.num_source_articles %}
+          <span style="opacity:0.7" title="Generated from {{ article.num_source_articles }} source articles">
+            · {{ article.num_source_articles }} sources
+          </span>
+        {% endif %}
+      {% else %}
+        {% if article.published_at %}
+          <span title="Published: {{ article.published_at | fmt_dt }}">
+            📰 {{ article.published_at | fmt_dt("%d/%m %H:%M") }}
+          </span>
+        {% endif %}
+        {% if article.fetched_at %}
+          {% set lag = article.fetched_at | dt_lag(article.published_at) %}
+          <span title="Fetched at: {{ article.fetched_at | fmt_dt }}" style="opacity:0.65">
+            · ⬇{{ article.fetched_at | fmt_dt("%H:%M") }}{% if lag %} <span style="opacity:0.7">({{ lag }})</span>{% endif %}
+          </span>
+        {% endif %}
       {% endif %}
     </span>
   </div>
   <div class="title">
-    <a href="{{ article.url }}" target="_blank" rel="noopener">{{ article.title }}</a>
+    {% if article.type == 'synthetic' %}
+      <a href="/article/{{ article.id }}" style="color:var(--accent)">
+        {{ article.title_en or article.title }}
+      </a>
+    {% else %}
+      <a href="{{ article.url }}" target="_blank" rel="noopener">{{ article.title }}</a>
+    {% endif %}
   </div>
-  {% if article.ai_status == 'done' and article.ai_summary_vi %}
-  <div class="summary">
-    🇻🇳 {{ article.ai_summary_vi }}
-  </div>
+  {% if article.type == 'synthetic' %}
+    <div class="summary" style="border-left:3px solid var(--accent);padding-left:12px">
+      🇻🇳 {{ article.content_vi }}
+    </div>
+    <div class="summary" style="margin-top:8px;opacity:0.85">
+      🇬🇧 {{ article.content_en }}
+    </div>
+  {% elif article.ai_status == 'done' and article.ai_summary_vi %}
+    <div class="summary">
+      🇻🇳 {{ article.ai_summary_vi }}
+    </div>
   {% elif article.summary %}
-  <div class="summary">{{ article.summary[:200] }}{% if article.summary|length > 200 %}...{% endif %}</div>
+    <div class="summary">{{ article.summary[:200] }}{% if article.summary|length > 200 %}...{% endif %}</div>
   {% endif %}
 </div>
 {% endfor %}
 
 {% if not articles %}
 <div style="text-align:center;padding:40px;color:var(--muted)">
-  {% if source or category %}
+  {% if source or category or article_type %}
     No articles matching this filter.
   {% else %}
     No articles yet. Waiting for first crawl...
@@ -97,7 +149,8 @@
 
 {% set qs_source = "&source=" ~ source if source else "" %}
 {% set qs_category = "&category=" ~ category if category else "" %}
-{% set qs_filters = qs_source ~ qs_category %}
+{% set qs_article_type = "&article_type=" ~ article_type if article_type else "" %}
+{% set qs_filters = qs_source ~ qs_category ~ qs_article_type %}
 
 {% if total_pages > 1 %}
 <nav class="pagination">

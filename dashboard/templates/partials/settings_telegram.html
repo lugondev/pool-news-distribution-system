@@ -215,6 +215,20 @@ function loadFilterOptions() {
             <input type="text" id="tg-fs-{{ ch.id }}" name="filter_sources" value="{{ ch.filter_sources|join(', ') if ch.filter_sources else '' }}" placeholder="techcrunch, reuters" autocomplete="off" data-filter-type="source">
           </div>
         </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Article Types</label>
+            <select name="filter_article_types_mode" onchange="toggleFilterInput(this,'tg-ft-wrap-{{ ch.id }}')">
+              <option value="all" {{ 'selected' if (ch.filter_article_types_mode or 'all') == 'all' }}>All types</option>
+              <option value="include" {{ 'selected' if ch.filter_article_types_mode == 'include' }}>Include only</option>
+              <option value="exclude" {{ 'selected' if ch.filter_article_types_mode == 'exclude' }}>Exclude</option>
+            </select>
+          </div>
+          <div class="form-group" id="tg-ft-wrap-{{ ch.id }}" style="display:{{ 'none' if (ch.filter_article_types_mode or 'all') == 'all' else '' }}">
+            <label>Types <span class="hint">original, synthetic</span></label>
+            <input type="text" name="filter_article_types" value="{{ ch.filter_article_types|join(', ') if ch.filter_article_types else '' }}" placeholder="original, synthetic" autocomplete="off">
+          </div>
+        </div>
         <div class="form-row-2" style="margin-top:6px">
           <div class="form-group">
             <label>Max messages <span class="hint">0 = unlimited</span></label>
@@ -315,6 +329,20 @@ function loadFilterOptions() {
           <div class="form-group" id="tg-add-fs-wrap" style="display:none">
             <label>Source IDs</label>
             <input type="text" id="tg-add-fs" name="filter_sources" placeholder="techcrunch, reuters" autocomplete="off" data-filter-type="source">
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Article Types</label>
+            <select name="filter_article_types_mode" onchange="toggleFilterInput(this,'tg-add-ft-wrap')">
+              <option value="all" selected>All types</option>
+              <option value="include">Include only</option>
+              <option value="exclude">Exclude</option>
+            </select>
+          </div>
+          <div class="form-group" id="tg-add-ft-wrap" style="display:none">
+            <label>Types <span class="hint">original, synthetic</span></label>
+            <input type="text" name="filter_article_types" placeholder="original, synthetic" autocomplete="off">
           </div>
         </div>
         <div class="form-row-2" style="margin-top:6px">

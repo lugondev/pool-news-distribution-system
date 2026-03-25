@@ -24,10 +24,15 @@
            placeholder="title, url, source_name, category, ai_summary_vi, ai_summary_en">
   </div>
   <div style="font-size:10px;color:var(--muted);margin:-6px 0 8px;line-height:1.5">
-    Available: <code>id</code> <code>source_id</code> <code>source_name</code> <code>url</code>
+    <div style="margin-bottom:4px"><strong style="color:#94a3b8">Original articles:</strong></div>
+    <code>id</code> <code>type</code> <code>source_id</code> <code>source_name</code> <code>url</code>
     <code>title</code> <code>summary</code> <code>content</code> <code>lang</code>
     <code>declared_lang</code> <code>category</code> <code>published_at</code>
     <code>fetched_at</code> <code>ai_summary_vi</code> <code>ai_summary_en</code> <code>ai_status</code>
+    <div style="margin:6px 0 4px"><strong style="color:#94a3b8">Synthetic articles:</strong></div>
+    <code>id</code> <code>type</code> <code>category</code> <code>title_en</code> <code>title_vi</code>
+    <code>content_en</code> <code>content_vi</code> <code>angle</code> <code>source_article_ids</code>
+    <code>num_source_articles</code> <code>ai_model</code> <code>ai_tokens</code> <code>created_at</code>
   </div>
 </div>
 
@@ -38,10 +43,24 @@
               placeholder='{"title":"{{ "{{" }} title {{ "}}" }}","summary":"{{ "{{" }} ai_summary_en {{ "}}" }}"}'>{{ tpl }}</textarea>
   </div>
   <div style="font-size:10px;color:var(--muted);margin:-6px 0 8px;line-height:1.6">
-    Variables: <code>{{ "{{" }} title {{ "}}" }}</code> <code>{{ "{{" }} url {{ "}}" }}</code>
+    <div style="margin-bottom:6px"><strong style="color:#94a3b8">Original article variables:</strong></div>
+    <code>{{ "{{" }} title {{ "}}" }}</code> <code>{{ "{{" }} url {{ "}}" }}</code>
     <code>{{ "{{" }} source_name {{ "}}" }}</code> <code>{{ "{{" }} category {{ "}}" }}</code>
     <code>{{ "{{" }} ai_summary_vi {{ "}}" }}</code> <code>{{ "{{" }} ai_summary_en {{ "}}" }}</code>
     <code>{{ "{{" }} lang {{ "}}" }}</code> <code>{{ "{{" }} published_at {{ "}}" }}</code>
-    <code>{{ "{{" }} sent_at {{ "}}" }}</code> · Conditionals: <code>{{ "{%" }} if ai_summary_vi {{ "%}" }}...{{ "{%" }} endif {{ "%}" }}</code>
+    <code>{{ "{{" }} sent_at {{ "}}" }}</code>
+    
+    <div style="margin:8px 0 6px"><strong style="color:#94a3b8">Synthetic article variables:</strong></div>
+    <code>{{ "{{" }} content_en {{ "}}" }}</code> <code>{{ "{{" }} content_vi {{ "}}" }}</code>
+    <code>{{ "{{" }} title_en {{ "}}" }}</code> <code>{{ "{{" }} title_vi {{ "}}" }}</code>
+    <code>{{ "{{" }} angle {{ "}}" }}</code> <code>{{ "{{" }} num_source_articles {{ "}}" }}</code>
+    <code>{{ "{{" }} ai_model {{ "}}" }}</code> <code>{{ "{{" }} created_at {{ "}}" }}</code>
+    
+    <div style="margin:8px 0 6px"><strong style="color:#94a3b8">Universal (both types):</strong></div>
+    <code>{{ "{{" }} id {{ "}}" }}</code> <code>{{ "{{" }} type {{ "}}" }}</code> <code>{{ "{{" }} category {{ "}}" }}</code>
+    
+    <div style="margin:8px 0 6px"><strong style="color:#94a3b8">Conditionals & fallbacks:</strong></div>
+    <code>{{ "{%" }} if type == 'synthetic' {{ "%}" }}...{{ "{%" }} endif {{ "%}" }}</code>
+    <code>{{ "{{" }} content_en|default(ai_summary_en) {{ "}}" }}</code>
   </div>
 </div>

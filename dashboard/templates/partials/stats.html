@@ -15,14 +15,21 @@
       <div class="sub">{{ db.crawl.saved or 0 }} saved · {{ db.crawl.dupes or 0 }} dupes</div>
     </div>
     <div class="stat-card">
-      <div class="label">Webhooks Sent</div>
-      <div class="value">{{ db.webhook.total or 0 }}</div>
-      <div class="sub">{{ db.webhook.ok or 0 }} success</div>
-    </div>
-    <div class="stat-card">
       <div class="label">AI Rewrites</div>
       <div class="value">{{ db.ai.total or 0 }}</div>
       <div class="sub">{{ db.ai.tokens or 0 }} tokens used</div>
+    </div>
+    {% if redis.synthetic_total is defined and redis.synthetic_total > 0 %}
+    <div class="stat-card" style="border-left:3px solid var(--accent)">
+      <div class="label">✨ Synthetic Articles</div>
+      <div class="value">{{ redis.synthetic_total or 0 }}</div>
+      <div class="sub">{{ redis.synthetic_today or 0 }} today · AI-generated summaries</div>
+    </div>
+    {% endif %}
+    <div class="stat-card">
+      <div class="label">Webhooks Sent</div>
+      <div class="value">{{ db.webhook.total or 0 }}</div>
+      <div class="sub">{{ db.webhook.ok or 0 }} success</div>
     </div>
   </div>
 

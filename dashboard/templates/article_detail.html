@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ article.title_en or article.id }} - News Aggregator</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3e;
+      --text: #e2e8f0; --muted: #718096; --accent: #6366f1;
+      --green: #10b981; --red: #ef4444; --yellow: #f59e0b;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; line-height: 1.6; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px; }
+    header a { color: var(--muted); font-size: 13px; }
+    header a:hover { color: var(--accent); }
+
+    .container { max-width: 800px; margin: 0 auto; padding: 32px 24px; }
+    
+    .badge {
+      display: inline-block;
+      background: linear-gradient(135deg, var(--accent), #818cf8);
+      color: white;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 12px;
+      border-radius: 999px;
+      margin-bottom: 16px;
+    }
+    
+    .meta {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    
+    .meta-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    
+    .angle-badge {
+      background: rgba(99,102,241,0.15);
+      color: var(--accent);
+      padding: 2px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      border: 1px solid var(--accent);
+    }
+    
+    .cat-badge {
+      background: var(--border);
+      color: var(--muted);
+      padding: 2px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    
+    h1 {
+      font-size: 32px;
+      font-weight: 700;
+      line-height: 1.3;
+      margin-bottom: 24px;
+      color: var(--accent);
+    }
+    
+    .content-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+    
+    .content-section h2 {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 12px;
+    }
+    
+    .content-section p {
+      font-size: 15px;
+      line-height: 1.7;
+      color: var(--text);
+    }
+    
+    .analysis-box {
+      background: rgba(99,102,241,0.05);
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 24px;
+    }
+    
+    .analysis-box h3 {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    
+    .analysis-box p {
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--muted);
+      font-style: italic;
+    }
+    
+    .source-articles {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+    }
+    
+    .source-articles h2 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .source-article-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px;
+      margin-bottom: 12px;
+      transition: border-color 0.2s;
+    }
+    
+    .source-article-card:hover {
+      border-color: var(--accent);
+    }
+    
+    .source-article-card .source-meta {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 11px;
+    }
+    
+    .source-name {
+      color: var(--accent);
+      font-weight: 600;
+    }
+    
+    .source-article-card .title {
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 6px;
+    }
+    
+    .source-article-card .title a {
+      color: var(--text);
+    }
+    
+    .source-article-card .title a:hover {
+      color: var(--accent);
+    }
+    
+    .source-article-card .summary {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 16px;
+    }
+    
+    .back-link:hover {
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/">← Back to Dashboard</a>
+  </header>
+
+  <div class="container">
+    <span class="badge">✨ AI-Generated Synthetic Article</span>
+    
+    <div class="meta">
+      <span class="angle-badge">{{ article.angle or 'summary' }}</span>
+      <span class="cat-badge">{{ article.category }}</span>
+      <span class="meta-item">
+        🤖 Created: {{ article.created_at | fmt_dt("%d/%m/%Y %H:%M") }}
+      </span>
+      <span class="meta-item">
+        📊 {{ article.num_source_articles }} source articles
+      </span>
+      <span class="meta-item">
+        🧠 {{ article.ai_model or 'AI model' }}
+      </span>
+    </div>
+    
+    <h1>{{ article.title_en }}</h1>
+    
+    {% if article.ai_analysis %}
+    <div class="analysis-box">
+      <h3>🔍 AI Analysis</h3>
+      <p>{{ article.ai_analysis }}</p>
+    </div>
+    {% endif %}
+    
+    <div class="content-section">
+      <h2>🇻🇳 Vietnamese</h2>
+      <p>{{ article.content_vi }}</p>
+    </div>
+    
+    <div class="content-section">
+      <h2>🇬🇧 English</h2>
+      <p>{{ article.content_en }}</p>
+    </div>
+    
+    <div class="source-articles">
+      <h2>
+        📰 Source Articles
+        <span style="font-size:13px;font-weight:400;color:var(--muted)">
+          ({{ source_articles|length }})
+        </span>
+      </h2>
+      
+      {% if source_articles %}
+        {% for src in source_articles %}
+        <div class="source-article-card">
+          <div class="source-meta">
+            <span class="source-name">{{ src.source_name }}</span>
+            <span>{{ src.lang }}</span>
+            <span>·</span>
+            <span>{{ src.published_at | fmt_dt("%d/%m %H:%M") }}</span>
+          </div>
+          <div class="title">
+            <a href="{{ src.url }}" target="_blank" rel="noopener">
+              {{ src.title }}
+            </a>
+          </div>
+          {% if src.ai_summary_vi %}
+          <div class="summary">
+            🇻🇳 {{ src.ai_summary_vi[:150] }}{% if src.ai_summary_vi|length > 150 %}...{% endif %}
+          </div>
+          {% elif src.summary %}
+          <div class="summary">
+            {{ src.summary[:150] }}{% if src.summary|length > 150 %}...{% endif %}
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      {% else %}
+        <p style="color:var(--muted);font-size:13px">
+          Source articles no longer available (expired from Redis cache).
+        </p>
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>

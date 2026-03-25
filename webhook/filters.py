@@ -6,9 +6,12 @@ Each endpoint/channel config supports:
   filter_categories: [list of category ids]
   filter_sources_mode: all | include | exclude
   filter_sources: [list of source ids]
+  filter_article_types_mode: all | include | exclude
+  filter_article_types: [list of article types: 'original', 'synthetic']
   rate_limit_max: int (0 = unlimited)
   rate_limit_window_minutes: int (default 60)
 """
+
 import logging
 import time
 from collections import defaultdict, deque
@@ -20,10 +23,14 @@ _rate_counters: dict[str, deque] = defaultdict(deque)
 
 
 def passes_filter(article: dict, config: dict) -> bool:
-    """Return True if the article passes the category and source filters in config."""
+    """Return True if the article passes the category, source, and article type filters in config."""
     category = article.get("category", "")
     source_id = article.get("source_id", "")
+    article_type = article.get(
+        "type", "original"
+    )  # Default to 'original' for backward compat
 
+    # Category filter
     cat_mode = config.get("filter_categories_mode", "all")
     cat_list = config.get("filter_categories") or []
     if cat_mode == "include" and cat_list:
@@ -33,6 +40,7 @@ def passes_filter(article: dict, config: dict) -> bool:
         if category in cat_list:
             return False
 
+    # Source filter
     src_mode = config.get("filter_sources_mode", "all")
     src_list = config.get("filter_sources") or []
     if src_mode == "include" and src_list:
@@ -40,6 +48,16 @@ def passes_filter(article: dict, config: dict) -> bool:
             return False
     elif src_mode == "exclude" and src_list:
         if source_id in src_list:
+            return False
+
+    # Article type filter (new)
+    type_mode = config.get("filter_article_types_mode", "all")
+    type_list = config.get("filter_article_types") or []
+    if type_mode == "include" and type_list:
+        if article_type not in type_list:
+            return False
+    elif type_mode == "exclude" and type_list:
+        if article_type in type_list:
             return False
 
     return True

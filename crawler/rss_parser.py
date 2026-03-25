@@ -2,6 +2,7 @@
 RSS parser + basic web scraper.
 Trả về list Article từ feed URL.
 """
+
 import asyncio
 import hashlib
 import re
@@ -24,15 +25,18 @@ class Article:
     title: str
     summary: str
     content: str
-    lang: str                      # detected language
-    declared_lang: str             # language declared in sources.yaml
+    lang: str  # detected language
+    declared_lang: str  # language declared in sources.yaml
     category: str
     published_at: datetime
     fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     # AI output (filled later)
     ai_summary_vi: str = ""
     ai_summary_en: str = ""
-    ai_status: str = "pending"     # pending | done | error
+    ai_status: str = "pending"  # pending | done | error
+    type: str = (
+        "original"  # article type: "original" (RSS) or "synthetic" (AI-generated)
+    )
 
 
 def _make_article_id(source_id: str, url: str) -> str:
@@ -84,7 +88,7 @@ async def parse_rss_feed(
             raise
         except Exception as e:
             if attempt < max_retries:
-                await asyncio.sleep(2 ** attempt)
+                await asyncio.sleep(2**attempt)
                 continue
             raise RuntimeError(f"[{source['id']}] fetch failed: {e}") from e
 

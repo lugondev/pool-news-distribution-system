@@ -200,6 +200,99 @@
       </div>
     </div>
 
+    <hr class="divider" style="margin:24px 0">
+    
+    <p class="section-title">
+      Topic Synthesis
+      <span class="hint">— AI analyzes multiple articles and generates diverse summaries</span>
+    </p>
+    
+    <div style="background:var(--accent-bg, rgba(99,102,241,.08));border:1px solid var(--accent);border-radius:8px;padding:14px;margin-bottom:16px;font-size:12px">
+      <div style="font-weight:600;margin-bottom:6px;color:var(--accent)">✨ New Feature</div>
+      <div style="line-height:1.5;color:var(--text)">
+        Instead of translating articles one-by-one, AI can group articles by category and generate 1-8 synthetic summaries with different angles (timeline, analysis, comparison, impact). 
+        <b>AI autonomously decides output count</b> based on content diversity.
+      </div>
+      <details style="margin-top:8px">
+        <summary style="cursor:pointer;color:var(--accent);font-weight:600">Example</summary>
+        <div style="margin-top:8px;padding:10px;background:rgba(255,255,255,.5);border-radius:4px;font-family:monospace;font-size:11px">
+          <div style="color:var(--muted)">// Input: 5 politics articles about "US-China trade tensions"</div>
+          <div style="margin-top:4px">→ AI generates 5 outputs:</div>
+          <div style="margin-left:12px;margin-top:4px">
+            1. Timeline summary<br>
+            2. US perspective<br>
+            3. China perspective<br>
+            4. Economic impact<br>
+            5. Tech sector implications
+          </div>
+        </div>
+      </details>
+    </div>
+    
+    <div class="toggle-row" style="margin-bottom:16px">
+      <input type="hidden" name="topic_synthesis_enabled" value="off">
+      <input type="checkbox" name="topic_synthesis_enabled" value="on" id="topic-synthesis-enabled"
+             {% if ai.topic_synthesis and ai.topic_synthesis.enabled %}checked{% endif %}
+             style="accent-color:var(--accent)"
+             onchange="document.getElementById('topic-synthesis-settings').style.display=this.checked?'':'none'">
+      <label for="topic-synthesis-enabled" class="toggle-label">Enable topic synthesis</label>
+      {% if ai.topic_synthesis and ai.topic_synthesis.enabled %}
+        <span class="toggle-status toggle-on">ACTIVE</span>
+      {% else %}
+        <span class="toggle-status toggle-off">DISABLED</span>
+      {% endif %}
+    </div>
+    
+    <div id="topic-synthesis-settings" style="display:{% if ai.topic_synthesis and ai.topic_synthesis.enabled %}''{% else %}none{% endif %};padding-left:20px;border-left:2px solid var(--border)">
+      <div class="form-row-2" style="margin-bottom:0">
+        <div class="form-group">
+          <label>Synthesis Interval <span class="hint">min</span></label>
+          <input type="number" name="topic_synthesis_interval" 
+                 value="{{ ai.topic_synthesis.interval_minutes if ai.topic_synthesis else 5 }}" 
+                 min="1" max="60">
+          <div style="font-size:10px;color:var(--muted);margin-top:4px">
+            How often to run synthesis job (default: 5 min)
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Temperature <span class="hint">— higher = more creative</span></label>
+          <input type="number" name="topic_synthesis_temperature" 
+                 value="{{ ai.topic_synthesis.temperature if ai.topic_synthesis else 0.5 }}" 
+                 min="0" max="2" step="0.1">
+          <div style="font-size:10px;color:var(--muted);margin-top:4px">
+            Default: 0.5 (more creative than single-article translation)
+          </div>
+        </div>
+      </div>
+      
+      <div class="form-row-2" style="margin-bottom:0">
+        <div class="form-group">
+          <label>Min Articles <span class="hint">— per category</span></label>
+          <input type="number" name="topic_synthesis_min_articles" 
+                 value="{{ ai.topic_synthesis.min_articles if ai.topic_synthesis else 5 }}" 
+                 min="3" max="20">
+          <div style="font-size:10px;color:var(--muted);margin-top:4px">
+            Minimum articles needed to trigger synthesis (default: 5)
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Max Articles <span class="hint">— to analyze</span></label>
+          <input type="number" name="topic_synthesis_max_articles" 
+                 value="{{ ai.topic_synthesis.max_articles if ai.topic_synthesis else 15 }}" 
+                 min="5" max="50">
+          <div style="font-size:10px;color:var(--muted);margin-top:4px">
+            Maximum articles to analyze per batch (default: 15)
+          </div>
+        </div>
+      </div>
+      
+      <div style="font-size:11px;color:var(--muted);margin-top:12px;padding:10px;background:var(--panel);border-radius:6px">
+        <b>Note:</b> AI will generate 1-8 outputs per category automatically. 
+        Token usage: ~1400 tokens per synthesis (more efficient than translating 5 articles individually).
+        See <a href="https://github.com/news-aggregator/TOPIC_SYNTHESIS.md" target="_blank" style="color:var(--accent)">full documentation</a> for details.
+      </div>
+    </div>
+
     <div class="form-actions">
       <button type="submit" class="btn btn-primary">Save Settings</button>
     </div>

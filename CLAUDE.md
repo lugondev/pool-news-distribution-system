@@ -27,11 +27,12 @@ uvicorn main:dashboard_app --host 0.0.0.0 --port 8000 --reload
 
 The system is a pipeline: **RSS feeds → SimHash dedup → Redis → AI batch → Webhooks + Telegram**.
 
-**Entry point:** `main.py` initializes SQLite, Redis, mounts the FastAPI app from `dashboard/app.py`, and starts `APScheduler` (two jobs).
+**Entry point:** `main.py` initializes SQLite, Redis, mounts the FastAPI app from `dashboard/app.py`, and starts `APScheduler` (three jobs).
 
-**Two async scheduler jobs** (`scheduler.py`):
+**Three async scheduler jobs** (`scheduler.py`):
 1. **Crawl job** (default every 3 min): sources split into N stagger groups; each tick crawls one group round-robin → per-domain rate-limited RSS fetch → parse → SimHash dedup → save to Redis. Full cycle = interval × groups (e.g. 3min × 3 groups = ~9min).
 2. **AI rewrite job** (default every 2 min): pulls up to 10 pending articles from Redis → calls OpenAI-compatible API → stores summaries → dispatches to webhooks + Telegram
+3. **Topic synthesis job** (default every 5 min, optional): groups articles by category → AI analyzes content diversity → generates 1-8 synthetic summaries with different angles → saves to Redis. AI autonomously decides output count.
 
 **Anti-ban measures** (`crawler/fetcher.py`): per-domain locks (same-domain feeds serialized), random delays (1-3s), User-Agent rotation, 429 retry with Retry-After, request order shuffling.
 
@@ -48,6 +49,7 @@ The system is a pipeline: **RSS feeds → SimHash dedup → Redis → AI batch �
 - **AI config**: All AI settings (api_key, base_url, model, tone) in `settings.yaml`, managed via Settings UI. Three tones: `formal`, `casual`, `general`. Test button verifies connectivity.
 - **Retry logic**: `tenacity` with exponential backoff for AI (max 3 attempts, 2–10s) and webhooks (3 attempts, 5s delay)
 - **Payload modes**: Each webhook/Telegram channel configures `payload_mode`: `full` (all data), `fields` (pick specific), `template` (Jinja2 custom)
+- **Article type filtering**: Webhooks/Telegram can filter by article type (`original` from RSS, `synthetic` from AI). Modes: `all` (default), `include`, `exclude`. See `ARTICLE_TYPE_FILTER.md` for details.
 - **Language handling**: `langdetect` auto-detects article language; falls back to source-declared language
 
 ## Configuration
@@ -92,4 +94,6 @@ curl -s http://localhost:8000/api/logs/crawl/timeline | jq .    # hourly perform
 | `dashboard/app.py` | FastAPI routes + HTMX partial endpoints |
 | `webhook/payload.py` | Shared payload builder (full/fields/template modes) |
 | `webhook/telegram.py` | Telegram Bot API dispatcher + HTML formatting |
+| `webhook/filters.py` | Article filtering logic (category, source, article type) |
 | `dashboard/api_router.py` | JSON API: CRUD, logs, crawl tracing, Telegram endpoints |
+| `ai/topic_synthesis.py` | Multi-article AI synthesis (generates synthetic articles) |

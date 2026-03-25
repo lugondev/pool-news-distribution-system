@@ -119,6 +119,7 @@ async def list_news(
     category: str | None = None,
     lang: str | None = None,
     ai_status: str | None = None,
+    article_type: str | None = None,  # NEW: "original", "synthetic", or None (all)
 ):
     """
     News list with filters.
@@ -129,6 +130,7 @@ async def list_news(
     - category         — filter by category id (world, tech, business, ...)
     - lang             — filter by detected language code (en, vi, ja, ...)
     - ai_status        — filter by AI processing state: pending, done, failed, dedup_skipped
+    - article_type     — filter by type: "original" (RSS articles), "synthetic" (AI-generated), or None (all)
     """
     limit = max(1, min(limit, 100))
     offset = (page - 1) * limit
@@ -143,6 +145,7 @@ async def list_news(
         offset=fetch_offset if not (lang or ai_status) else 0,
         source_id=source or None,
         category=category or None,
+        article_type=article_type or None,  # NEW
     )
 
     # Post-filter for lang / ai_status (not indexable in Redis without extra sets)
@@ -176,6 +179,7 @@ async def list_news(
             "category": category,
             "lang": lang,
             "ai_status": ai_status,
+            "article_type": article_type,  # NEW
         },
     }
 
@@ -433,6 +437,8 @@ class WebhookIn(BaseModel):
     filter_categories: list[str] = []
     filter_sources_mode: str = "all"
     filter_sources: list[str] = []
+    filter_article_types_mode: str = "all"
+    filter_article_types: list[str] = []
     rate_limit_max: int = 0
     rate_limit_window_minutes: int = 60
 
@@ -452,6 +458,8 @@ class WebhookUpdate(BaseModel):
     filter_categories: list[str] | None = None
     filter_sources_mode: str | None = None
     filter_sources: list[str] | None = None
+    filter_article_types_mode: str | None = None
+    filter_article_types: list[str] | None = None
     rate_limit_max: int | None = None
     rate_limit_window_minutes: int | None = None
 
@@ -493,6 +501,8 @@ async def add_webhook(body: WebhookIn):
         "filter_categories": body.filter_categories,
         "filter_sources_mode": body.filter_sources_mode,
         "filter_sources": body.filter_sources,
+        "filter_article_types_mode": body.filter_article_types_mode,
+        "filter_article_types": body.filter_article_types,
         "rate_limit_max": max(0, body.rate_limit_max),
         "rate_limit_window_minutes": max(1, body.rate_limit_window_minutes),
     }
@@ -523,6 +533,8 @@ async def update_webhook(wh_id: str, body: WebhookUpdate):
         "filter_categories",
         "filter_sources_mode",
         "filter_sources",
+        "filter_article_types_mode",
+        "filter_article_types",
         "rate_limit_max",
         "rate_limit_window_minutes",
     ):
@@ -799,6 +811,8 @@ class TelegramChannelIn(BaseModel):
     filter_categories: list[str] = []
     filter_sources_mode: str = "all"
     filter_sources: list[str] = []
+    filter_article_types_mode: str = "all"
+    filter_article_types: list[str] = []
     rate_limit_max: int = 0
     rate_limit_window_minutes: int = 60
 
@@ -817,6 +831,8 @@ class TelegramChannelUpdate(BaseModel):
     filter_categories: list[str] | None = None
     filter_sources_mode: str | None = None
     filter_sources: list[str] | None = None
+    filter_article_types_mode: str | None = None
+    filter_article_types: list[str] | None = None
     rate_limit_max: int | None = None
     rate_limit_window_minutes: int | None = None
 
@@ -857,6 +873,8 @@ async def add_telegram_channel(body: TelegramChannelIn):
         "filter_categories": body.filter_categories,
         "filter_sources_mode": body.filter_sources_mode,
         "filter_sources": body.filter_sources,
+        "filter_article_types_mode": body.filter_article_types_mode,
+        "filter_article_types": body.filter_article_types,
         "rate_limit_max": max(0, body.rate_limit_max),
         "rate_limit_window_minutes": max(1, body.rate_limit_window_minutes),
     }
@@ -886,6 +904,8 @@ async def update_telegram_channel(ch_id: str, body: TelegramChannelUpdate):
         "filter_categories",
         "filter_sources_mode",
         "filter_sources",
+        "filter_article_types_mode",
+        "filter_article_types",
         "rate_limit_max",
         "rate_limit_window_minutes",
     ):

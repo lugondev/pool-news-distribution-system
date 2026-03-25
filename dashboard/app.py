@@ -2,6 +2,7 @@
 FastAPI dashboard với htmx real-time updates + source/category management.
 """
 
+import json
 import logging
 import math
 import os
@@ -187,6 +188,54 @@ async def dashboard(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
+@app.get("/article/{article_id}", response_class=HTMLResponse)
+async def article_detail(request: Request, article_id: str):
+    """Detail view for synthetic articles with source article links."""
+    redis = get_redis()
+    article = await get_article(redis, article_id)
+
+    if not article:
+        return HTMLResponse("<h1>Article not found</h1>", status_code=404)
+
+    # Only show detail view for synthetic articles
+    if article.get("type") != "synthetic":
+        # Redirect to original URL for RSS articles
+        return HTMLResponse(
+            f"<script>window.location.href='{article.get('url')}'</script>",
+            status_code=302,
+        )
+
+    # Parse source article IDs
+    source_article_ids = []
+    source_ids_raw = article.get("source_article_ids", "")
+    if source_ids_raw:
+        try:
+            source_article_ids = (
+                json.loads(source_ids_raw)
+                if isinstance(source_ids_raw, str)
+                else source_ids_raw
+            )
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Fetch source articles
+    source_articles = []
+    if source_article_ids:
+        for src_id in source_article_ids:
+            src = await get_article(redis, src_id)
+            if src:
+                source_articles.append(src)
+
+    return templates.TemplateResponse(
+        "article_detail.html",
+        {
+            "request": request,
+            "article": article,
+            "source_articles": source_articles,
+        },
+    )
+
+
 @app.get("/partials/stats", response_class=HTMLResponse)
 async def stats_partial(request: Request):
     redis = get_redis()
@@ -204,7 +253,11 @@ async def stats_partial(request: Request):
 
 @app.get("/partials/feed", response_class=HTMLResponse)
 async def feed_partial(
-    request: Request, page: int = 1, source: str = None, category: str = None
+    request: Request,
+    page: int = 1,
+    source: str = None,
+    category: str = None,
+    article_type: str = None,
 ):
     redis = get_redis()
     offset = (page - 1) * PAGE_SIZE
@@ -214,6 +267,7 @@ async def feed_partial(
         offset=offset,
         source_id=source or None,
         category=category or None,
+        article_type=article_type or None,
     )
     total_pages = max(1, math.ceil(total / PAGE_SIZE))
     sources = _read_sources()
@@ -228,6 +282,7 @@ async def feed_partial(
             "total": total,
             "source": source or "",
             "category": category or "",
+            "article_type": article_type or "",
             "sources": sources,
             "categories": categories,
         },
@@ -582,6 +637,11 @@ async def settings_ai_update(
     prompt_template: str = Form(""),
     output_limit_enabled: str = Form("off"),
     output_limit_chars: int = Form(250),
+    topic_synthesis_enabled: str = Form("off"),
+    topic_synthesis_interval: int = Form(5),
+    topic_synthesis_temperature: float = Form(0.5),
+    topic_synthesis_min_articles: int = Form(5),
+    topic_synthesis_max_articles: int = Form(15),
 ):
     valid_tones = ("formal", "casual", "general")
     resolved_tone = tone if tone in valid_tones else "general"
@@ -616,6 +676,14 @@ async def settings_ai_update(
         "prompt_template": prompt_template.strip(),
         "output_limit_enabled": output_limit_enabled == "on",
         "output_limit_chars": max(50, min(output_limit_chars, 2000)),
+        "topic_synthesis": {
+            "enabled": topic_synthesis_enabled == "on",
+            "interval_minutes": max(1, min(topic_synthesis_interval, 60)),
+            "temperature": max(0.0, min(float(topic_synthesis_temperature), 2.0)),
+            "min_articles": max(3, min(topic_synthesis_min_articles, 20)),
+            "max_articles": max(5, min(topic_synthesis_max_articles, 50)),
+            "max_tokens": 2000,
+        },
     }
     cfg.setdefault("crawler", {}).update(
         {
@@ -628,7 +696,8 @@ async def settings_ai_update(
     _write_settings(cfg)
     logger.info(
         f"Settings updated: model={cfg['ai']['model']}, tone={resolved_tone}, "
-        f"crawl={crawl_interval}min×{stagger_groups}groups, ai={ai_interval}min"
+        f"crawl={crawl_interval}min×{stagger_groups}groups, ai={ai_interval}min, "
+        f"synthesis={topic_synthesis_enabled}"
     )
     from ai.rewriter import TONE_PROMPTS, SUMMARIZE_PROMPT
 
@@ -775,6 +844,8 @@ async def webhook_add(
     filter_categories: str = Form(""),
     filter_sources_mode: str = Form("all"),
     filter_sources: str = Form(""),
+    filter_article_types_mode: str = Form("all"),
+    filter_article_types: str = Form(""),
     rate_limit_max: int = Form(0),
     rate_limit_window_minutes: int = Form(60),
 ):
@@ -797,6 +868,11 @@ async def webhook_add(
         if filter_sources
         else []
     )
+    type_list = (
+        [t.strip() for t in filter_article_types.split(",") if t.strip()]
+        if filter_article_types
+        else []
+    )
     endpoints.append(
         {
             "id": id.strip(),
@@ -815,6 +891,8 @@ async def webhook_add(
             "filter_categories": cat_list,
             "filter_sources_mode": filter_sources_mode,
             "filter_sources": src_list,
+            "filter_article_types_mode": filter_article_types_mode,
+            "filter_article_types": type_list,
             "rate_limit_max": max(0, rate_limit_max),
             "rate_limit_window_minutes": max(1, rate_limit_window_minutes),
         }
@@ -855,6 +933,8 @@ async def webhook_update(
     filter_categories: str = Form(""),
     filter_sources_mode: str = Form("all"),
     filter_sources: str = Form(""),
+    filter_article_types_mode: str = Form("all"),
+    filter_article_types: str = Form(""),
     rate_limit_max: int = Form(0),
     rate_limit_window_minutes: int = Form(60),
 ):
@@ -874,6 +954,11 @@ async def webhook_update(
         if filter_sources
         else []
     )
+    type_list = (
+        [t.strip() for t in filter_article_types.split(",") if t.strip()]
+        if filter_article_types
+        else []
+    )
     for ep in endpoints:
         if ep["id"] == wh_id:
             ep["name"] = name.strip()
@@ -890,6 +975,8 @@ async def webhook_update(
             ep["filter_categories"] = cat_list
             ep["filter_sources_mode"] = filter_sources_mode
             ep["filter_sources"] = src_list
+            ep["filter_article_types_mode"] = filter_article_types_mode
+            ep["filter_article_types"] = type_list
             ep["rate_limit_max"] = max(0, rate_limit_max)
             ep["rate_limit_window_minutes"] = max(1, rate_limit_window_minutes)
             break
@@ -1015,6 +1102,8 @@ async def telegram_add(
     filter_categories: str = Form(""),
     filter_sources_mode: str = Form("all"),
     filter_sources: str = Form(""),
+    filter_article_types_mode: str = Form("all"),
+    filter_article_types: str = Form(""),
     rate_limit_max: int = Form(0),
     rate_limit_window_minutes: int = Form(60),
 ):
@@ -1039,6 +1128,11 @@ async def telegram_add(
         if filter_sources
         else []
     )
+    type_list = (
+        [t.strip() for t in filter_article_types.split(",") if t.strip()]
+        if filter_article_types
+        else []
+    )
     channels.append(
         {
             "id": id.strip(),
@@ -1056,6 +1150,8 @@ async def telegram_add(
             "filter_categories": cat_list,
             "filter_sources_mode": filter_sources_mode,
             "filter_sources": src_list,
+            "filter_article_types_mode": filter_article_types_mode,
+            "filter_article_types": type_list,
             "rate_limit_max": max(0, rate_limit_max),
             "rate_limit_window_minutes": max(1, rate_limit_window_minutes),
         }
@@ -1098,6 +1194,8 @@ async def telegram_update(
     filter_categories: str = Form(""),
     filter_sources_mode: str = Form("all"),
     filter_sources: str = Form(""),
+    filter_article_types_mode: str = Form("all"),
+    filter_article_types: str = Form(""),
     rate_limit_max: int = Form(0),
     rate_limit_window_minutes: int = Form(60),
 ):
@@ -1117,6 +1215,11 @@ async def telegram_update(
         if filter_sources
         else []
     )
+    type_list = (
+        [t.strip() for t in filter_article_types.split(",") if t.strip()]
+        if filter_article_types
+        else []
+    )
     for ch in channels:
         if ch["id"] == ch_id:
             ch["name"] = name.strip()
@@ -1132,6 +1235,8 @@ async def telegram_update(
             ch["filter_categories"] = cat_list
             ch["filter_sources_mode"] = filter_sources_mode
             ch["filter_sources"] = src_list
+            ch["filter_article_types_mode"] = filter_article_types_mode
+            ch["filter_article_types"] = type_list
             ch["rate_limit_max"] = max(0, rate_limit_max)
             ch["rate_limit_window_minutes"] = max(1, rate_limit_window_minutes)
             break

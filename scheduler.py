@@ -3,6 +3,7 @@ APScheduler: due-based crawler + AI rewriter.
 Every tick (default 30s), picks the N sources whose next_crawl_at is due
 and fetches them. 403/429 responses push next_crawl_at further into the future.
 """
+
 import logging
 import os
 from datetime import datetime, timezone
@@ -13,8 +14,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from crawler.fetcher import fetch_all_sources
 from ai.rewriter import process_pending_articles
+from ai.topic_synthesis import process_category_synthesis
 from storage.redis_store import get_due_source_ids
 from storage.sqlite_stats import log_system_event
+from webhook.dispatcher import enqueue_dispatch
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +57,6 @@ def _load_sources() -> list[dict]:
     return _sources_cache
 
 
-
-
 def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
     global _scheduler
     if _scheduler is not None:
@@ -72,17 +73,21 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
         current_cfg = _load_config()
         crawler = current_cfg.get("crawler", {})
         active_cats = {
-            c["id"] for c in current_cfg.get("categories", [])
-            if c.get("enabled", True)
+            c["id"] for c in current_cfg.get("categories", []) if c.get("enabled", True)
         }
         all_sources = _load_sources()
         filtered = [
-            s for s in all_sources
+            s
+            for s in all_sources
             if s.get("enabled", True) and s.get("category", "world") in active_cats
         ]
         if not filtered:
-            await log_system_event("crawl_job", started, status="skipped",
-                                   metadata={"reason": "no enabled sources"})
+            await log_system_event(
+                "crawl_job",
+                started,
+                status="skipped",
+                metadata={"reason": "no enabled sources"},
+            )
             return
 
         sources_per_tick = crawler.get("sources_per_tick", 3)
@@ -92,8 +97,12 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
         # Pick sources whose next_crawl_at is due (or never scheduled)
         due_ids = await get_due_source_ids(redis, all_ids, limit=sources_per_tick)
         if not due_ids:
-            await log_system_event("crawl_job", started, status="skipped",
-                                   metadata={"reason": "no sources due", "eligible": len(filtered)})
+            await log_system_event(
+                "crawl_job",
+                started,
+                status="skipped",
+                metadata={"reason": "no sources due", "eligible": len(filtered)},
+            )
             return
 
         batch = [source_map[sid] for sid in due_ids if sid in source_map]
@@ -106,7 +115,9 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
                 sources=batch,
                 redis=redis,
                 max_concurrent=sources_per_tick,
-                dedup_threshold=current_cfg.get("dedup", {}).get("simhash_distance_threshold", 3),
+                dedup_threshold=current_cfg.get("dedup", {}).get(
+                    "simhash_distance_threshold", 3
+                ),
                 max_articles_per_source=crawler.get("max_articles_per_source", 50),
                 request_timeout=crawler.get("request_timeout_seconds", 15),
                 domain_delay=(
@@ -122,12 +133,16 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
                 "source_ids": due_ids,
                 "total_found": sum(r.get("found", 0) for r in (results or [])),
                 "total_saved": sum(r.get("saved", 0) for r in (results or [])),
-                "total_duplicates": sum(r.get("duplicates", 0) for r in (results or [])),
+                "total_duplicates": sum(
+                    r.get("duplicates", 0) for r in (results or [])
+                ),
                 "errors": sum(1 for r in (results or []) if r.get("errors", 0)),
             }
             await log_system_event("crawl_job", started, status="ok", metadata=meta)
         except Exception as exc:
-            await log_system_event("crawl_job", started, status="error", error_msg=str(exc))
+            await log_system_event(
+                "crawl_job", started, status="error", error_msg=str(exc)
+            )
             raise
 
     tick_interval = crawler_cfg.get("tick_interval_seconds", 30)
@@ -141,6 +156,7 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
     )
 
     if ai_cfg.get("enabled", True):
+
         async def ai_job():
             started = datetime.now(timezone.utc)
             current_cfg = _load_config()
@@ -148,8 +164,12 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
             wh = current_cfg.get("webhook", {})
             tg = current_cfg.get("telegram", {})
             if not ai.get("enabled", True):
-                await log_system_event("ai_job", started, status="skipped",
-                                       metadata={"reason": "AI disabled"})
+                await log_system_event(
+                    "ai_job",
+                    started,
+                    status="skipped",
+                    metadata={"reason": "AI disabled"},
+                )
                 return
             endpoints = wh.get("endpoints", [])
             tg_channels = tg.get("channels", [])
@@ -170,12 +190,15 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
                     webhook_endpoints=endpoints,
                     telegram_channels=tg_channels,
                     spread_seconds=spread,
-                    ai_dedup_threshold=dedup_cfg.get("ai_simhash_distance_threshold", 6),
+                    ai_dedup_threshold=dedup_cfg.get(
+                        "ai_simhash_distance_threshold", 6
+                    ),
                 )
                 if processed:
                     logger.info(f"AI job: processed {processed} articles")
                 await log_system_event(
-                    "ai_job", started,
+                    "ai_job",
+                    started,
                     status="ok" if processed is not None else "skipped",
                     metadata={
                         "processed": processed or 0,
@@ -186,7 +209,9 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
                     },
                 )
             except Exception as exc:
-                await log_system_event("ai_job", started, status="error", error_msg=str(exc))
+                await log_system_event(
+                    "ai_job", started, status="error", error_msg=str(exc)
+                )
                 raise
 
         ai_interval = ai_cfg.get("interval_minutes", 2)
@@ -195,6 +220,100 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
             "interval",
             minutes=ai_interval,
             id="ai_rewrite",
+            max_instances=1,
+            coalesce=True,
+        )
+
+        # NEW: Topic synthesis job — generates synthetic articles from grouped content
+        async def topic_synthesis_job():
+            started = datetime.now(timezone.utc)
+            current_cfg = _load_config()
+            ai = current_cfg.get("ai", {})
+            synthesis_cfg = ai.get("topic_synthesis", {})
+
+            if not synthesis_cfg.get("enabled", False):
+                return
+
+            wh = current_cfg.get("webhook", {})
+            tg = current_cfg.get("telegram", {})
+            endpoints = wh.get("endpoints", [])
+            tg_channels = tg.get("channels", [])
+
+            active_cats = [
+                c["id"]
+                for c in current_cfg.get("categories", [])
+                if c.get("enabled", True)
+            ]
+
+            if not active_cats:
+                await log_system_event(
+                    "topic_synthesis_job",
+                    started,
+                    status="skipped",
+                    metadata={"reason": "no active categories"},
+                )
+                return
+
+            total_generated = 0
+            results_by_cat = {}
+
+            try:
+                for category in active_cats:
+                    count = await process_category_synthesis(
+                        redis=redis,
+                        category=category,
+                        min_articles=synthesis_cfg.get("min_articles", 5),
+                        max_articles=synthesis_cfg.get("max_articles", 15),
+                        model=ai.get("model"),
+                        tone=ai.get("tone", "general"),
+                        api_key=ai.get("api_key"),
+                        base_url=ai.get("base_url"),
+                        webhook_endpoints=endpoints,
+                        telegram_channels=tg_channels,
+                    )
+
+                    if count > 0:
+                        results_by_cat[category] = count
+                        total_generated += count
+
+                        # Synthetic articles are now automatically dispatched
+                        logger.info(
+                            f"Topic synthesis: {category} generated {count} synthetic articles"
+                        )
+
+                await log_system_event(
+                    "topic_synthesis_job",
+                    started,
+                    status="ok",
+                    metadata={
+                        "total_generated": total_generated,
+                        "categories_processed": len(active_cats),
+                        "categories_with_output": len(results_by_cat),
+                        "results": results_by_cat,
+                    },
+                )
+
+                if total_generated > 0:
+                    logger.info(
+                        f"Topic synthesis job: {total_generated} synthetic articles "
+                        f"across {len(results_by_cat)} categories"
+                    )
+
+            except Exception as exc:
+                await log_system_event(
+                    "topic_synthesis_job", started, status="error", error_msg=str(exc)
+                )
+                logger.error(f"Topic synthesis job failed: {exc}", exc_info=True)
+                raise
+
+        synthesis_interval = ai_cfg.get("topic_synthesis", {}).get(
+            "interval_minutes", 5
+        )
+        scheduler.add_job(
+            topic_synthesis_job,
+            "interval",
+            minutes=synthesis_interval,
+            id="topic_synthesis",
             max_instances=1,
             coalesce=True,
         )
