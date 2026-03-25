@@ -403,6 +403,229 @@ async def update_ai_settings(body: AISettingsIn):
     return {"ok": True, "ai": ai}
 
 
+@router.post("/settings/ai/toggle")
+async def toggle_ai_summary():
+    """Quick-toggle AI summary on/off without touching other settings."""
+    cfg = _read_settings()
+    ai = cfg.setdefault("ai", {})
+    ai["enabled"] = not ai.get("enabled", True)
+    _write_settings(cfg)
+    logger.info(f"API: AI summary toggled → {'on' if ai['enabled'] else 'off'}")
+    return {"ok": True, "enabled": ai["enabled"]}
+
+
+@router.post("/settings/ai/synthesis/toggle")
+async def toggle_ai_synthesis():
+    """Quick-toggle topic synthesis on/off without touching other settings."""
+    cfg = _read_settings()
+    synthesis = cfg.setdefault("ai", {}).setdefault("topic_synthesis", {})
+    synthesis["enabled"] = not synthesis.get("enabled", False)
+    _write_settings(cfg)
+    logger.info(f"API: Topic synthesis toggled → {'on' if synthesis['enabled'] else 'off'}")
+    return {"ok": True, "enabled": synthesis["enabled"]}
+
+
+# ── AI Providers ──────────────────────────────────────────────────────────────
+
+
+class ProviderIn(BaseModel):
+    name: str
+    api_key: str
+    base_url: str
+    model: str = ""
+
+
+@router.get("/providers")
+async def list_providers():
+    cfg = _read_settings()
+    providers = cfg.get("ai", {}).get("providers", [])
+    # Mask api_key in list — use GET /providers/{id} to retrieve full data for editing
+    return [
+        {**p, "api_key": p["api_key"][:12] + "…" if p.get("api_key") else ""}
+        for p in providers
+    ]
+
+
+@router.get("/providers/{provider_id}")
+async def get_provider(provider_id: str):
+    """Return full provider data (including unmasked api_key) for editing."""
+    cfg = _read_settings()
+    providers = cfg.get("ai", {}).get("providers", [])
+    provider = next((p for p in providers if p["id"] == provider_id), None)
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    return provider
+
+
+@router.post("/providers")
+async def create_provider(body: ProviderIn):
+    import re
+    cfg = _read_settings()
+    ai = cfg.setdefault("ai", {})
+    providers = ai.setdefault("providers", [])
+    pid = re.sub(r"[^a-z0-9]+", "-", body.name.lower()).strip("-") or f"provider-{len(providers)+1}"
+    if any(p["id"] == pid for p in providers):
+        pid = f"{pid}-{len(providers)+1}"
+    entry = {"id": pid, "name": body.name, "api_key": body.api_key, "base_url": body.base_url}
+    if body.model:
+        entry["model"] = body.model
+    providers.append(entry)
+    _write_settings(cfg)
+    logger.info(f"API: provider created id={pid}")
+    return {"ok": True, "id": pid}
+
+
+@router.put("/providers/{provider_id}")
+async def update_provider(provider_id: str, body: ProviderIn):
+    cfg = _read_settings()
+    providers = cfg.get("ai", {}).get("providers", [])
+    for p in providers:
+        if p["id"] == provider_id:
+            p["name"] = body.name
+            p["api_key"] = body.api_key
+            p["base_url"] = body.base_url
+            p["model"] = body.model or None
+            _write_settings(cfg)
+            logger.info(f"API: provider updated id={provider_id}")
+            return {"ok": True}
+    raise HTTPException(status_code=404, detail="Provider not found")
+
+
+@router.delete("/providers/{provider_id}")
+async def delete_provider(provider_id: str):
+    cfg = _read_settings()
+    ai = cfg.get("ai", {})
+    providers = ai.get("providers", [])
+    new_providers = [p for p in providers if p["id"] != provider_id]
+    if len(new_providers) == len(providers):
+        raise HTTPException(status_code=404, detail="Provider not found")
+    ai["providers"] = new_providers
+    if ai.get("provider_id") == provider_id:
+        ai["provider_id"] = new_providers[0]["id"] if new_providers else None
+    synthesis = ai.get("topic_synthesis", {})
+    if synthesis.get("provider_id") == provider_id:
+        synthesis["provider_id"] = None
+    _write_settings(cfg)
+    logger.info(f"API: provider deleted id={provider_id}")
+    return {"ok": True}
+
+
+@router.post("/providers/{provider_id}/test")
+async def test_provider(provider_id: str):
+    from ai.rewriter import test_ai_connection
+    cfg = _read_settings()
+    providers = cfg.get("ai", {}).get("providers", [])
+    provider = next((p for p in providers if p["id"] == provider_id), None)
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    # Use provider's own model if set, else fall back to global ai model
+    model = provider.get("model") or cfg.get("ai", {}).get("model", "gpt-4o-mini")
+    tone = cfg.get("ai", {}).get("tone", "general")
+    result = await test_ai_connection(
+        api_key=provider.get("api_key"),
+        base_url=provider.get("base_url"),
+        model=model,
+        tone=tone,
+    )
+    return result
+
+
+# ── AI Configs ───────────────────────────────────────────────────────────────
+
+
+class AiConfigIn(BaseModel):
+    name: str
+    tone: str = "general"
+    prompt_system: str = ""
+    prompt_template: str = ""
+    is_default: bool = False
+
+
+@router.get("/ai-configs")
+async def list_ai_configs():
+    cfg = _read_settings()
+    return {"configs": cfg.get("ai", {}).get("configs", [])}
+
+
+@router.post("/ai-configs", status_code=201)
+async def create_ai_config(body: AiConfigIn):
+    import re
+    cfg = _read_settings()
+    ai = cfg.setdefault("ai", {})
+    configs = ai.setdefault("configs", [])
+    cid = re.sub(r"[^a-z0-9]+", "-", body.name.lower()).strip("-") or f"cfg-{len(configs)+1}"
+    if any(c["id"] == cid for c in configs):
+        cid = f"{cid}-{len(configs)+1}"
+    if body.is_default:
+        for c in configs:
+            c["is_default"] = False
+    tone = body.tone if body.tone in ("formal", "casual", "general") else "general"
+    entry = {
+        "id": cid,
+        "name": body.name,
+        "tone": tone,
+        "prompt_system": body.prompt_system,
+        "prompt_template": body.prompt_template,
+        "is_default": body.is_default,
+    }
+    configs.append(entry)
+    _write_settings(cfg)
+    logger.info(f"API: AI config created id={cid}")
+    return {"ok": True, "id": cid}
+
+
+@router.put("/ai-configs/{config_id}")
+async def update_ai_config(config_id: str, body: AiConfigIn):
+    cfg = _read_settings()
+    configs = cfg.get("ai", {}).get("configs", [])
+    target = next((c for c in configs if c["id"] == config_id), None)
+    if not target:
+        raise HTTPException(404, "Config not found")
+    if body.is_default:
+        for c in configs:
+            c["is_default"] = False
+    tone = body.tone if body.tone in ("formal", "casual", "general") else "general"
+    target["name"] = body.name
+    target["tone"] = tone
+    target["prompt_system"] = body.prompt_system
+    target["prompt_template"] = body.prompt_template
+    target["is_default"] = body.is_default
+    _write_settings(cfg)
+    logger.info(f"API: AI config updated id={config_id}")
+    return {"ok": True}
+
+
+@router.post("/ai-configs/{config_id}/set-default")
+async def set_default_ai_config(config_id: str):
+    cfg = _read_settings()
+    configs = cfg.get("ai", {}).get("configs", [])
+    found = False
+    for c in configs:
+        if c["id"] == config_id:
+            c["is_default"] = True
+            found = True
+        else:
+            c["is_default"] = False
+    if not found:
+        raise HTTPException(404, "Config not found")
+    _write_settings(cfg)
+    return {"ok": True}
+
+
+@router.delete("/ai-configs/{config_id}")
+async def delete_ai_config(config_id: str):
+    cfg = _read_settings()
+    ai = cfg.get("ai", {})
+    configs = ai.get("configs", [])
+    new_configs = [c for c in configs if c["id"] != config_id]
+    if len(new_configs) == len(configs):
+        raise HTTPException(404, "Config not found")
+    ai["configs"] = new_configs
+    _write_settings(cfg)
+    logger.info(f"API: AI config deleted id={config_id}")
+    return {"ok": True}
+
+
 # ── AI Logs ──────────────────────────────────────────────────────────────────
 
 

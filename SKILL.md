@@ -4,7 +4,7 @@ description: >-
   Manage, monitor, and troubleshoot the News Aggregator via its JSON API.
   Use when the user asks to check system health, inspect articles, view
   crawl/AI/webhook logs, manage RSS sources, categories, webhooks, AI
-  settings, or diagnose pipeline issues.
+  settings, providers, AI configs, or diagnose pipeline issues.
 ---
 
 # News Aggregator Operations
@@ -160,6 +160,104 @@ curl -s -X PUT $API/settings/ai \
 ```
 
 Partial update — fields: `enabled`, `model`, `temperature`, `batch_size`, `max_tokens_summary`, `retry_attempts`, `output_languages` (array).
+
+### Toggle AI summary on/off
+
+```bash
+curl -s -X POST $API/settings/ai/toggle | jq .
+```
+
+### Toggle topic synthesis on/off
+
+```bash
+curl -s -X POST $API/settings/ai/synthesis/toggle | jq .
+```
+
+Topic synthesis groups articles by category and generates 1-8 synthetic summaries per category batch.
+
+## AI Providers
+
+Providers hold API credentials (api_key, base_url, model). Multiple providers can be configured.
+
+### List providers (api_key masked)
+
+```bash
+curl -s $API/providers | jq .
+```
+
+### Get single provider (full api_key)
+
+```bash
+curl -s $API/providers/{provider_id} | jq .
+```
+
+### Add a provider
+
+```bash
+curl -s -X POST $API/providers \
+  -H "Content-Type: application/json" \
+  -d '{"name":"OpenRouter","api_key":"sk-...","base_url":"https://openrouter.ai/api/v1","model":"google/gemini-2.5-flash"}' | jq .
+```
+
+### Update a provider
+
+```bash
+curl -s -X PUT $API/providers/{provider_id} \
+  -H "Content-Type: application/json" \
+  -d '{"name":"OpenRouter","api_key":"sk-...","base_url":"https://openrouter.ai/api/v1","model":"gpt-4o"}' | jq .
+```
+
+### Delete a provider
+
+```bash
+curl -s -X DELETE $API/providers/{provider_id} | jq .
+```
+
+### Test a provider connection
+
+```bash
+curl -s -X POST $API/providers/{provider_id}/test | jq .
+```
+
+## AI Configs
+
+AI Configs are named presets (tone + custom prompt) that can be assigned to individual webhooks or Telegram channels.
+
+### List configs
+
+```bash
+curl -s $API/ai-configs | jq .
+```
+
+### Create a config
+
+```bash
+curl -s -X POST $API/ai-configs \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Formal English","tone":"formal","prompt_system":"You are a professional news editor.","prompt_template":"","is_default":false}' | jq .
+```
+
+Fields: `name` (required), `tone` (`formal`|`casual`|`general`), `prompt_system`, `prompt_template`, `is_default`.
+
+### Update a config
+
+```bash
+curl -s -X PUT $API/ai-configs/{config_id} \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Casual VI","tone":"casual"}' | jq .
+```
+
+### Set as default
+
+```bash
+curl -s -X POST $API/ai-configs/{config_id}/set-default | jq .
+```
+
+### Delete a config
+
+```bash
+curl -s -X DELETE $API/ai-configs/{config_id} | jq .
+```
 
 ## Crawl Logs & Tracing
 
@@ -324,13 +422,51 @@ curl -s $API/webhooks | jq .
 ```bash
 curl -s -X POST $API/webhooks \
   -H "Content-Type: application/json" \
-  -d '{"id":"my_hook","name":"My Hook","url":"https://example.com/hook","payload_mode":"full"}' | jq .
+  -d '{
+    "id": "my_hook",
+    "name": "My Hook",
+    "url": "https://example.com/hook",
+    "http_method": "POST",
+    "content_type": "application/json",
+    "payload_mode": "full",
+    "filter_categories_mode": "all",
+    "filter_sources_mode": "all",
+    "filter_article_types_mode": "all",
+    "filter_article_types": [],
+    "ai_mode": "rewrite",
+    "ai_config_id": "",
+    "target_language": "vi",
+    "rate_limit_max": 0,
+    "rate_limit_window_minutes": 60
+  }' | jq .
 ```
 
-Payload mode options (applies to both webhooks and Telegram):
-- `"payload_mode": "full"` — send all article fields (default)
-- `"payload_mode": "fields", "payload_fields": ["title","url","ai_summary_vi"]` — only selected fields
-- `"payload_mode": "template", "payload_template": "..."` — custom Jinja2 template
+**Webhook fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `id` | string | required | Unique slug |
+| `name` | string | required | Display name |
+| `url` | string | required | Endpoint URL |
+| `http_method` | string | `POST` | `POST` or `GET` |
+| `content_type` | string | `application/json` | Content-Type header |
+| `retry_attempts` | int | 3 | Max retries on failure |
+| `retry_delay_seconds` | int | 5 | Delay between retries |
+| `timeout_seconds` | int | 10 | Request timeout |
+| `payload_mode` | string | `full` | `full`, `fields`, or `template` |
+| `payload_fields` | list | `[]` | Fields to include (for `fields` mode) |
+| `payload_template` | string | `""` | Jinja2 template (for `template` mode) |
+| `filter_categories_mode` | string | `all` | `all`, `include`, or `exclude` |
+| `filter_categories` | list | `[]` | Category IDs to filter |
+| `filter_sources_mode` | string | `all` | `all`, `include`, or `exclude` |
+| `filter_sources` | list | `[]` | Source IDs to filter |
+| `filter_article_types_mode` | string | `all` | `all`, `include`, or `exclude` |
+| `filter_article_types` | list | `[]` | `original`, `synthetic`, or both |
+| `ai_mode` | string | `rewrite` | `rewrite` (per-article), `synthetic` (batch), `off` (raw) |
+| `ai_config_id` | string | `""` | AI Config ID (empty = built-in global) |
+| `target_language` | string | `""` | Translate to this language code (empty = origin only) |
+| `rate_limit_max` | int | 0 | Max deliveries per window (0 = unlimited) |
+| `rate_limit_window_minutes` | int | 60 | Rate limit window in minutes |
 
 ### Update a webhook
 
@@ -339,6 +475,8 @@ curl -s -X PUT $API/webhooks/{wh_id} \
   -H "Content-Type: application/json" \
   -d '{"name":"Updated Hook","payload_mode":"fields","payload_fields":["title","url","ai_summary_en","category"]}' | jq .
 ```
+
+Partial update — only send fields to change.
 
 ### Toggle webhook
 
@@ -352,15 +490,21 @@ curl -s -X POST $API/webhooks/{wh_id}/toggle | jq .
 curl -s -X DELETE $API/webhooks/{wh_id} | jq .
 ```
 
+### Test a webhook (sends mock article)
+
+```bash
+curl -s -X POST $API/webhooks/{wh_id}/test | jq .
+```
+
+Returns request details, status code, elapsed ms, and a preview of the payload sent.
+
 ## Webhook Logs
 
 ```bash
 curl -s "$API/logs/webhooks?page=1&limit=20" | jq .
 ```
 
-Returns `logs` (article_id, webhook_url, sent_at, status_code, success, error_msg), `total`, `page`, `total_pages`.
-
-Telegram delivery logs also appear here with `webhook_url` = `telegram:{chat_id}`.
+Returns `logs` (article_id, webhook_id, webhook_url, sent_at, status_code, success, error_msg), `total`, `page`, `total_pages`.
 
 ## Telegram Channels
 
@@ -375,10 +519,24 @@ curl -s $API/telegram | jq .
 ```bash
 curl -s -X POST $API/telegram \
   -H "Content-Type: application/json" \
-  -d '{"id":"news_channel","name":"Finance News","bot_token":"123456:ABC...","chat_id":"-1001234567890","lang":"both","payload_mode":"full"}' | jq .
+  -d '{
+    "id": "news_channel",
+    "name": "Finance News",
+    "bot_token": "123456:ABC...",
+    "chat_id": "-1001234567890",
+    "payload_mode": "full",
+    "filter_categories_mode": "all",
+    "filter_sources_mode": "all",
+    "filter_article_types_mode": "all",
+    "filter_article_types": [],
+    "ai_mode": "rewrite",
+    "target_language": "vi",
+    "rate_limit_max": 0,
+    "rate_limit_window_minutes": 60
+  }' | jq .
 ```
 
-Fields: `id` (required, unique), `name`, `bot_token` (from @BotFather), `chat_id`, `lang` ("vi", "en", or "both"), `retry_attempts`, `timeout_seconds`, `payload_mode`, `payload_fields`, `payload_template`.
+Fields mirror webhook fields above (no `url`, `http_method`, `content_type`; adds `bot_token`, `chat_id`).
 
 ### Update a channel
 
@@ -424,22 +582,34 @@ curl -s -X PUT $API/webhooks/my_hook \
   -d '{"payload_mode":"fields","payload_fields":["title","url","ai_summary_vi","ai_summary_en","category"]}' | jq .
 ```
 
-Available fields: `id`, `source_id`, `source_name`, `url`, `title`, `summary`, `content`, `lang`, `declared_lang`, `category`, `published_at`, `fetched_at`, `ai_summary_vi`, `ai_summary_en`, `ai_status`.
+**Available fields for original articles:** `id`, `source_id`, `source_name`, `url`, `title`, `summary`, `content`, `lang`, `declared_lang`, `category`, `published_at`, `fetched_at`, `ai_summary_vi`, `ai_summary_en`, `ai_status`.
+
+**Additional fields for synthetic articles:** `title_en`, `title_vi`, `content_en`, `content_vi`, `angle`, `source_article_ids`, `num_source_articles`, `ai_model`, `ai_tokens`, `created_at`.
+
+Note: `ai_summary_{lang}` is dynamic — e.g. `ai_summary_ja` if `target_language="ja"`.
 
 ### Mode 3: `template` — custom Jinja2
 
 ```bash
 curl -s -X PUT $API/webhooks/my_hook \
   -H "Content-Type: application/json" \
-  -d '{"payload_mode":"template","payload_template":"{\"title\":\"{{ title }}\",\"link\":\"{{ url }}\",\"summary\":\"{{ ai_summary_en }}\"}"}' | jq .
+  -d '{"payload_mode":"template","payload_template":"{\"title\":\"{{ title }}\",\"link\":\"{{ url }}\",\"summary\":\"{{ ai_summary_en }}\"}" }' | jq .
+```
+
+Universal template (works for both original and synthetic):
+```
+{{ title|default(title_en, true) }} — {{ content_en|default(ai_summary_en, true) }}
+```
+
+Conditional example:
+```
+{% if type == 'synthetic' %}{{ content_en }}{% else %}{{ ai_summary_en }}{% endif %}
 ```
 
 Telegram template example (HTML):
 ```
 <b>{{ title }}</b>\n📡 {{ source_name }}\n\n{{ ai_summary_vi }}\n\n🔗 <a href="{{ url }}">Read more</a>
 ```
-
-All article fields are available as template variables. Use `{{ "{{" }} if ... {{ "}}" }}` for conditionals.
 
 ### Validate & preview a template
 
@@ -514,12 +684,13 @@ curl -s -X POST $API/payload/preview \
 1. `curl -s $API/articles/pending/list | jq .count` — check pending queue
 2. `curl -s $API/settings/ai | jq .enabled` — verify AI is enabled
 3. `curl -s "$API/logs/ai?limit=5" | jq .logs` — check recent AI activity
+4. `curl -s $API/ai-configs | jq .` — verify AI configs are correct
 
 ### Webhook failures
 
 1. `curl -s "$API/logs/webhooks?limit=10" | jq '.logs[] | select(.success==0)'` — find failures
 2. `curl -s $API/webhooks | jq .endpoints` — verify endpoint config
-3. Common causes: endpoint down, timeout too low, URL incorrect
+3. Common causes: endpoint down, timeout too low, URL incorrect, article filtered out by type/category/source rules
 
 ### Telegram not sending
 
@@ -562,12 +733,26 @@ redis-cli DEL news:dedup:simhashes
 | DELETE | `/api/categories/{id}` | Delete category |
 | GET | `/api/settings/ai` | Get AI config |
 | PUT | `/api/settings/ai` | Update AI config |
+| POST | `/api/settings/ai/toggle` | Toggle AI summary on/off |
+| POST | `/api/settings/ai/synthesis/toggle` | Toggle topic synthesis on/off |
+| GET | `/api/providers` | List AI providers (api_key masked) |
+| GET | `/api/providers/{id}` | Get provider (full api_key) |
+| POST | `/api/providers` | Add provider |
+| PUT | `/api/providers/{id}` | Update provider |
+| DELETE | `/api/providers/{id}` | Delete provider |
+| POST | `/api/providers/{id}/test` | Test provider connection |
+| GET | `/api/ai-configs` | List AI config presets |
+| POST | `/api/ai-configs` | Create AI config preset |
+| PUT | `/api/ai-configs/{id}` | Update AI config preset |
+| POST | `/api/ai-configs/{id}/set-default` | Set as default config |
+| DELETE | `/api/ai-configs/{id}` | Delete AI config preset |
 | GET | `/api/logs/ai?page=&limit=` | AI processing logs |
 | GET | `/api/webhooks` | List webhook endpoints |
 | POST | `/api/webhooks` | Add webhook |
-| PUT | `/api/webhooks/{id}` | Update webhook |
+| PUT | `/api/webhooks/{id}` | Update webhook (partial) |
 | POST | `/api/webhooks/{id}/toggle` | Toggle webhook |
 | DELETE | `/api/webhooks/{id}` | Delete webhook |
+| POST | `/api/webhooks/{id}/test` | Test webhook with mock article |
 | GET | `/api/logs/webhooks?page=&limit=` | Webhook delivery logs |
 | GET | `/api/logs/crawl?page=&source=&domain=&errors_only=&http_status=&since=` | Browse crawl logs (filterable) |
 | GET | `/api/logs/crawl/sources` | Per-source summary (success rate, latency) |
@@ -581,10 +766,11 @@ redis-cli DEL news:dedup:simhashes
 | GET | `/api/logs/api/summary` | Per-endpoint stats (latency, error rate) |
 | GET | `/api/telegram` | List Telegram channels |
 | POST | `/api/telegram` | Add Telegram channel |
-| PUT | `/api/telegram/{id}` | Update Telegram channel |
+| PUT | `/api/telegram/{id}` | Update Telegram channel (partial) |
 | POST | `/api/telegram/{id}/toggle` | Toggle Telegram channel |
 | DELETE | `/api/telegram/{id}` | Delete Telegram channel |
 | POST | `/api/telegram/{id}/test` | Send test message to channel |
 | POST | `/api/payload/validate` | Validate Jinja2 template + preview |
 | GET | `/api/payload/fields` | List available payload fields |
 | POST | `/api/payload/preview` | Preview payload output for any mode |
+| GET | `/api/filter-options` | List categories + sources for autocomplete |

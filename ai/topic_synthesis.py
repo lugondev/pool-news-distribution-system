@@ -76,10 +76,10 @@ IMPORTANT: Each summary (both vi and en) must be {length_guidance}.
 
 
 def _generate_synthetic_id(category: str, articles: list[dict]) -> str:
-    """Generate deterministic ID for synthetic article based on source article IDs."""
+    """Generate deterministic ID based on category + sorted source article IDs.
+    Same source articles always produce the same base ID, enabling idempotency checks."""
     article_ids = sorted([a["id"] for a in articles])
-    timestamp = datetime.now(timezone.utc).isoformat()
-    fingerprint = f"{category}:{','.join(article_ids)}:{timestamp}"
+    fingerprint = f"{category}:{','.join(article_ids)}"
     return f"synth_{hashlib.sha256(fingerprint.encode()).hexdigest()[:16]}"
 
 
@@ -303,6 +303,10 @@ async def save_synthetic_article(redis: aioredis.Redis, synth: dict) -> None:
     logger.debug(f"Saved synthetic article {synth['id']} (angle={synth['angle']})")
 
 
+SYNTH_USED_KEY = "news:synth:used"
+SYNTH_MAX_AGE_SECONDS = 39600  # 11h — avoid articles very close to their 12h TTL
+
+
 async def get_recent_articles_by_category(
     redis: aioredis.Redis,
     category: str,
@@ -334,9 +338,76 @@ async def get_recent_articles_by_category(
     return articles
 
 
+async def _get_unseen_articles(
+    redis: aioredis.Redis,
+    category: str,
+    hook_id: str,
+    max_articles: int,
+) -> list[dict]:
+    """Return articles for the category that this hook has not yet synthesized.
+
+    Fetches 3× max_articles from the feed (newest first) to have a large enough
+    pool after filtering, then removes:
+      - already-used article IDs (tracked per-hook per-category)
+      - articles older than SYNTH_MAX_AGE_SECONDS (too stale)
+    Result is returned newest-first, capped at max_articles.
+    """
+    candidates = await get_recent_articles_by_category(
+        redis, category, limit=max_articles * 3, exclude_synthetic=True
+    )
+    if not candidates:
+        return []
+
+    # Age filter: drop articles older than SYNTH_MAX_AGE_SECONDS
+    now_ts = datetime.now(timezone.utc).timestamp()
+    fresh = []
+    for art in candidates:
+        ts_str = art.get("fetched_at") or art.get("published_at", "")
+        try:
+            dt = datetime.fromisoformat(ts_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            if (now_ts - dt.timestamp()) <= SYNTH_MAX_AGE_SECONDS:
+                fresh.append(art)
+        except (ValueError, TypeError):
+            fresh.append(art)  # if no parseable timestamp, keep it
+
+    if not fresh:
+        return []
+
+    # Used-article filter: per-hook per-category seen set
+    used_key = f"{SYNTH_USED_KEY}:{hook_id}:{category}"
+    used_raw = await redis.zrange(used_key, 0, -1)
+    used_ids = {m.decode() if isinstance(m, bytes) else m for m in used_raw}
+
+    unseen = [a for a in fresh if a["id"] not in used_ids]
+    return unseen[:max_articles]
+
+
+async def _mark_articles_used(
+    redis: aioredis.Redis,
+    category: str,
+    hook_id: str,
+    article_ids: list[str],
+) -> None:
+    """Record article IDs as used for this hook+category. Auto-prunes stale entries."""
+    used_key = f"{SYNTH_USED_KEY}:{hook_id}:{category}"
+    now_ts = datetime.now(timezone.utc).timestamp()
+    cutoff = now_ts - SYNTH_MAX_AGE_SECONDS
+
+    pipe = redis.pipeline()
+    for aid in article_ids:
+        pipe.zadd(used_key, {aid: now_ts})
+    # Prune entries older than the max-age window
+    pipe.zremrangebyscore(used_key, 0, cutoff)
+    pipe.expire(used_key, SYNTH_MAX_AGE_SECONDS + 3600)  # slight buffer over article TTL
+    await pipe.execute()
+
+
 async def process_category_synthesis(
     redis: aioredis.Redis,
     category: str,
+    hook_id: str,
     min_articles: int = 5,
     max_articles: int = 15,
     model: str | None = None,
@@ -347,23 +418,25 @@ async def process_category_synthesis(
     telegram_channels: list[dict] | None = None,
 ) -> int:
     """
-    Process one category: fetch recent articles, synthesize, save, and return count.
+    Process one category for one hook: fetch unseen recent articles, synthesize,
+    save, dispatch, and track used articles. Returns number of synthetic articles generated.
 
-    Returns: Number of synthetic articles generated.
+    Per-hook tracking (news:synth:used:{hook_id}:{category}) ensures the same
+    source articles are never synthesized twice for the same hook, and that
+    each hook independently accumulates fresh batches.
     """
-    articles = await get_recent_articles_by_category(
-        redis,
-        category,
-        limit=max_articles,
-        exclude_synthetic=True,
-    )
+    articles = await _get_unseen_articles(redis, category, hook_id, max_articles)
 
     if len(articles) < min_articles:
         logger.debug(
-            f"Category {category}: only {len(articles)} articles "
+            f"Category {category} / hook {hook_id}: only {len(articles)} unseen articles "
             f"(min {min_articles} required), skipping"
         )
         return 0
+
+    logger.info(
+        f"Category {category} / hook {hook_id}: {len(articles)} unseen articles → synthesizing"
+    )
 
     try:
         synthetics = await synthesize_topic_articles(
@@ -376,13 +449,18 @@ async def process_category_synthesis(
             base_url=base_url,
         )
     except Exception as e:
-        logger.error(f"Synthesis failed for category {category}: {e}")
+        logger.error(f"Synthesis failed for category={category} hook={hook_id}: {e}")
         return 0
+
+    if not synthetics:
+        return 0
+
+    # Mark source articles as used BEFORE dispatch so a crash doesn't cause re-synthesis
+    await _mark_articles_used(redis, category, hook_id, [a["id"] for a in articles])
 
     for synth in synthetics:
         await save_synthetic_article(redis, synth)
 
-        # Dispatch synthetic article to webhooks and Telegram
         if webhook_endpoints or telegram_channels:
             await enqueue_dispatch(
                 synth,
@@ -391,7 +469,7 @@ async def process_category_synthesis(
             )
             logger.debug(
                 f"Enqueued dispatch for synthetic article {synth['id']} "
-                f"(category={category}, angle={synth.get('angle', 'summary')})"
+                f"(category={category}, hook={hook_id}, angle={synth.get('angle', 'summary')})"
             )
 
     return len(synthetics)

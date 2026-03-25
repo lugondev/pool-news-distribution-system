@@ -60,14 +60,27 @@ def _hash_to_article(data: dict) -> dict:
 async def save_article(redis: aioredis.Redis, article: Article) -> None:
     """Save article to Redis với TTL và index vào các Sorted Sets."""
     key = f"news:{article.id}"
-    ts = _ts(article.published_at)
 
+    # Check existing AI status BEFORE pipeline to avoid overwriting completed summaries
+    # and to avoid re-enqueueing articles that have already been processed.
+    existing_status_raw = await redis.hget(key, "ai_status")
+    existing_status = existing_status_raw.decode() if existing_status_raw else None
+    already_processed = existing_status and existing_status != "pending"
+
+    ts = _ts(article.published_at)
     now = article.fetched_at
     date_key = now.strftime("%Y%m%d")
     hour_key = now.strftime("%Y%m%d%H")
 
+    hash_data = _article_to_hash(article)
+    if already_processed:
+        # Preserve AI results — don't overwrite with empty fields from re-crawl
+        hash_data.pop("ai_summary_vi", None)
+        hash_data.pop("ai_summary_en", None)
+        hash_data.pop("ai_status", None)
+
     pipe = redis.pipeline()
-    pipe.hset(key, mapping=_article_to_hash(article))
+    pipe.hset(key, mapping=hash_data)
     pipe.expire(key, TTL_SECONDS)
 
     # Global feed
@@ -90,9 +103,10 @@ async def save_article(redis: aioredis.Redis, article: Article) -> None:
     pipe.zadd(f"news:cat:{article.category}", {article.id: ts})
     pipe.expire(f"news:cat:{article.category}", TTL_SECONDS)
 
-    # AI pending queue — atomic sorted set; popped when AI job picks it up
-    pipe.zadd(AI_PENDING_KEY, {article.id: ts})
-    pipe.expire(AI_PENDING_KEY, TTL_SECONDS)
+    # AI pending queue — only enqueue if not already processed
+    if not already_processed:
+        pipe.zadd(AI_PENDING_KEY, {article.id: ts})
+        pipe.expire(AI_PENDING_KEY, TTL_SECONDS)
 
     await pipe.execute()
 
@@ -114,17 +128,27 @@ async def update_article_content(
 async def update_article_ai(
     redis: aioredis.Redis,
     article_id: str,
-    ai_summary_vi: str,
-    ai_summary_en: str,
+    summaries: dict[str, str],
 ) -> None:
-    await redis.hset(
-        f"news:{article_id}",
-        mapping={
-            "ai_summary_vi": ai_summary_vi,
-            "ai_summary_en": ai_summary_en,
-            "ai_status": "done",
-        },
-    )
+    """Store AI summaries. summaries = {lang_code: text, ...}"""
+    mapping: dict = {"ai_status": "done"}
+    for lang, text in summaries.items():
+        mapping[f"ai_summary_{lang}"] = text
+    await redis.hset(f"news:{article_id}", mapping=mapping)
+
+
+async def update_article_ai_config(
+    redis: aioredis.Redis,
+    article_id: str,
+    summaries: dict[str, str],
+    config_id: str,
+) -> None:
+    """Store AI summaries for a specific (config, lang) group."""
+    mapping: dict = {}
+    for lang, text in summaries.items():
+        mapping[f"ai_{config_id}_{lang}"] = text
+    if mapping:
+        await redis.hset(f"news:{article_id}", mapping=mapping)
 
 
 async def get_latest_articles(

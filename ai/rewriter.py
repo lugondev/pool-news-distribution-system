@@ -14,7 +14,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 import redis.asyncio as aioredis
 from crawler.dedup import check_ai_duplicate, register_ai_simhash
-from storage.redis_store import pop_pending_ai_articles, update_article_ai
+from storage.redis_store import pop_pending_ai_articles, update_article_ai, update_article_ai_config
 from storage.sqlite_stats import log_ai_usage
 from webhook.dispatcher import enqueue_dispatch
 
@@ -80,33 +80,65 @@ TONE_PROMPTS = {
     ),
 }
 
+LANG_NAMES: dict[str, str] = {
+    "en": "English", "vi": "Vietnamese", "ja": "Japanese", "ko": "Korean",
+    "zh": "Chinese", "fr": "French", "es": "Spanish", "de": "German",
+    "pt": "Portuguese", "ar": "Arabic", "th": "Thai", "id": "Indonesian",
+    "ms": "Malay", "ru": "Russian", "tr": "Turkish", "it": "Italian",
+}
+
 SUMMARIZE_PROMPT = """{tone_instruction}
 
-You are writing for readers who have NOT read the original article. Your goal is to deliver the complete information clearly and contextually so they understand the story immediately without needing to re-read.
+You are writing for readers who have NOT read the original article. Deliver the complete information clearly so they understand the story without needing the source.
 
-Given the following news article, create TWO reader-friendly summaries that answer:
+Given the following news article, write {lang_count} that answers:
 - WHAT happened (the core event/development)
 - WHO is involved (key people, organizations, countries)
-- WHERE/WHEN it occurred (location, timeframe if relevant)
+- WHERE/WHEN it occurred (if relevant)
 - WHY it matters (impact, significance, context)
 
 Structure each summary:
 1. Lead sentence: Most important information first (what + who)
 2. Context: Background or why this matters
-3. Impact/Outcome: What this means for readers or what happens next
+3. Impact/Outcome: What this means or what happens next
 
 Requirements:
-- Write in clear, natural language — as if explaining to a friend
-- Each summary must be standalone and complete (no references to "the article")
-- Vietnamese: {length_guidance}, tiếng Việt tự nhiên, dễ hiểu
-- English: {length_guidance}, clear and conversational
+{lang_requirements}- Write naturally in each language — not a word-for-word translation
+- Each summary must be standalone (no references to "the article")
 - NO marketing fluff, NO opinions — just facts with context
 
 Article title: {title}
 Article content: {content}
 
-Respond in JSON format:
-{{"vi": "Vietnamese summary here", "en": "English summary here"}}"""
+{lang_json_format}"""
+
+
+def _build_lang_spec(
+    origin_lang: str,
+    target_lang: str | None,
+    length_guidance: str,
+) -> tuple[str, str, str]:
+    """Return (lang_count, lang_requirements, lang_json_format) for the prompt."""
+    origin_name = LANG_NAMES.get(origin_lang, origin_lang.upper())
+
+    if target_lang and target_lang != origin_lang:
+        target_name = LANG_NAMES.get(target_lang, target_lang.upper())
+        count = "two summaries"
+        reqs = (
+            f"- {origin_name}: {length_guidance}\n"
+            f"- {target_name}: {length_guidance}\n"
+        )
+        fmt = (
+            f'Respond in JSON format:\n'
+            f'{{"{origin_lang}": "{origin_name} summary here",'
+            f' "{target_lang}": "{target_name} summary here"}}'
+        )
+    else:
+        count = "one summary"
+        reqs = f"- {origin_name}: {length_guidance}\n"
+        fmt = f'Respond in JSON format:\n{{"{origin_lang}": "{origin_name} summary here"}}'
+
+    return count, reqs, fmt
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
@@ -118,33 +150,60 @@ async def rewrite_article(
     tone: str = "general",
     api_key: str | None = None,
     base_url: str | None = None,
-) -> tuple[str, str, int]:
-    """Returns (vi_summary, en_summary, tokens_used)."""
+    prompt_system_override: str | None = None,
+    prompt_template_override: str | None = None,
+    origin_lang: str = "en",
+    target_lang: str | None = None,
+) -> tuple[dict[str, str], int]:
+    """
+    Returns (summaries, tokens_used).
+    summaries = {lang_code: text} — always has origin_lang key, has target_lang key if set.
+    """
     client = get_openai_client(api_key=api_key, base_url=base_url)
     cfg = _load_ai_config()
     resolved_model = model or cfg.get("model", "gpt-4o-mini")
-    custom_system = (cfg.get("prompt_system") or "").strip()
-    custom_template = (cfg.get("prompt_template") or "").strip()
+    custom_system = (prompt_system_override or cfg.get("prompt_system") or "").strip()
+    custom_template = (prompt_template_override or cfg.get("prompt_template") or "").strip()
     tone_instruction = custom_system or TONE_PROMPTS.get(tone, TONE_PROMPTS["general"])
+
     if cfg.get("output_limit_enabled"):
         max_chars = int(cfg.get("output_limit_chars") or 250)
         tone_instruction += (
-            f"\nIMPORTANT: Each summary (both vi and en) must be at most {max_chars} characters. "
-            "Count every character including spaces. URLs count as 23 characters (Twitter-style)."
+            f"\nIMPORTANT: Each summary must be at most {max_chars} characters. "
+            "Count every character including spaces."
         )
         length_guidance = f"at most {max_chars} characters"
     else:
         length_guidance = "2-3 sentences"
-    prompt_template = custom_template or SUMMARIZE_PROMPT
-    content = article.get("content") or article.get("summary") or ""
+
+    lang_count, lang_requirements, lang_json_format = _build_lang_spec(
+        origin_lang, target_lang, length_guidance
+    )
+
+    article_content = article.get("content") or article.get("summary") or ""
     title = article.get("title", "")
 
-    prompt = prompt_template.format(
-        tone_instruction=tone_instruction,
-        length_guidance=length_guidance,
-        title=title,
-        content=content[:1500],
-    )
+    if custom_template:
+        # Custom templates can use {lang_count}, {lang_requirements}, {lang_json_format}
+        # or the old-style {length_guidance} for backward compat
+        prompt = custom_template.format(
+            tone_instruction=tone_instruction,
+            length_guidance=length_guidance,
+            lang_count=lang_count,
+            lang_requirements=lang_requirements,
+            lang_json_format=lang_json_format,
+            title=title,
+            content=article_content[:1500],
+        )
+    else:
+        prompt = SUMMARIZE_PROMPT.format(
+            tone_instruction=tone_instruction,
+            lang_count=lang_count,
+            lang_requirements=lang_requirements,
+            lang_json_format=lang_json_format,
+            title=title,
+            content=article_content[:1500],
+        )
 
     response = await client.chat.completions.create(
         model=resolved_model,
@@ -154,12 +213,18 @@ async def rewrite_article(
         temperature=temperature,
     )
 
-    content = response.choices[0].message.content if response.choices else None
-    if not content:
+    resp_content = response.choices[0].message.content if response.choices else None
+    if not resp_content:
         raise ValueError(f"Model returned empty content (model={resolved_model})")
-    result = json.loads(content)
+    result = json.loads(resp_content)
     tokens = response.usage.total_tokens if response.usage else 0
-    return result.get("vi", ""), result.get("en", ""), tokens
+
+    summaries: dict[str, str] = {}
+    summaries[origin_lang] = result.get(origin_lang, "")
+    if target_lang and target_lang != origin_lang:
+        summaries[target_lang] = result.get(target_lang, "")
+
+    return summaries, tokens
 
 
 async def test_ai_connection(
@@ -305,16 +370,29 @@ async def process_pending_articles(
     base_url: str | None = None,
     webhook_endpoints: list[dict] | None = None,
     telegram_channels: list[dict] | None = None,
+    raw_webhook_endpoints: list[dict] | None = None,
+    raw_telegram_channels: list[dict] | None = None,
     spread_seconds: float = 0,
     ai_dedup_threshold: int = 6,
+    pre_fetched_articles: list[dict] | None = None,
+    config_id: str | None = None,
+    prompt_system_override: str | None = None,
+    prompt_template_override: str | None = None,
+    perform_ai_dedup: bool = True,
+    target_language: str | None = None,
 ) -> int:
     """
     Lấy các bài pending, rewrite rồi dispatch webhook + telegram.
     If spread_seconds > 0, articles are processed one-by-one with even delays
     instead of all-at-once, to avoid bursts.
+    If pre_fetched_articles is provided, uses those instead of popping from queue.
+    If config_id is set, stores summaries under config-specific fields for per-config dispatch.
     Returns số bài đã xử lý.
     """
-    articles = await pop_pending_ai_articles(redis, limit=batch_size)
+    if pre_fetched_articles is not None:
+        articles = pre_fetched_articles
+    else:
+        articles = await pop_pending_ai_articles(redis, limit=batch_size)
     if not articles:
         return 0
 
@@ -334,6 +412,22 @@ async def process_pending_articles(
 
     for article in articles:
         title = article.get("title", "")
+
+        # Per-config+lang dedup: skip if already processed with this exact (config, lang) combo
+        _dedup_key = f"ai_done_{config_id or 'builtin'}_{target_language or 'origin'}"
+        if config_id or target_language:
+            cfg_done = await redis.hget(f"news:{article['id']}", _dedup_key)
+            if cfg_done:
+                processed += 1
+                continue
+
+        # Raw dispatch: send immediately without AI processing, for hooks with ai_mode="off"
+        if raw_webhook_endpoints or raw_telegram_channels:
+            await enqueue_dispatch(
+                article,
+                raw_webhook_endpoints or [],
+                telegram_channels=raw_telegram_channels,
+            )
 
         # Age-based skip: avoid wasting quota on stale articles.
         # Threshold scales with category volume — busy categories expire faster.
@@ -360,8 +454,13 @@ async def process_pending_articles(
             except (ValueError, TypeError):
                 pass
 
+        # Skip AI processing if no rewrite hooks are configured
+        if not webhook_endpoints and not telegram_channels:
+            processed += 1
+            continue
+
         # Pre-AI semantic dedup: check BEFORE sleeping to avoid wasted delay
-        if ai_dedup_threshold > 0 and title:
+        if perform_ai_dedup and ai_dedup_threshold > 0 and title:
             ai_dup = await check_ai_duplicate(
                 redis, title, threshold=ai_dedup_threshold
             )
@@ -377,8 +476,13 @@ async def process_pending_articles(
         if ai_call_count > 0 and inter_delay > 0:
             await asyncio.sleep(inter_delay)
 
+        # Determine the article's origin language
+        raw_lang = article.get("lang") or article.get("declared_lang") or "en"
+        origin_lang = raw_lang[:2].lower() if raw_lang and raw_lang != "und" else "en"
+        tgt_lang = target_language if target_language and target_language != origin_lang else None
+
         try:
-            vi, en, tokens = await rewrite_article(
+            summaries, tokens = await rewrite_article(
                 article,
                 model=model,
                 max_tokens=max_tokens,
@@ -386,23 +490,32 @@ async def process_pending_articles(
                 tone=tone,
                 api_key=api_key,
                 base_url=base_url,
+                prompt_system_override=prompt_system_override,
+                prompt_template_override=prompt_template_override,
+                origin_lang=origin_lang,
+                target_lang=tgt_lang,
             )
         except Exception as e:
-            # AI failed after tenacity retries — mark failed so it won't block the queue.
-            # It will NOT be re-enqueued; the article stays in Redis with ai_status="failed".
             logger.warning(f"AI failed for {article['id']}: {e}")
             await redis.hset(f"news:{article['id']}", "ai_status", "failed")
             ai_call_count += 1
             continue
 
         ai_call_count += 1
-        await update_article_ai(redis, article["id"], vi, en)
+        await update_article_ai(redis, article["id"], summaries)
+        if config_id or target_language:
+            await update_article_ai_config(redis, article["id"], summaries, config_id or "builtin")
+            await redis.hset(f"news:{article['id']}", _dedup_key, "1")
         await log_ai_usage(article["id"], model, tokens)
-        if title:
+        if title and perform_ai_dedup:
             await register_ai_simhash(redis, title)
 
-        article["ai_summary_vi"] = vi
-        article["ai_summary_en"] = en
+        # Populate article dict for payload dispatch
+        for lang, text in summaries.items():
+            article[f"ai_summary_{lang}"] = text
+        article["ai_summary_origin"] = summaries.get(origin_lang, "")
+        article["ai_summary_target"] = summaries.get(tgt_lang, "") if tgt_lang else ""
+
         if webhook_endpoints or telegram_channels:
             await enqueue_dispatch(
                 article,

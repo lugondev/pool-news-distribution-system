@@ -34,6 +34,11 @@ def _default_format(article: dict, lang: str = "both") -> str:
     source = article.get("source_name", "")
     category = article.get("category", "")
     emoji = CATEGORY_EMOJI.get(category, "\U0001f4f0")
+
+    # Prefer per-hook origin/target summaries; fall back to legacy vi/en fields
+    origin_text = article.get("ai_summary_origin", "") or article.get("ai_summary_vi", "") or article.get("ai_summary_en", "")
+    target_text = article.get("ai_summary_target", "")
+    # Legacy vi/en fallback for backward compat
     vi = article.get("ai_summary_vi", "")
     en = article.get("ai_summary_en", "")
 
@@ -42,14 +47,22 @@ def _default_format(article: dict, lang: str = "both") -> str:
         lines.append(f"\U0001f4e1 <i>{_escape(source)}</i>")
     lines.append("")
 
-    if lang in ("vi", "both") and vi:
-        lines.append(f"\U0001f1fb\U0001f1f3 {_escape(vi)}")
-    if lang in ("en", "both") and en:
-        lines.append(f"\U0001f1ec\U0001f1e7 {_escape(en)}")
-    if not vi and not en:
-        summary = article.get("summary", "")
-        if summary:
-            lines.append(_escape(summary[:300]))
+    if origin_text or target_text:
+        # New format: show origin summary, then target translation if available
+        if origin_text:
+            lines.append(f"\U0001f4dd {_escape(origin_text)}")
+        if target_text and target_text != origin_text:
+            lines.append(f"\U0001f310 {_escape(target_text)}")
+    else:
+        # Legacy fallback: use lang setting with vi/en
+        if lang in ("vi", "both") and vi:
+            lines.append(f"\U0001f1fb\U0001f1f3 {_escape(vi)}")
+        if lang in ("en", "both") and en:
+            lines.append(f"\U0001f1ec\U0001f1e7 {_escape(en)}")
+        if not vi and not en:
+            summary = article.get("summary", "")
+            if summary:
+                lines.append(_escape(summary[:300]))
 
     if url:
         lines.append(f"\n\U0001f517 <a href=\"{url}\">Read full article</a>")

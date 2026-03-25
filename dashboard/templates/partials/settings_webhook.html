@@ -142,6 +142,11 @@ function loadFilterOptions() {
       {% set cat_mode = ep.filter_categories_mode or 'all' %}{% set src_mode = ep.filter_sources_mode or 'all' %}
       {% if cat_mode != 'all' and ep.filter_categories %} · Cat {{ cat_mode }}: <b>{{ ep.filter_categories|join(', ') }}</b>{% endif %}
       {% if src_mode != 'all' and ep.filter_sources %} · Src {{ src_mode }}: <b>{{ ep.filter_sources|join(', ') }}</b>{% endif %}
+      {% if ep.target_language %} · Lang: <b>{{ ep.target_language }}</b>{% endif %}
+      {% set type_mode = ep.filter_article_types_mode or 'all' %}
+      {% if type_mode != 'all' and ep.filter_article_types %} · Type {{ type_mode }}: <b>{{ ep.filter_article_types|join(', ') }}</b>{% endif %}
+      {% set ai_mode = ep.ai_mode or 'rewrite' %}
+      · AI: <b style="color:{% if ai_mode=='rewrite' %}var(--accent){% elif ai_mode=='synthetic' %}var(--green,#22c55e){% else %}var(--muted){% endif %}">{{ ai_mode }}</b>
       {% if ep.rate_limit_max %} · Rate: <b>{{ ep.rate_limit_max }}/{{ ep.rate_limit_window_minutes or 60 }}min</b>{% endif %}
     </div>
 
@@ -232,8 +237,46 @@ function loadFilterOptions() {
           </div>
           <div class="form-group" id="wh-ft-wrap-{{ ep.id }}" style="display:{{ 'none' if (ep.filter_article_types_mode or 'all') == 'all' else '' }}">
             <label>Types <span class="hint">original, synthetic</span></label>
-            <input type="text" name="filter_article_types" value="{{ ep.filter_article_types|join(', ') if ep.filter_article_types else '' }}" placeholder="original, synthetic" autocomplete="off">
+            <input type="text" name="filter_article_types" value="{{ ep.filter_article_types|join(', ') if ep.filter_article_types else '' }}" placeholder="original, synthetic">
           </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>AI Mode <span class="hint">— what this hook receives</span></label>
+            <select name="ai_mode">
+              <option value="rewrite"   {{ 'selected' if (ep.ai_mode or 'rewrite') == 'rewrite' }}>AI Rewrite — per-article summary</option>
+              <option value="synthetic" {{ 'selected' if ep.ai_mode == 'synthetic' }}>AI Synthetic — batch synthesis</option>
+              <option value="off"       {{ 'selected' if ep.ai_mode == 'off' }}>Off — raw article, no AI</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>AI Config <span class="hint">— tone/prompt preset (built-in if none)</span></label>
+            <select name="ai_config_id">
+              <option value="">— Built-in (global settings) —</option>
+              {% for c in ai_configs %}
+              <option value="{{ c.id }}" {{ 'selected' if ep.ai_config_id == c.id }}>
+                {{ c.name }}{% if c.is_default %} (default){% endif %} — {{ c.tone or 'general' }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Target Language <span class="hint">— translate to (empty = origin only)</span></label>
+            <select name="target_language">
+              <option value="" {{ 'selected' if not ep.target_language }}>— Origin language only —</option>
+              <option value="en" {{ 'selected' if ep.target_language == 'en' }}>English (en)</option>
+              <option value="vi" {{ 'selected' if ep.target_language == 'vi' }}>Vietnamese (vi)</option>
+              <option value="ja" {{ 'selected' if ep.target_language == 'ja' }}>Japanese (ja)</option>
+              <option value="ko" {{ 'selected' if ep.target_language == 'ko' }}>Korean (ko)</option>
+              <option value="zh" {{ 'selected' if ep.target_language == 'zh' }}>Chinese (zh)</option>
+              <option value="fr" {{ 'selected' if ep.target_language == 'fr' }}>French (fr)</option>
+              <option value="de" {{ 'selected' if ep.target_language == 'de' }}>German (de)</option>
+              <option value="es" {{ 'selected' if ep.target_language == 'es' }}>Spanish (es)</option>
+            </select>
+          </div>
+          <div class="form-group"></div>
         </div>
         <div class="form-row-2" style="margin-top:6px">
           <div class="form-group">
@@ -358,8 +401,46 @@ function loadFilterOptions() {
           </div>
           <div class="form-group" id="wh-add-ft-wrap" style="display:none">
             <label>Types <span class="hint">original, synthetic</span></label>
-            <input type="text" name="filter_article_types" placeholder="original, synthetic" autocomplete="off">
+            <input type="text" name="filter_article_types" placeholder="original, synthetic">
           </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>AI Mode <span class="hint">— what this hook receives</span></label>
+            <select name="ai_mode">
+              <option value="rewrite" selected>AI Rewrite — per-article summary</option>
+              <option value="synthetic">AI Synthetic — batch synthesis</option>
+              <option value="off">Off — raw article, no AI</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>AI Config <span class="hint">— tone/prompt preset (built-in if none)</span></label>
+            <select name="ai_config_id">
+              <option value="">— Built-in (global settings) —</option>
+              {% for c in ai_configs %}
+              <option value="{{ c.id }}">{{ c.name }}{% if c.is_default %} (default){% endif %} — {{ c.tone or 'general' }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Target Language <span class="hint">— translate to (empty = origin only)</span></label>
+            <select name="target_language">
+              <option value="" selected>— Origin language only —</option>
+              <option value="en">English (en)</option>
+              <option value="vi">Vietnamese (vi)</option>
+              <option value="ja">Japanese (ja)</option>
+              <option value="ko">Korean (ko)</option>
+              <option value="zh">Chinese (zh)</option>
+              <option value="fr">French (fr)</option>
+              <option value="de">German (de)</option>
+              <option value="es">Spanish (es)</option>
+            </select>
+          </div>
+          <div class="form-group"></div>
         </div>
         <div class="form-row-2" style="margin-top:6px">
           <div class="form-group">

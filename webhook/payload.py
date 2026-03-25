@@ -28,6 +28,8 @@ ALL_FIELDS = [
     "fetched_at",
     "ai_summary_vi",
     "ai_summary_en",
+    "ai_summary_origin",
+    "ai_summary_target",
     "ai_status",
     # Synthetic article fields
     "title_en",
@@ -63,6 +65,8 @@ def build_full_payload(article: dict) -> dict:
         "fetched_at": article.get("fetched_at", ""),
         "ai_summary_vi": article.get("ai_summary_vi", ""),
         "ai_summary_en": article.get("ai_summary_en", ""),
+        "ai_summary_origin": article.get("ai_summary_origin", ""),
+        "ai_summary_target": article.get("ai_summary_target", ""),
         "ai_status": article.get("ai_status", ""),
         "sent_at": datetime.now(timezone.utc).isoformat(),
     }

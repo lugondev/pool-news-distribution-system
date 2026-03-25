@@ -113,7 +113,7 @@ function loadFilterOptions() {
         {% else %}
           <span class="toggle-status toggle-off" style="font-size:10px">OFF</span>
         {% endif %}
-        <span class="log-lang">{{ ch.lang or 'both' }}</span>
+        <span class="log-lang">{{ ch.target_language or 'origin' }}</span>
       </div>
       <div class="wh-actions">
         <button class="btn btn-sm btn-toggle"
@@ -138,11 +138,15 @@ function loadFilterOptions() {
     </div>
     <div class="wh-url">Chat ID: {{ ch.chat_id }}</div>
     <div class="wh-meta">
-      Token: {{ ch.bot_token[:8] if ch.bot_token else '—' }}••• · Lang: {{ ch.lang or 'both' }} · Retry: {{ ch.retry_attempts or 3 }}x · Timeout: {{ ch.timeout_seconds or 10 }}s
+      Token: {{ ch.bot_token[:8] if ch.bot_token else '—' }}••• · Target: {{ ch.target_language or 'origin only' }} · Retry: {{ ch.retry_attempts or 3 }}x · Timeout: {{ ch.timeout_seconds or 10 }}s
       · Payload: <b>{{ ch.payload_mode or 'full' }}</b>{% if ch.payload_mode == 'fields' and ch.payload_fields %} ({{ ch.payload_fields|join(', ') }}){% endif %}
       {% set cat_mode = ch.filter_categories_mode or 'all' %}{% set src_mode = ch.filter_sources_mode or 'all' %}
       {% if cat_mode != 'all' and ch.filter_categories %} · Cat {{ cat_mode }}: <b>{{ ch.filter_categories|join(', ') }}</b>{% endif %}
       {% if src_mode != 'all' and ch.filter_sources %} · Src {{ src_mode }}: <b>{{ ch.filter_sources|join(', ') }}</b>{% endif %}
+      {% set type_mode = ch.filter_article_types_mode or 'all' %}
+      {% if type_mode != 'all' and ch.filter_article_types %} · Type {{ type_mode }}: <b>{{ ch.filter_article_types|join(', ') }}</b>{% endif %}
+      {% set ai_mode = ch.ai_mode or 'rewrite' %}
+      · AI: <b style="color:{% if ai_mode=='rewrite' %}var(--accent){% elif ai_mode=='synthetic' %}var(--green,#22c55e){% else %}var(--muted){% endif %}">{{ ai_mode }}</b>
       {% if ch.rate_limit_max %} · Rate: <b>{{ ch.rate_limit_max }}/{{ ch.rate_limit_window_minutes or 60 }}min</b>{% endif %}
     </div>
     <div class="tg-test-result" style="margin-top:4px;font-size:11px"></div>
@@ -166,11 +170,17 @@ function loadFilterOptions() {
       </div>
       <div class="form-row-3">
         <div class="form-group">
-          <label>Summary Language</label>
-          <select name="lang">
-            <option value="both" {{ 'selected' if (ch.lang or 'both') == 'both' }}>Both (VI + EN)</option>
-            <option value="vi" {{ 'selected' if ch.lang == 'vi' }}>Vietnamese only</option>
-            <option value="en" {{ 'selected' if ch.lang == 'en' }}>English only</option>
+          <label>Target Language <span class="hint">— translate to (empty = origin only)</span></label>
+          <select name="target_language">
+            <option value="" {{ 'selected' if not ch.target_language }}>— Origin language only —</option>
+            <option value="en" {{ 'selected' if ch.target_language == 'en' }}>English (en)</option>
+            <option value="vi" {{ 'selected' if ch.target_language == 'vi' }}>Vietnamese (vi)</option>
+            <option value="ja" {{ 'selected' if ch.target_language == 'ja' }}>Japanese (ja)</option>
+            <option value="ko" {{ 'selected' if ch.target_language == 'ko' }}>Korean (ko)</option>
+            <option value="zh" {{ 'selected' if ch.target_language == 'zh' }}>Chinese (zh)</option>
+            <option value="fr" {{ 'selected' if ch.target_language == 'fr' }}>French (fr)</option>
+            <option value="de" {{ 'selected' if ch.target_language == 'de' }}>German (de)</option>
+            <option value="es" {{ 'selected' if ch.target_language == 'es' }}>Spanish (es)</option>
           </select>
         </div>
         <div class="form-group">
@@ -226,7 +236,28 @@ function loadFilterOptions() {
           </div>
           <div class="form-group" id="tg-ft-wrap-{{ ch.id }}" style="display:{{ 'none' if (ch.filter_article_types_mode or 'all') == 'all' else '' }}">
             <label>Types <span class="hint">original, synthetic</span></label>
-            <input type="text" name="filter_article_types" value="{{ ch.filter_article_types|join(', ') if ch.filter_article_types else '' }}" placeholder="original, synthetic" autocomplete="off">
+            <input type="text" name="filter_article_types" value="{{ ch.filter_article_types|join(', ') if ch.filter_article_types else '' }}" placeholder="original, synthetic">
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>AI Mode <span class="hint">— what this channel receives</span></label>
+            <select name="ai_mode">
+              <option value="rewrite"   {{ 'selected' if (ch.ai_mode or 'rewrite') == 'rewrite' }}>AI Rewrite — per-article summary</option>
+              <option value="synthetic" {{ 'selected' if ch.ai_mode == 'synthetic' }}>AI Synthetic — batch synthesis</option>
+              <option value="off"       {{ 'selected' if ch.ai_mode == 'off' }}>Off — raw article, no AI</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>AI Config <span class="hint">— tone/prompt preset (built-in if none)</span></label>
+            <select name="ai_config_id">
+              <option value="">— Built-in (global settings) —</option>
+              {% for c in ai_configs %}
+              <option value="{{ c.id }}" {{ 'selected' if ch.ai_config_id == c.id }}>
+                {{ c.name }}{% if c.is_default %} (default){% endif %} — {{ c.tone or 'general' }}
+              </option>
+              {% endfor %}
+            </select>
           </div>
         </div>
         <div class="form-row-2" style="margin-top:6px">
@@ -282,11 +313,17 @@ function loadFilterOptions() {
       </div>
       <div class="form-row-3">
         <div class="form-group">
-          <label>Summary Language</label>
-          <select name="lang">
-            <option value="both" selected>Both (VI + EN)</option>
-            <option value="vi">Vietnamese only</option>
-            <option value="en">English only</option>
+          <label>Target Language <span class="hint">— translate to (empty = origin only)</span></label>
+          <select name="target_language">
+            <option value="" selected>— Origin language only —</option>
+            <option value="en">English (en)</option>
+            <option value="vi">Vietnamese (vi)</option>
+            <option value="ja">Japanese (ja)</option>
+            <option value="ko">Korean (ko)</option>
+            <option value="zh">Chinese (zh)</option>
+            <option value="fr">French (fr)</option>
+            <option value="de">German (de)</option>
+            <option value="es">Spanish (es)</option>
           </select>
         </div>
         <div class="form-group">
@@ -342,7 +379,26 @@ function loadFilterOptions() {
           </div>
           <div class="form-group" id="tg-add-ft-wrap" style="display:none">
             <label>Types <span class="hint">original, synthetic</span></label>
-            <input type="text" name="filter_article_types" placeholder="original, synthetic" autocomplete="off">
+            <input type="text" name="filter_article_types" placeholder="original, synthetic">
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>AI Mode <span class="hint">— what this channel receives</span></label>
+            <select name="ai_mode">
+              <option value="rewrite" selected>AI Rewrite — per-article summary</option>
+              <option value="synthetic">AI Synthetic — batch synthesis</option>
+              <option value="off">Off — raw article, no AI</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>AI Config <span class="hint">— tone/prompt preset (built-in if none)</span></label>
+            <select name="ai_config_id">
+              <option value="">— Built-in (global settings) —</option>
+              {% for c in ai_configs %}
+              <option value="{{ c.id }}">{{ c.name }}{% if c.is_default %} (default){% endif %} — {{ c.tone or 'general' }}</option>
+              {% endfor %}
+            </select>
           </div>
         </div>
         <div class="form-row-2" style="margin-top:6px">

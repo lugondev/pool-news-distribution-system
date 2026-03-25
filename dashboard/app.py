@@ -521,6 +521,25 @@ async def source_update(
 LOG_PAGE_SIZE = 15
 
 
+def _pick_title(article: dict, target_language: str | None = None) -> str:
+    """Pick the best display title for an article given a target language.
+
+    Original articles have a single 'title' field (source language).
+    Synthetic articles have 'title_vi' / 'title_en' (and potentially other langs).
+    """
+    if article.get("type") == "synthetic":
+        if target_language:
+            lang_title = article.get(f"title_{target_language}")
+            if lang_title:
+                return lang_title
+        return (
+            article.get("title_en")
+            or article.get("title_vi")
+            or "—"
+        )
+    return article.get("title") or "—"
+
+
 async def _enrich_logs(
     logs: list[dict], full: bool = False, include_content: bool = False
 ) -> list[dict]:
@@ -529,7 +548,12 @@ async def _enrich_logs(
     for log in logs:
         article = await get_article(redis, log["article_id"])
         if article:
-            log["article_title"] = article.get("title", "—")
+            log["article_title"] = _pick_title(article)
+            log["article_type"] = article.get("type", "original")
+            # Store raw title fields so callers can re-apply language-aware selection
+            log["_title"] = article.get("title", "")
+            log["_title_vi"] = article.get("title_vi", "")
+            log["_title_en"] = article.get("title_en", "")
             if full:
                 log["source_name"] = article.get("source_name", "")
                 log["lang"] = article.get("lang", "")
@@ -607,6 +631,8 @@ async def settings_ai_partial(request: Request):
         {
             "request": request,
             "ai": ai_cfg,
+            "providers": ai_cfg.get("providers", []),
+            "ai_configs": ai_cfg.get("configs", []),
             "crawler": cfg.get("crawler", {}),
             "builtin_tone_prompts": TONE_PROMPTS,
             "builtin_prompt_template": SUMMARIZE_PROMPT.replace(
@@ -622,13 +648,11 @@ async def settings_ai_update(
     enabled: str = Form("off"),
     api_key: str = Form(""),
     base_url: str = Form(""),
-    model: str = Form("gpt-4o-mini"),
-    tone: str = Form("general"),
+    provider_id: str = Form(""),
     temperature: float = Form(0.3),
     batch_size: int = Form(10),
     max_tokens: int = Form(300),
     retry_attempts: int = Form(3),
-    output_languages: str = Form("vi,en"),
     crawl_interval: int = Form(3),
     stagger_groups: int = Form(3),
     ai_interval: int = Form(2),
@@ -638,14 +662,12 @@ async def settings_ai_update(
     output_limit_enabled: str = Form("off"),
     output_limit_chars: int = Form(250),
     topic_synthesis_enabled: str = Form("off"),
+    topic_synthesis_provider_id: str = Form(""),
     topic_synthesis_interval: int = Form(5),
     topic_synthesis_temperature: float = Form(0.5),
     topic_synthesis_min_articles: int = Form(5),
     topic_synthesis_max_articles: int = Form(15),
 ):
-    valid_tones = ("formal", "casual", "general")
-    resolved_tone = tone if tone in valid_tones else "general"
-
     delay_parts = domain_delay.replace(" ", "").split("-")
     try:
         delay_min = max(0.1, float(delay_parts[0]))
@@ -658,26 +680,26 @@ async def settings_ai_update(
         delay_min, delay_max = 0.5, 1.5
 
     cfg = _read_settings()
+    existing_ai = cfg.get("ai", {})
     cfg["ai"] = {
+        "providers": existing_ai.get("providers", []),
+        "configs": existing_ai.get("configs", []),
         "enabled": enabled == "on",
-        "api_key": api_key.strip(),
-        "base_url": base_url.strip(),
-        "model": model.strip(),
-        "tone": resolved_tone,
+        "provider_id": provider_id.strip() or None,
+        "tone": existing_ai.get("tone", "general"),
         "interval_minutes": max(1, min(ai_interval, 30)),
         "temperature": max(0.0, min(float(temperature), 2.0)),
         "batch_size": max(1, min(batch_size, 50)),
         "max_tokens_summary": max(100, min(max_tokens, 1000)),
         "retry_attempts": max(1, min(retry_attempts, 10)),
-        "output_languages": [
-            l.strip() for l in output_languages.split(",") if l.strip()
-        ],
+        "output_languages": existing_ai.get("output_languages", []),
         "prompt_system": prompt_system.strip(),
         "prompt_template": prompt_template.strip(),
         "output_limit_enabled": output_limit_enabled == "on",
         "output_limit_chars": max(50, min(output_limit_chars, 2000)),
         "topic_synthesis": {
             "enabled": topic_synthesis_enabled == "on",
+            "provider_id": topic_synthesis_provider_id.strip() or None,
             "interval_minutes": max(1, min(topic_synthesis_interval, 60)),
             "temperature": max(0.0, min(float(topic_synthesis_temperature), 2.0)),
             "min_articles": max(3, min(topic_synthesis_min_articles, 20)),
@@ -695,9 +717,8 @@ async def settings_ai_update(
     )
     _write_settings(cfg)
     logger.info(
-        f"Settings updated: model={cfg['ai']['model']}, tone={resolved_tone}, "
-        f"crawl={crawl_interval}min×{stagger_groups}groups, ai={ai_interval}min, "
-        f"synthesis={topic_synthesis_enabled}"
+        f"Settings updated: crawl={crawl_interval}min×{stagger_groups}groups, "
+        f"ai={ai_interval}min, synthesis={topic_synthesis_enabled}"
     )
     from ai.rewriter import TONE_PROMPTS, SUMMARIZE_PROMPT
 
@@ -711,6 +732,8 @@ async def settings_ai_update(
         {
             "request": request,
             "ai": cfg["ai"],
+            "providers": cfg["ai"].get("providers", []),
+            "ai_configs": cfg["ai"].get("configs", []),
             "crawler": cfg["crawler"],
             "builtin_tone_prompts": TONE_PROMPTS,
             "builtin_prompt_template": SUMMARIZE_PROMPT.replace(
@@ -779,26 +802,34 @@ def _get_all_source_ids() -> list[str]:
     return [s["id"] for s in sources if s.get("enabled", True)]
 
 
+def _get_ai_configs() -> list[dict]:
+    return _read_settings().get("ai", {}).get("configs", [])
+
+
 async def _webhook_ctx(request, page=1, **extra) -> dict:
     offset = (page - 1) * LOG_PAGE_SIZE
     logs, total = await get_recent_webhook_logs(limit=LOG_PAGE_SIZE, offset=offset)
     logs = await _enrich_logs(logs, include_content=True)
 
-    # Map webhook ID to name (fallback to URL if ID not found)
+    # Map webhook ID to endpoint metadata (name + target_language)
     endpoints = _get_webhook_endpoints()
-    id_to_name = {ep["id"]: ep["name"] for ep in endpoints}
-    url_to_name = {ep["url"]: ep["name"] for ep in endpoints}
+    id_to_ep = {ep["id"]: ep for ep in endpoints}
+    url_to_ep = {ep["url"]: ep for ep in endpoints}
 
     for log in logs:
         webhook_id = log.get("webhook_id")
         webhook_url = log.get("webhook_url", "—")
 
-        if webhook_id and webhook_id in id_to_name:
-            log["webhook_name"] = id_to_name[webhook_id]
-        elif webhook_url in url_to_name:
-            log["webhook_name"] = url_to_name[webhook_url]
-        else:
-            log["webhook_name"] = webhook_url
+        ep = id_to_ep.get(webhook_id) or url_to_ep.get(webhook_url)
+        log["webhook_name"] = ep["name"] if ep else webhook_url
+
+        # Re-apply title using the webhook's target_language for synthetic articles
+        if log.get("article_type") == "synthetic" and ep:
+            tgt_lang = ep.get("target_language") or None
+            if tgt_lang:
+                lang_title = log.get(f"_title_{tgt_lang}")
+                if lang_title:
+                    log["article_title"] = lang_title
 
     ctx = {
         "request": request,
@@ -809,6 +840,7 @@ async def _webhook_ctx(request, page=1, **extra) -> dict:
         "log_total": total,
         "all_categories": _get_all_categories(),
         "all_sources": _get_all_source_ids(),
+        "ai_configs": _get_ai_configs(),
     }
     ctx.update(extra)
     return ctx
@@ -846,6 +878,9 @@ async def webhook_add(
     filter_sources: str = Form(""),
     filter_article_types_mode: str = Form("all"),
     filter_article_types: str = Form(""),
+    ai_mode: str = Form("rewrite"),
+    ai_config_id: str = Form(""),
+    target_language: str = Form(""),
     rate_limit_max: int = Form(0),
     rate_limit_window_minutes: int = Form(60),
 ):
@@ -868,8 +903,8 @@ async def webhook_add(
         if filter_sources
         else []
     )
-    type_list = (
-        [t.strip() for t in filter_article_types.split(",") if t.strip()]
+    types_list = (
+        [t.strip() for t in filter_article_types.split(",") if t.strip() in ("original", "synthetic")]
         if filter_article_types
         else []
     )
@@ -892,7 +927,10 @@ async def webhook_add(
             "filter_sources_mode": filter_sources_mode,
             "filter_sources": src_list,
             "filter_article_types_mode": filter_article_types_mode,
-            "filter_article_types": type_list,
+            "filter_article_types": types_list,
+            "ai_mode": ai_mode if ai_mode in ("rewrite", "synthetic", "off") else "rewrite",
+            "ai_config_id": ai_config_id.strip() or "",
+            "target_language": target_language.strip() or "",
             "rate_limit_max": max(0, rate_limit_max),
             "rate_limit_window_minutes": max(1, rate_limit_window_minutes),
         }
@@ -935,6 +973,9 @@ async def webhook_update(
     filter_sources: str = Form(""),
     filter_article_types_mode: str = Form("all"),
     filter_article_types: str = Form(""),
+    ai_mode: str = Form("rewrite"),
+    ai_config_id: str = Form(""),
+    target_language: str = Form(""),
     rate_limit_max: int = Form(0),
     rate_limit_window_minutes: int = Form(60),
 ):
@@ -954,8 +995,8 @@ async def webhook_update(
         if filter_sources
         else []
     )
-    type_list = (
-        [t.strip() for t in filter_article_types.split(",") if t.strip()]
+    types_list = (
+        [t.strip() for t in filter_article_types.split(",") if t.strip() in ("original", "synthetic")]
         if filter_article_types
         else []
     )
@@ -976,7 +1017,10 @@ async def webhook_update(
             ep["filter_sources_mode"] = filter_sources_mode
             ep["filter_sources"] = src_list
             ep["filter_article_types_mode"] = filter_article_types_mode
-            ep["filter_article_types"] = type_list
+            ep["filter_article_types"] = types_list
+            ep["ai_mode"] = ai_mode if ai_mode in ("rewrite", "synthetic", "off") else "rewrite"
+            ep["ai_config_id"] = ai_config_id.strip() or ""
+            ep["target_language"] = target_language.strip() or ""
             ep["rate_limit_max"] = max(0, rate_limit_max)
             ep["rate_limit_window_minutes"] = max(1, rate_limit_window_minutes)
             break
@@ -1015,6 +1059,7 @@ def _telegram_ctx(request, **extra) -> dict:
         "channels": _get_telegram_channels(),
         "all_categories": _get_all_categories(),
         "all_sources": _get_all_source_ids(),
+        "ai_configs": _get_ai_configs(),
     }
     ctx.update(extra)
     return ctx
@@ -1037,13 +1082,20 @@ async def telegram_logs_partial(
     )
     logs = await _enrich_logs(logs, full=True, include_content=True)
 
-    # Map channel_id to name
+    # Map channel_id to channel metadata (name + target_language)
     channels = _get_telegram_channels()
-    id_to_name = {ch["id"]: ch["name"] for ch in channels}
+    id_to_ch = {ch["id"]: ch for ch in channels}
     for log in logs:
-        log["channel_name"] = id_to_name.get(
-            log.get("channel_id"), log.get("channel_id", "—")
-        )
+        ch = id_to_ch.get(log.get("channel_id"))
+        log["channel_name"] = ch["name"] if ch else log.get("channel_id", "—")
+
+        # Re-apply title using the channel's target_language for synthetic articles
+        if log.get("article_type") == "synthetic" and ch:
+            tgt_lang = ch.get("target_language") or None
+            if tgt_lang:
+                lang_title = log.get(f"_title_{tgt_lang}")
+                if lang_title:
+                    log["article_title"] = lang_title
 
     return templates.TemplateResponse(
         "partials/telegram_logs_table.html",
@@ -1092,7 +1144,6 @@ async def telegram_add(
     name: str = Form(...),
     bot_token: str = Form(...),
     chat_id: str = Form(...),
-    lang: str = Form("both"),
     retry_attempts: int = Form(3),
     timeout: int = Form(10),
     payload_mode: str = Form("full"),
@@ -1104,6 +1155,9 @@ async def telegram_add(
     filter_sources: str = Form(""),
     filter_article_types_mode: str = Form("all"),
     filter_article_types: str = Form(""),
+    ai_mode: str = Form("rewrite"),
+    ai_config_id: str = Form(""),
+    target_language: str = Form(""),
     rate_limit_max: int = Form(0),
     rate_limit_window_minutes: int = Form(60),
 ):
@@ -1128,8 +1182,8 @@ async def telegram_add(
         if filter_sources
         else []
     )
-    type_list = (
-        [t.strip() for t in filter_article_types.split(",") if t.strip()]
+    types_list = (
+        [t.strip() for t in filter_article_types.split(",") if t.strip() in ("original", "synthetic")]
         if filter_article_types
         else []
     )
@@ -1139,7 +1193,6 @@ async def telegram_add(
             "name": name.strip(),
             "bot_token": bot_token.strip(),
             "chat_id": chat_id.strip(),
-            "lang": lang,
             "enabled": True,
             "retry_attempts": max(1, min(retry_attempts, 10)),
             "timeout_seconds": max(1, min(timeout, 60)),
@@ -1151,7 +1204,10 @@ async def telegram_add(
             "filter_sources_mode": filter_sources_mode,
             "filter_sources": src_list,
             "filter_article_types_mode": filter_article_types_mode,
-            "filter_article_types": type_list,
+            "filter_article_types": types_list,
+            "ai_mode": ai_mode if ai_mode in ("rewrite", "synthetic", "off") else "rewrite",
+            "ai_config_id": ai_config_id.strip() or "",
+            "target_language": target_language.strip() or "",
             "rate_limit_max": max(0, rate_limit_max),
             "rate_limit_window_minutes": max(1, rate_limit_window_minutes),
         }
@@ -1184,7 +1240,6 @@ async def telegram_update(
     name: str = Form(...),
     bot_token: str = Form(...),
     chat_id: str = Form(...),
-    lang: str = Form("both"),
     retry_attempts: int = Form(3),
     timeout: int = Form(10),
     payload_mode: str = Form("full"),
@@ -1196,6 +1251,9 @@ async def telegram_update(
     filter_sources: str = Form(""),
     filter_article_types_mode: str = Form("all"),
     filter_article_types: str = Form(""),
+    ai_mode: str = Form("rewrite"),
+    ai_config_id: str = Form(""),
+    target_language: str = Form(""),
     rate_limit_max: int = Form(0),
     rate_limit_window_minutes: int = Form(60),
 ):
@@ -1215,8 +1273,8 @@ async def telegram_update(
         if filter_sources
         else []
     )
-    type_list = (
-        [t.strip() for t in filter_article_types.split(",") if t.strip()]
+    types_list = (
+        [t.strip() for t in filter_article_types.split(",") if t.strip() in ("original", "synthetic")]
         if filter_article_types
         else []
     )
@@ -1225,7 +1283,6 @@ async def telegram_update(
             ch["name"] = name.strip()
             ch["bot_token"] = bot_token.strip()
             ch["chat_id"] = chat_id.strip()
-            ch["lang"] = lang
             ch["retry_attempts"] = max(1, min(retry_attempts, 10))
             ch["timeout_seconds"] = max(1, min(timeout, 60))
             ch["payload_mode"] = payload_mode
@@ -1236,7 +1293,10 @@ async def telegram_update(
             ch["filter_sources_mode"] = filter_sources_mode
             ch["filter_sources"] = src_list
             ch["filter_article_types_mode"] = filter_article_types_mode
-            ch["filter_article_types"] = type_list
+            ch["filter_article_types"] = types_list
+            ch["ai_mode"] = ai_mode if ai_mode in ("rewrite", "synthetic", "off") else "rewrite"
+            ch["ai_config_id"] = ai_config_id.strip() or ""
+            ch["target_language"] = target_language.strip() or ""
             ch["rate_limit_max"] = max(0, rate_limit_max)
             ch["rate_limit_window_minutes"] = max(1, rate_limit_window_minutes)
             break
