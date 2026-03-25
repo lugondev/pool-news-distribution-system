@@ -26,7 +26,7 @@ sources:
   type: rss
   lang: en
   category: tech
-  enabled: false
+  enabled: true
 - id: nhk_world
   name: NHK World
   url: https://www3.nhk.or.jp/rss/news/cat0.xml
@@ -250,7 +250,7 @@ sources:
   type: rss
   lang: en
   category: tech
-  enabled: false
+  enabled: true
 - id: guardian_tech
   name: The Guardian Technology
   url: https://www.theguardian.com/uk/technology/rss
@@ -376,6 +376,65 @@ sources:
   type: rss
   lang: en
   category: science
+  enabled: true
+# --- AI (Chuyên sâu) ---
+- id: huggingface_blog
+  name: Hugging Face Blog
+  url: https://huggingface.co/blog/feed.xml
+  type: rss
+  lang: en
+  category: ai
+  enabled: true
+- id: tldr_ai
+  name: TLDR AI
+  url: https://tldr.tech/api/rss/ai
+  type: rss
+  lang: en
+  category: ai
+  enabled: true
+- id: the_rundown_ai
+  name: The Rundown AI
+  url: https://www.therundown.ai/rss
+  type: rss
+  lang: en
+  category: ai
+  enabled: true
+- id: mit_ai
+  name: MIT Technology Review - AI
+  url: https://www.technologyreview.com/topic/artificial-intelligence/feed/
+  type: rss
+  lang: en
+  category: ai
+  enabled: true
+# --- Gaming Business ---
+- id: vgc
+  name: Video Games Chronicle (VGC)
+  url: https://www.videogameschronicle.com/feed/
+  type: rss
+  lang: en
+  category: gaming
+  enabled: true
+- id: gamesbeat
+  name: GamesBeat (VentureBeat)
+  url: https://venturebeat.com/games/feed/
+  type: rss
+  lang: en
+  category: gaming
+  enabled: true
+- id: ign_business
+  name: IGN (Business & Industry)
+  url: https://feeds.feedburner.com/ign/games-articles
+  type: rss
+  lang: en
+  category: gaming
+  enabled: false
+# --- Tech & Startups (Chuyên sâu) ---
+- id: rest_of_world
+  name: Rest of World
+  url: https://restofworld.org/feed/
+  type: rss
+  lang: en
+  category: tech
   enabled: true
 - id: nature_news
   name: Nature News
