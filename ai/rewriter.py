@@ -14,7 +14,11 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 import redis.asyncio as aioredis
 from crawler.dedup import check_ai_duplicate, register_ai_simhash
-from storage.redis_store import pop_pending_ai_articles, update_article_ai, update_article_ai_config
+from storage.redis_store import (
+    pop_pending_ai_articles,
+    update_article_ai,
+    update_article_ai_config,
+)
 from storage.sqlite_stats import log_ai_usage
 from webhook.dispatcher import enqueue_dispatch
 
@@ -81,10 +85,22 @@ TONE_PROMPTS = {
 }
 
 LANG_NAMES: dict[str, str] = {
-    "en": "English", "vi": "Vietnamese", "ja": "Japanese", "ko": "Korean",
-    "zh": "Chinese", "fr": "French", "es": "Spanish", "de": "German",
-    "pt": "Portuguese", "ar": "Arabic", "th": "Thai", "id": "Indonesian",
-    "ms": "Malay", "ru": "Russian", "tr": "Turkish", "it": "Italian",
+    "en": "English",
+    "vi": "Vietnamese",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "zh": "Chinese",
+    "fr": "French",
+    "es": "Spanish",
+    "de": "German",
+    "pt": "Portuguese",
+    "ar": "Arabic",
+    "th": "Thai",
+    "id": "Indonesian",
+    "ms": "Malay",
+    "ru": "Russian",
+    "tr": "Turkish",
+    "it": "Italian",
 }
 
 SUMMARIZE_PROMPT = """{tone_instruction}
@@ -125,11 +141,10 @@ def _build_lang_spec(
         target_name = LANG_NAMES.get(target_lang, target_lang.upper())
         count = "two summaries"
         reqs = (
-            f"- {origin_name}: {length_guidance}\n"
-            f"- {target_name}: {length_guidance}\n"
+            f"- {origin_name}: {length_guidance}\n- {target_name}: {length_guidance}\n"
         )
         fmt = (
-            f'Respond in JSON format:\n'
+            f"Respond in JSON format:\n"
             f'{{"{origin_lang}": "{origin_name} summary here",'
             f' "{target_lang}": "{target_name} summary here"}}'
         )
@@ -163,7 +178,9 @@ async def rewrite_article(
     cfg = _load_ai_config()
     resolved_model = model or cfg.get("model", "gpt-4o-mini")
     custom_system = (prompt_system_override or cfg.get("prompt_system") or "").strip()
-    custom_template = (prompt_template_override or cfg.get("prompt_template") or "").strip()
+    custom_template = (
+        prompt_template_override or cfg.get("prompt_template") or ""
+    ).strip()
     tone_instruction = custom_system or TONE_PROMPTS.get(tone, TONE_PROMPTS["general"])
 
     if cfg.get("output_limit_enabled"):
@@ -331,19 +348,28 @@ async def _get_category_counts(
     return counts
 
 
-def _max_age_for_category(cat: str, counts: dict[str, int]) -> int:
+def _max_age_for_category(
+    cat: str, counts: dict[str, int], ai_cfg: dict | None = None
+) -> int:
     """
     Return max article age (seconds) before it is skipped for AI processing.
 
     Thresholds scale with category volume:
-      - busy   (top third by article count)  → 5 min  — plenty of fresh articles
-      - moderate (middle third)              → 10 min
-      - quiet  (bottom third / unknown)      → 15 min — rare topics, still worth translating
+      - busy   (top third by article count)  → configurable (default 15 min)
+      - moderate (middle third)              → configurable (default 20 min)
+      - quiet  (bottom third / unknown)      → configurable (default 30 min)
 
-    If no count data is available, defaults to 10 min.
+    If no count data is available, defaults to moderate threshold.
     """
+    if ai_cfg is None:
+        ai_cfg = _load_ai_config()
+
+    busy_mins = ai_cfg.get("age_threshold_busy_minutes", 15)
+    moderate_mins = ai_cfg.get("age_threshold_moderate_minutes", 20)
+    quiet_mins = ai_cfg.get("age_threshold_quiet_minutes", 30)
+
     if not counts:
-        return 10 * 60
+        return moderate_mins * 60
 
     sorted_vals = sorted(counts.values())
     n = len(sorted_vals)
@@ -352,11 +378,11 @@ def _max_age_for_category(cat: str, counts: dict[str, int]) -> int:
 
     cat_count = counts.get(cat, 0)
     if cat_count >= high_thresh:
-        return 5 * 60
+        return busy_mins * 60
     elif cat_count >= low_thresh:
-        return 10 * 60
+        return moderate_mins * 60
     else:
-        return 15 * 60
+        return quiet_mins * 60
 
 
 async def process_pending_articles(
@@ -395,6 +421,9 @@ async def process_pending_articles(
         articles = await pop_pending_ai_articles(redis, limit=batch_size)
     if not articles:
         return 0
+
+    # Load AI config for age thresholds
+    ai_cfg = _load_ai_config()
 
     # Sample category volumes once per batch to determine freshness thresholds.
     category_counts = await _get_category_counts(redis)
@@ -439,7 +468,7 @@ async def process_pending_articles(
                     fetched_dt = fetched_dt.replace(tzinfo=timezone.utc)
                 age_sec = (datetime.now(timezone.utc) - fetched_dt).total_seconds()
                 max_age = _max_age_for_category(
-                    article.get("category", ""), category_counts
+                    article.get("category", ""), category_counts, ai_cfg
                 )
                 if age_sec > max_age:
                     await redis.hset(
@@ -479,7 +508,11 @@ async def process_pending_articles(
         # Determine the article's origin language
         raw_lang = article.get("lang") or article.get("declared_lang") or "en"
         origin_lang = raw_lang[:2].lower() if raw_lang and raw_lang != "und" else "en"
-        tgt_lang = target_language if target_language and target_language != origin_lang else None
+        tgt_lang = (
+            target_language
+            if target_language and target_language != origin_lang
+            else None
+        )
 
         try:
             summaries, tokens = await rewrite_article(
@@ -504,7 +537,9 @@ async def process_pending_articles(
         ai_call_count += 1
         await update_article_ai(redis, article["id"], summaries)
         if config_id or target_language:
-            await update_article_ai_config(redis, article["id"], summaries, config_id or "builtin")
+            await update_article_ai_config(
+                redis, article["id"], summaries, config_id or "builtin"
+            )
             await redis.hset(f"news:{article['id']}", _dedup_key, "1")
         await log_ai_usage(article["id"], model, tokens)
         if title and perform_ai_dedup:
