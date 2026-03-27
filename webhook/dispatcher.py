@@ -9,10 +9,16 @@ Call enqueue_dispatch() to add a job; start dispatch_worker() in app lifespan.
 import asyncio
 import json
 import logging
+import time
 
 import httpx
 
 from storage.sqlite_stats import log_webhook
+
+try:
+    from realtime.manager import ws_manager
+except ImportError:
+    ws_manager = None
 from webhook.filters import check_rate_limit, passes_filter
 from webhook.payload import build_payload
 from webhook.telegram import dispatch_to_telegram
@@ -140,6 +146,7 @@ async def dispatch_article(
             timeout=ep.get("timeout_seconds", 10),
             retry_attempts=ep.get("retry_attempts", 3),
             retry_delay_seconds=ep.get("retry_delay_seconds", 5),
+            article_title=article.get("title", ""),
         )
 
     if telegram_channels:
@@ -156,8 +163,14 @@ async def _dispatch_to_url(
     timeout: int,
     retry_attempts: int,
     retry_delay_seconds: int = 5,
+    article_title: str = "",
 ) -> None:
+    webhook_name = webhook_id or url
+    if ws_manager:
+        asyncio.create_task(ws_manager.emit_webhook_start(article_id, article_title, webhook_name))
+
     last_error = None
+    t0 = time.monotonic()
     for attempt in range(retry_attempts):
         if attempt > 0:
             await asyncio.sleep(retry_delay_seconds)
@@ -172,6 +185,11 @@ async def _dispatch_to_url(
                 logger.info(
                     f"Webhook {method} OK [{status_code}] → {url} (article {article_id})"
                 )
+                duration_ms = int((time.monotonic() - t0) * 1000)
+                if ws_manager:
+                    asyncio.create_task(ws_manager.emit_webhook_success(
+                        article_id, article_title, webhook_name, status_code, duration_ms
+                    ))
                 return
             else:
                 logger.warning(
@@ -186,4 +204,8 @@ async def _dispatch_to_url(
     await log_webhook(
         article_id, url, 0, False, error_msg=last_error, webhook_id=webhook_id
     )
+    if ws_manager:
+        asyncio.create_task(ws_manager.emit_webhook_error(
+            article_id, article_title, webhook_name, last_error or "max retries exceeded"
+        ))
     logger.error(f"Webhook {method} permanently failed → {url} (article {article_id})")

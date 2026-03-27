@@ -1,5 +1,13 @@
 """
-FastAPI dashboard với htmx real-time updates + source/category management.
+FastAPI dashboard — app factory and top-level page routes.
+
+Route organization:
+  / /pipeline /article/{id}     — page renders (this file)
+  /partials/stats /partials/feed — HTMX partials (this file)
+  /sources /categories           — dashboard/routes/sources_ui.py
+  /settings /logs                — dashboard/routes/settings_ui.py
+  /webhooks /telegram            — dashboard/routes/dispatch_ui.py
+  /api/*                         — dashboard/api_router.py → routes/*_api.py
 """
 
 import json
@@ -8,85 +16,33 @@ import math
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import redis.asyncio as aioredis
-import yaml
-from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.routing import APIRoute
-from fastapi.templating import Jinja2Templates
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from storage.redis_store import get_latest_articles, get_feed_stats, get_article
+from dashboard import redis_state
+from dashboard.api_router import router as api_router
+from dashboard.config_io import get_categories, read_sources
+from dashboard.routes.dispatch_ui import router as dispatch_ui_router
+from dashboard.routes.settings_ui import router as settings_ui_router
+from dashboard.routes.sources_ui import router as sources_ui_router
+from dashboard.templates_state import templates
+from storage.redis_store import get_article, get_feed_stats, get_latest_articles
 from storage.sqlite_stats import (
     get_dashboard_stats,
-    get_recent_webhook_logs,
     get_recent_ai_logs,
+    get_recent_webhook_logs,
     get_recent_telegram_logs,
     init_db,
     log_api_request,
 )
-from dashboard.api_router import router as api_router, set_redis as api_set_redis
+from realtime.manager import ws_manager
 
 logger = logging.getLogger(__name__)
-templates = Jinja2Templates(
-    directory=os.path.join(os.path.dirname(__file__), "templates")
-)
-
-
-def _get_app_tz() -> ZoneInfo:
-    """Return configured app timezone, falling back to UTC."""
-    try:
-        cfg = _read_settings()
-        tz_name = cfg.get("app", {}).get("timezone", "UTC")
-        return ZoneInfo(tz_name)
-    except Exception:
-        return ZoneInfo("UTC")
-
-
-def _fmt_dt(iso_str: str, fmt: str = "%Y-%m-%d %H:%M") -> str:
-    """Format ISO datetime string for display in the configured app timezone."""
-    if not iso_str:
-        return "—"
-    try:
-        dt = datetime.fromisoformat(iso_str)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        dt = dt.astimezone(_get_app_tz())
-        return dt.strftime(fmt)
-    except Exception:
-        return iso_str[:16].replace("T", " ")
-
-
-def _dt_lag(fetched_str: str, published_str: str) -> str:
-    """Return human-readable crawl lag: how long after publish the article was fetched."""
-    try:
-        pub = datetime.fromisoformat(published_str)
-        fet = datetime.fromisoformat(fetched_str)
-        if pub.tzinfo is None:
-            pub = pub.replace(tzinfo=timezone.utc)
-        if fet.tzinfo is None:
-            fet = fet.replace(tzinfo=timezone.utc)
-        delta = int((fet - pub).total_seconds())
-        if delta < 0:
-            return ""
-        if delta < 60:
-            return f"+{delta}s"
-        if delta < 3600:
-            return f"+{delta // 60}m"
-        h, m = divmod(delta, 3600)
-        return f"+{h}h{m // 60}m" if m >= 60 else f"+{h}h"
-    except Exception:
-        return ""
-
-
-templates.env.filters["fmt_dt"] = _fmt_dt
-templates.env.filters["dt_lag"] = _dt_lag
 
 _BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-SOURCES_PATH = os.path.join(_BASE_DIR, "config", "sources.yaml")
-SETTINGS_PATH = os.path.join(_BASE_DIR, "config", "settings.yaml")
 
 _redis: aioredis.Redis | None = None
 
@@ -99,43 +55,8 @@ def get_redis() -> aioredis.Redis:
             encoding="utf-8",
             decode_responses=False,
         )
-        api_set_redis(_redis)
+        redis_state.set_redis(_redis)
     return _redis
-
-
-def _read_sources() -> list[dict]:
-    with open(SOURCES_PATH) as f:
-        data = yaml.safe_load(f)
-    return data.get("sources", [])
-
-
-def _write_sources(sources: list[dict]) -> None:
-    with open(SOURCES_PATH, "w") as f:
-        yaml.dump(
-            {"sources": sources},
-            f,
-            default_flow_style=False,
-            allow_unicode=True,
-            sort_keys=False,
-        )
-
-
-def _read_settings() -> dict:
-    with open(SETTINGS_PATH) as f:
-        return yaml.safe_load(f)
-
-
-def _write_settings(cfg: dict) -> None:
-    with open(SETTINGS_PATH, "w") as f:
-        yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-
-
-def _get_categories() -> list[dict]:
-    return _read_settings().get("categories", [])
-
-
-def _get_active_category_ids() -> set[str]:
-    return {c["id"] for c in _get_categories() if c.get("enabled", True)}
 
 
 @asynccontextmanager
@@ -150,8 +71,6 @@ _API_PREFIX = "/api/"
 
 
 class _APIRequestLogger(BaseHTTPMiddleware):
-    """Log method, path, status_code and latency for all /api/* requests."""
-
     async def dispatch(self, request: Request, call_next):
         if not request.url.path.startswith(_API_PREFIX):
             return await call_next(request)
@@ -159,9 +78,7 @@ class _APIRequestLogger(BaseHTTPMiddleware):
         t0 = started.timestamp()
         response = await call_next(request)
         duration_ms = int((datetime.now(timezone.utc).timestamp() - t0) * 1000)
-        error_msg = (
-            None if response.status_code < 400 else f"HTTP {response.status_code}"
-        )
+        error_msg = None if response.status_code < 400 else f"HTTP {response.status_code}"
         try:
             await log_api_request(
                 method=request.method,
@@ -179,8 +96,14 @@ class _APIRequestLogger(BaseHTTPMiddleware):
 app = FastAPI(title="News Aggregator Dashboard", lifespan=lifespan)
 app.add_middleware(_APIRequestLogger)
 app.include_router(api_router)
+app.include_router(sources_ui_router)
+app.include_router(settings_ui_router)
+app.include_router(dispatch_ui_router)
 
 PAGE_SIZE = 20
+
+
+# ── Page routes ───────────────────────────────────────────────────────────────
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -188,66 +111,64 @@ async def dashboard(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
+@app.get("/pipeline", response_class=HTMLResponse)
+async def pipeline_view(request: Request):
+    return templates.TemplateResponse("pipeline.html", {"request": request})
+
+
+@app.websocket("/ws/pipeline")
+async def pipeline_ws(websocket: WebSocket):
+    await ws_manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except (WebSocketDisconnect, Exception):
+        ws_manager.disconnect(websocket)
+
+
 @app.get("/article/{article_id}", response_class=HTMLResponse)
 async def article_detail(request: Request, article_id: str):
-    """Detail view for synthetic articles with source article links."""
     redis = get_redis()
     article = await get_article(redis, article_id)
 
     if not article:
         return HTMLResponse("<h1>Article not found</h1>", status_code=404)
 
-    # Only show detail view for synthetic articles
     if article.get("type") != "synthetic":
-        # Redirect to original URL for RSS articles
         return HTMLResponse(
             f"<script>window.location.href='{article.get('url')}'</script>",
             status_code=302,
         )
 
-    # Parse source article IDs
     source_article_ids = []
     source_ids_raw = article.get("source_article_ids", "")
     if source_ids_raw:
         try:
-            source_article_ids = (
-                json.loads(source_ids_raw)
-                if isinstance(source_ids_raw, str)
-                else source_ids_raw
-            )
+            source_article_ids = json.loads(source_ids_raw) if isinstance(source_ids_raw, str) else source_ids_raw
         except (json.JSONDecodeError, TypeError):
             pass
 
-    # Fetch source articles
     source_articles = []
-    if source_article_ids:
-        for src_id in source_article_ids:
-            src = await get_article(redis, src_id)
-            if src:
-                source_articles.append(src)
+    for src_id in source_article_ids:
+        src = await get_article(redis, src_id)
+        if src:
+            source_articles.append(src)
 
     return templates.TemplateResponse(
         "article_detail.html",
-        {
-            "request": request,
-            "article": article,
-            "source_articles": source_articles,
-        },
+        {"request": request, "article": article, "source_articles": source_articles},
     )
+
+
+# ── HTMX partials ─────────────────────────────────────────────────────────────
 
 
 @app.get("/partials/stats", response_class=HTMLResponse)
 async def stats_partial(request: Request):
     redis = get_redis()
-    redis_stats = await get_feed_stats(redis)
-    db_stats = await get_dashboard_stats()
     return templates.TemplateResponse(
         "partials/stats.html",
-        {
-            "request": request,
-            "redis": redis_stats,
-            "db": db_stats,
-        },
+        {"request": request, "redis": await get_feed_stats(redis), "db": await get_dashboard_stats()},
     )
 
 
@@ -262,16 +183,10 @@ async def feed_partial(
     redis = get_redis()
     offset = (page - 1) * PAGE_SIZE
     articles, total = await get_latest_articles(
-        redis,
-        limit=PAGE_SIZE,
-        offset=offset,
-        source_id=source or None,
-        category=category or None,
-        article_type=article_type or None,
+        redis, limit=PAGE_SIZE, offset=offset,
+        source_id=source or None, category=category or None, article_type=article_type or None,
     )
     total_pages = max(1, math.ceil(total / PAGE_SIZE))
-    sources = _read_sources()
-    categories = _get_categories()
     return templates.TemplateResponse(
         "partials/feed.html",
         {
@@ -283,1069 +198,7 @@ async def feed_partial(
             "source": source or "",
             "category": category or "",
             "article_type": article_type or "",
-            "sources": sources,
-            "categories": categories,
+            "sources": read_sources(),
+            "categories": get_categories(),
         },
     )
-
-
-# --- Source management ---
-
-
-@app.get("/sources", response_class=HTMLResponse)
-async def sources_page(request: Request):
-    return templates.TemplateResponse("sources.html", {"request": request})
-
-
-@app.get("/partials/sources", response_class=HTMLResponse)
-async def sources_partial(request: Request):
-    sources = _read_sources()
-    return templates.TemplateResponse(
-        "partials/sources.html",
-        {
-            "request": request,
-            "sources": sources,
-        },
-    )
-
-
-@app.post("/sources/add", response_class=HTMLResponse)
-async def source_add(
-    request: Request,
-    id: str = Form(...),
-    name: str = Form(...),
-    url: str = Form(...),
-    lang: str = Form("en"),
-    category: str = Form("world"),
-):
-    sources = _read_sources()
-    if any(s["id"] == id for s in sources):
-        sources = _read_sources()
-        return templates.TemplateResponse(
-            "partials/sources.html",
-            {
-                "request": request,
-                "sources": sources,
-                "error": f"Source '{id}' already exists",
-            },
-        )
-    sources.append(
-        {
-            "id": id,
-            "name": name,
-            "url": url,
-            "type": "rss",
-            "lang": lang,
-            "category": category,
-            "enabled": True,
-        }
-    )
-    _write_sources(sources)
-    logger.info(f"Source added: {id}")
-    return templates.TemplateResponse(
-        "partials/sources.html",
-        {
-            "request": request,
-            "sources": sources,
-            "success": f"Source '{name}' added",
-        },
-    )
-
-
-@app.post("/sources/{source_id}/toggle", response_class=HTMLResponse)
-async def source_toggle(request: Request, source_id: str):
-    sources = _read_sources()
-    for s in sources:
-        if s["id"] == source_id:
-            s["enabled"] = not s.get("enabled", True)
-            break
-    _write_sources(sources)
-    return templates.TemplateResponse(
-        "partials/sources.html",
-        {
-            "request": request,
-            "sources": sources,
-        },
-    )
-
-
-@app.delete("/sources/{source_id}", response_class=HTMLResponse)
-async def source_delete(request: Request, source_id: str):
-    sources = _read_sources()
-    sources = [s for s in sources if s["id"] != source_id]
-    _write_sources(sources)
-    logger.info(f"Source deleted: {source_id}")
-    return templates.TemplateResponse(
-        "partials/sources.html",
-        {
-            "request": request,
-            "sources": sources,
-            "success": f"Source '{source_id}' deleted",
-        },
-    )
-
-
-# --- Category management ---
-
-
-@app.get("/partials/categories", response_class=HTMLResponse)
-async def categories_partial(request: Request):
-    categories = _get_categories()
-    return templates.TemplateResponse(
-        "partials/categories.html",
-        {
-            "request": request,
-            "categories": categories,
-        },
-    )
-
-
-@app.post("/categories/add", response_class=HTMLResponse)
-async def category_add(
-    request: Request,
-    id: str = Form(...),
-    name: str = Form(...),
-):
-    cfg = _read_settings()
-    cats = cfg.get("categories", [])
-    if any(c["id"] == id for c in cats):
-        return templates.TemplateResponse(
-            "partials/categories.html",
-            {
-                "request": request,
-                "categories": cats,
-                "error": f"Category '{id}' already exists",
-            },
-        )
-    cats.append({"id": id, "name": name, "enabled": True})
-    cfg["categories"] = cats
-    _write_settings(cfg)
-    return templates.TemplateResponse(
-        "partials/categories.html",
-        {
-            "request": request,
-            "categories": cats,
-            "success": f"Category '{name}' added",
-        },
-    )
-
-
-@app.post("/categories/{cat_id}/toggle", response_class=HTMLResponse)
-async def category_toggle(request: Request, cat_id: str):
-    cfg = _read_settings()
-    cats = cfg.get("categories", [])
-    for c in cats:
-        if c["id"] == cat_id:
-            c["enabled"] = not c.get("enabled", True)
-            break
-    cfg["categories"] = cats
-    _write_settings(cfg)
-    return templates.TemplateResponse(
-        "partials/categories.html",
-        {
-            "request": request,
-            "categories": cats,
-        },
-    )
-
-
-@app.delete("/categories/{cat_id}", response_class=HTMLResponse)
-async def category_delete(request: Request, cat_id: str):
-    cfg = _read_settings()
-    cats = [c for c in cfg.get("categories", []) if c["id"] != cat_id]
-    cfg["categories"] = cats
-    _write_settings(cfg)
-    return templates.TemplateResponse(
-        "partials/categories.html",
-        {
-            "request": request,
-            "categories": cats,
-            "success": f"Category '{cat_id}' deleted",
-        },
-    )
-
-
-@app.get("/partials/category-options", response_class=HTMLResponse)
-async def category_options():
-    cats = _get_categories()
-    html = "".join(f'<option value="{c["id"]}">{c["name"]}</option>' for c in cats)
-    return HTMLResponse(html)
-
-
-@app.get("/sources/{source_id}/edit", response_class=HTMLResponse)
-async def source_edit_form(request: Request, source_id: str):
-    sources = _read_sources()
-    source = next((s for s in sources if s["id"] == source_id), None)
-    if not source:
-        return HTMLResponse("<tr><td colspan='6'>Source not found</td></tr>")
-    return templates.TemplateResponse(
-        "partials/source_edit_row.html",
-        {
-            "request": request,
-            "s": source,
-        },
-    )
-
-
-@app.put("/sources/{source_id}", response_class=HTMLResponse)
-async def source_update(
-    request: Request,
-    source_id: str,
-    name: str = Form(...),
-    url: str = Form(...),
-    lang: str = Form("en"),
-    category: str = Form("world"),
-):
-    sources = _read_sources()
-    for s in sources:
-        if s["id"] == source_id:
-            s["name"] = name
-            s["url"] = url
-            s["lang"] = lang
-            s["category"] = category
-            break
-    _write_sources(sources)
-    logger.info(f"Source updated: {source_id}")
-    return templates.TemplateResponse(
-        "partials/sources.html",
-        {
-            "request": request,
-            "sources": sources,
-            "success": f"Source '{name}' updated",
-        },
-    )
-
-
-# --- Settings page ---
-
-LOG_PAGE_SIZE = 15
-
-
-def _pick_title(article: dict, target_language: str | None = None) -> str:
-    """Pick the best display title for an article given a target language.
-
-    Original articles have a single 'title' field (source language).
-    Synthetic articles have 'title_vi' / 'title_en' (and potentially other langs).
-    """
-    if article.get("type") == "synthetic":
-        if target_language:
-            lang_title = article.get(f"title_{target_language}")
-            if lang_title:
-                return lang_title
-        return (
-            article.get("title_en")
-            or article.get("title_vi")
-            or "—"
-        )
-    return article.get("title") or "—"
-
-
-async def _enrich_logs(
-    logs: list[dict], full: bool = False, include_content: bool = False
-) -> list[dict]:
-    """Attach article data to each log entry from Redis."""
-    redis = get_redis()
-    for log in logs:
-        article = await get_article(redis, log["article_id"])
-        if article:
-            log["article_title"] = _pick_title(article)
-            log["article_type"] = article.get("type", "original")
-            # Store raw title fields so callers can re-apply language-aware selection
-            log["_title"] = article.get("title", "")
-            log["_title_vi"] = article.get("title_vi", "")
-            log["_title_en"] = article.get("title_en", "")
-            if full:
-                log["source_name"] = article.get("source_name", "")
-                log["lang"] = article.get("lang", "")
-                log["category"] = article.get("category", "")
-                log["url"] = article.get("url", "")
-                log["ai_summary_vi"] = article.get("ai_summary_vi", "")
-                log["ai_summary_en"] = article.get("ai_summary_en", "")
-                log["ai_status"] = article.get("ai_status", "")
-            if include_content:
-                log["article_content"] = article.get("content", "")
-                log["article_summary"] = article.get("summary", "")
-        else:
-            log["article_title"] = "—"
-    return logs
-
-
-@app.get("/settings", response_class=HTMLResponse)
-async def settings_page(request: Request):
-    return templates.TemplateResponse("settings.html", {"request": request})
-
-
-@app.get("/partials/settings-general", response_class=HTMLResponse)
-async def settings_general_partial(request: Request):
-    cfg = _read_settings()
-    return templates.TemplateResponse(
-        "partials/settings_general.html",
-        {
-            "request": request,
-            "app_cfg": cfg.get("app", {}),
-        },
-    )
-
-
-@app.post("/settings/general", response_class=HTMLResponse)
-async def settings_general_update(
-    request: Request,
-    tz_name: str = Form("Asia/Ho_Chi_Minh", alias="timezone"),
-):
-    try:
-        ZoneInfo(tz_name)
-    except ZoneInfoNotFoundError:
-        tz_name = "Asia/Ho_Chi_Minh"
-    cfg = _read_settings()
-    cfg.setdefault("app", {})["timezone"] = tz_name
-    _write_settings(cfg)
-    logger.info(f"General settings updated: timezone={tz_name}")
-    return templates.TemplateResponse(
-        "partials/settings_general.html",
-        {
-            "request": request,
-            "app_cfg": cfg.get("app", {}),
-            "success": "Settings saved.",
-        },
-    )
-
-
-@app.get("/logs", response_class=HTMLResponse)
-async def logs_page(request: Request):
-    return templates.TemplateResponse("logs.html", {"request": request})
-
-
-@app.get("/partials/settings-ai", response_class=HTMLResponse)
-async def settings_ai_partial(request: Request):
-    from ai.rewriter import TONE_PROMPTS, SUMMARIZE_PROMPT
-
-    cfg = _read_settings()
-    ai_cfg = cfg.get("ai", {})
-    length_guidance = (
-        f"at most {ai_cfg.get('output_limit_chars') or 250} characters"
-        if ai_cfg.get("output_limit_enabled")
-        else "2-3 sentences"
-    )
-    return templates.TemplateResponse(
-        "partials/settings_ai.html",
-        {
-            "request": request,
-            "ai": ai_cfg,
-            "providers": ai_cfg.get("providers", []),
-            "ai_configs": ai_cfg.get("configs", []),
-            "crawler": cfg.get("crawler", {}),
-            "builtin_tone_prompts": TONE_PROMPTS,
-            "builtin_prompt_template": SUMMARIZE_PROMPT.replace(
-                "{length_guidance}", length_guidance
-            ),
-        },
-    )
-
-
-@app.post("/settings/ai", response_class=HTMLResponse)
-async def settings_ai_update(
-    request: Request,
-    enabled: str = Form("off"),
-    api_key: str = Form(""),
-    base_url: str = Form(""),
-    provider_id: str = Form(""),
-    temperature: float = Form(0.3),
-    batch_size: int = Form(10),
-    max_tokens: int = Form(300),
-    retry_attempts: int = Form(3),
-    crawl_interval: int = Form(3),
-    stagger_groups: int = Form(3),
-    ai_interval: int = Form(2),
-    domain_delay: str = Form("0.5-1.5"),
-    prompt_system: str = Form(""),
-    prompt_template: str = Form(""),
-    output_limit_enabled: str = Form("off"),
-    output_limit_chars: int = Form(250),
-    topic_synthesis_enabled: str = Form("off"),
-    topic_synthesis_provider_id: str = Form(""),
-    topic_synthesis_interval: int = Form(5),
-    topic_synthesis_temperature: float = Form(0.5),
-    topic_synthesis_min_articles: int = Form(5),
-    topic_synthesis_max_articles: int = Form(15),
-):
-    delay_parts = domain_delay.replace(" ", "").split("-")
-    try:
-        delay_min = max(0.1, float(delay_parts[0]))
-        delay_max = (
-            max(delay_min, float(delay_parts[1]))
-            if len(delay_parts) > 1
-            else delay_min + 1.0
-        )
-    except (ValueError, IndexError):
-        delay_min, delay_max = 0.5, 1.5
-
-    cfg = _read_settings()
-    existing_ai = cfg.get("ai", {})
-    cfg["ai"] = {
-        "providers": existing_ai.get("providers", []),
-        "configs": existing_ai.get("configs", []),
-        "enabled": enabled == "on",
-        "provider_id": provider_id.strip() or None,
-        "tone": existing_ai.get("tone", "general"),
-        "interval_minutes": max(1, min(ai_interval, 30)),
-        "temperature": max(0.0, min(float(temperature), 2.0)),
-        "batch_size": max(1, min(batch_size, 50)),
-        "max_tokens_summary": max(100, min(max_tokens, 1000)),
-        "retry_attempts": max(1, min(retry_attempts, 10)),
-        "output_languages": existing_ai.get("output_languages", []),
-        "prompt_system": prompt_system.strip(),
-        "prompt_template": prompt_template.strip(),
-        "output_limit_enabled": output_limit_enabled == "on",
-        "output_limit_chars": max(50, min(output_limit_chars, 2000)),
-        "topic_synthesis": {
-            "enabled": topic_synthesis_enabled == "on",
-            "provider_id": topic_synthesis_provider_id.strip() or None,
-            "interval_minutes": max(1, min(topic_synthesis_interval, 60)),
-            "temperature": max(0.0, min(float(topic_synthesis_temperature), 2.0)),
-            "min_articles": max(3, min(topic_synthesis_min_articles, 20)),
-            "max_articles": max(5, min(topic_synthesis_max_articles, 50)),
-            "max_tokens": 2000,
-        },
-    }
-    cfg.setdefault("crawler", {}).update(
-        {
-            "fetch_interval_minutes": max(1, min(crawl_interval, 60)),
-            "stagger_groups": max(1, min(stagger_groups, 10)),
-            "domain_delay_min": delay_min,
-            "domain_delay_max": delay_max,
-        }
-    )
-    _write_settings(cfg)
-    logger.info(
-        f"Settings updated: crawl={crawl_interval}min×{stagger_groups}groups, "
-        f"ai={ai_interval}min, synthesis={topic_synthesis_enabled}"
-    )
-    from ai.rewriter import TONE_PROMPTS, SUMMARIZE_PROMPT
-
-    length_guidance = (
-        f"at most {cfg['ai'].get('output_limit_chars') or 250} characters"
-        if cfg["ai"].get("output_limit_enabled")
-        else "2-3 sentences"
-    )
-    return templates.TemplateResponse(
-        "partials/settings_ai.html",
-        {
-            "request": request,
-            "ai": cfg["ai"],
-            "providers": cfg["ai"].get("providers", []),
-            "ai_configs": cfg["ai"].get("configs", []),
-            "crawler": cfg["crawler"],
-            "builtin_tone_prompts": TONE_PROMPTS,
-            "builtin_prompt_template": SUMMARIZE_PROMPT.replace(
-                "{length_guidance}", length_guidance
-            ),
-            "success": "Settings saved. Restart app to apply interval changes.",
-        },
-    )
-
-
-@app.post("/settings/ai/test", response_class=HTMLResponse)
-async def settings_ai_test(request: Request):
-    from ai.rewriter import test_ai_connection
-
-    cfg = _read_settings().get("ai", {})
-    result = await test_ai_connection(
-        api_key=cfg.get("api_key"),
-        base_url=cfg.get("base_url"),
-        model=cfg.get("model"),
-        tone=cfg.get("tone", "general"),
-    )
-    return templates.TemplateResponse(
-        "partials/ai_test_result.html",
-        {
-            "request": request,
-            "result": result,
-        },
-    )
-
-
-@app.get("/partials/ai-logs", response_class=HTMLResponse)
-async def ai_logs_partial(request: Request, page: int = 1):
-    offset = (page - 1) * LOG_PAGE_SIZE
-    logs, total = await get_recent_ai_logs(limit=LOG_PAGE_SIZE, offset=offset)
-    logs = await _enrich_logs(logs, full=True, include_content=True)
-    return templates.TemplateResponse(
-        "partials/ai_logs_table.html",
-        {
-            "request": request,
-            "logs": logs,
-            "log_page": page,
-            "log_total_pages": max(1, math.ceil(total / LOG_PAGE_SIZE)),
-            "log_total": total,
-        },
-    )
-
-
-def _get_webhook_endpoints() -> list[dict]:
-    return _read_settings().get("webhook", {}).get("endpoints", [])
-
-
-def _save_webhook_endpoints(endpoints: list[dict]) -> None:
-    cfg = _read_settings()
-    cfg.setdefault("webhook", {})["endpoints"] = endpoints
-    _write_settings(cfg)
-
-
-def _get_all_categories() -> list[str]:
-    cfg = _read_settings()
-    return [c["id"] for c in cfg.get("categories", []) if c.get("enabled", True)]
-
-
-def _get_all_source_ids() -> list[str]:
-    with open(SOURCES_PATH) as f:
-        sources = yaml.safe_load(f).get("sources", [])
-    return [s["id"] for s in sources if s.get("enabled", True)]
-
-
-def _get_ai_configs() -> list[dict]:
-    return _read_settings().get("ai", {}).get("configs", [])
-
-
-async def _webhook_ctx(request, page=1, **extra) -> dict:
-    offset = (page - 1) * LOG_PAGE_SIZE
-    logs, total = await get_recent_webhook_logs(limit=LOG_PAGE_SIZE, offset=offset)
-    logs = await _enrich_logs(logs, include_content=True)
-
-    # Map webhook ID to endpoint metadata (name + target_language)
-    endpoints = _get_webhook_endpoints()
-    id_to_ep = {ep["id"]: ep for ep in endpoints}
-    url_to_ep = {ep["url"]: ep for ep in endpoints}
-
-    for log in logs:
-        webhook_id = log.get("webhook_id")
-        webhook_url = log.get("webhook_url", "—")
-
-        ep = id_to_ep.get(webhook_id) or url_to_ep.get(webhook_url)
-        log["webhook_name"] = ep["name"] if ep else webhook_url
-
-        # Re-apply title using the webhook's target_language for synthetic articles
-        if log.get("article_type") == "synthetic" and ep:
-            tgt_lang = ep.get("target_language") or None
-            if tgt_lang:
-                lang_title = log.get(f"_title_{tgt_lang}")
-                if lang_title:
-                    log["article_title"] = lang_title
-
-    ctx = {
-        "request": request,
-        "endpoints": endpoints,
-        "logs": logs,
-        "log_page": page,
-        "log_total_pages": max(1, math.ceil(total / LOG_PAGE_SIZE)),
-        "log_total": total,
-        "all_categories": _get_all_categories(),
-        "all_sources": _get_all_source_ids(),
-        "ai_configs": _get_ai_configs(),
-    }
-    ctx.update(extra)
-    return ctx
-
-
-@app.get("/partials/settings-webhook", response_class=HTMLResponse)
-async def settings_webhook_partial(request: Request, page: int = 1):
-    ctx = await _webhook_ctx(request, page=page)
-    return templates.TemplateResponse("partials/settings_webhook.html", ctx)
-
-
-@app.get("/partials/logs-webhook", response_class=HTMLResponse)
-async def logs_webhook_partial(request: Request, page: int = 1):
-    ctx = await _webhook_ctx(request, page=page)
-    return templates.TemplateResponse("partials/webhook_logs_table.html", ctx)
-
-
-@app.post("/webhooks/add", response_class=HTMLResponse)
-async def webhook_add(
-    request: Request,
-    id: str = Form(...),
-    name: str = Form(...),
-    url: str = Form(...),
-    http_method: str = Form("POST"),
-    content_type: str = Form("application/json"),
-    retry_attempts: int = Form(3),
-    retry_delay: int = Form(5),
-    timeout: int = Form(10),
-    payload_mode: str = Form("full"),
-    payload_fields: str = Form(""),
-    payload_template: str = Form(""),
-    filter_categories_mode: str = Form("all"),
-    filter_categories: str = Form(""),
-    filter_sources_mode: str = Form("all"),
-    filter_sources: str = Form(""),
-    filter_article_types_mode: str = Form("all"),
-    filter_article_types: str = Form(""),
-    ai_mode: str = Form("rewrite"),
-    ai_config_id: str = Form(""),
-    target_language: str = Form(""),
-    rate_limit_max: int = Form(0),
-    rate_limit_window_minutes: int = Form(60),
-):
-    endpoints = _get_webhook_endpoints()
-    if any(ep["id"] == id for ep in endpoints):
-        ctx = await _webhook_ctx(request, error=f"Webhook '{id}' already exists")
-        return templates.TemplateResponse("partials/settings_webhook.html", ctx)
-    fields_list = (
-        [f.strip() for f in payload_fields.split(",") if f.strip()]
-        if payload_fields
-        else []
-    )
-    cat_list = (
-        [c.strip() for c in filter_categories.split(",") if c.strip()]
-        if filter_categories
-        else []
-    )
-    src_list = (
-        [s.strip() for s in filter_sources.split(",") if s.strip()]
-        if filter_sources
-        else []
-    )
-    types_list = (
-        [t.strip() for t in filter_article_types.split(",") if t.strip() in ("original", "synthetic")]
-        if filter_article_types
-        else []
-    )
-    endpoints.append(
-        {
-            "id": id.strip(),
-            "name": name.strip(),
-            "url": url.strip(),
-            "enabled": True,
-            "http_method": http_method.upper(),
-            "content_type": content_type.strip(),
-            "retry_attempts": max(1, min(retry_attempts, 10)),
-            "retry_delay_seconds": max(1, min(retry_delay, 60)),
-            "timeout_seconds": max(1, min(timeout, 60)),
-            "payload_mode": payload_mode,
-            "payload_fields": fields_list,
-            "payload_template": payload_template,
-            "filter_categories_mode": filter_categories_mode,
-            "filter_categories": cat_list,
-            "filter_sources_mode": filter_sources_mode,
-            "filter_sources": src_list,
-            "filter_article_types_mode": filter_article_types_mode,
-            "filter_article_types": types_list,
-            "ai_mode": ai_mode if ai_mode in ("rewrite", "synthetic", "off") else "rewrite",
-            "ai_config_id": ai_config_id.strip() or "",
-            "target_language": target_language.strip() or "",
-            "rate_limit_max": max(0, rate_limit_max),
-            "rate_limit_window_minutes": max(1, rate_limit_window_minutes),
-        }
-    )
-    _save_webhook_endpoints(endpoints)
-    logger.info(f"Webhook added: {id}")
-    ctx = await _webhook_ctx(request, success=f"Webhook '{name}' added")
-    return templates.TemplateResponse("partials/settings_webhook.html", ctx)
-
-
-@app.post("/webhooks/{wh_id}/toggle", response_class=HTMLResponse)
-async def webhook_toggle(request: Request, wh_id: str):
-    endpoints = _get_webhook_endpoints()
-    for ep in endpoints:
-        if ep["id"] == wh_id:
-            ep["enabled"] = not ep.get("enabled", True)
-            break
-    _save_webhook_endpoints(endpoints)
-    ctx = await _webhook_ctx(request)
-    return templates.TemplateResponse("partials/settings_webhook.html", ctx)
-
-
-@app.put("/webhooks/{wh_id}", response_class=HTMLResponse)
-async def webhook_update(
-    request: Request,
-    wh_id: str,
-    name: str = Form(...),
-    url: str = Form(...),
-    http_method: str = Form("POST"),
-    content_type: str = Form("application/json"),
-    retry_attempts: int = Form(3),
-    retry_delay: int = Form(5),
-    timeout: int = Form(10),
-    payload_mode: str = Form("full"),
-    payload_fields: str = Form(""),
-    payload_template: str = Form(""),
-    filter_categories_mode: str = Form("all"),
-    filter_categories: str = Form(""),
-    filter_sources_mode: str = Form("all"),
-    filter_sources: str = Form(""),
-    filter_article_types_mode: str = Form("all"),
-    filter_article_types: str = Form(""),
-    ai_mode: str = Form("rewrite"),
-    ai_config_id: str = Form(""),
-    target_language: str = Form(""),
-    rate_limit_max: int = Form(0),
-    rate_limit_window_minutes: int = Form(60),
-):
-    endpoints = _get_webhook_endpoints()
-    fields_list = (
-        [f.strip() for f in payload_fields.split(",") if f.strip()]
-        if payload_fields
-        else []
-    )
-    cat_list = (
-        [c.strip() for c in filter_categories.split(",") if c.strip()]
-        if filter_categories
-        else []
-    )
-    src_list = (
-        [s.strip() for s in filter_sources.split(",") if s.strip()]
-        if filter_sources
-        else []
-    )
-    types_list = (
-        [t.strip() for t in filter_article_types.split(",") if t.strip() in ("original", "synthetic")]
-        if filter_article_types
-        else []
-    )
-    for ep in endpoints:
-        if ep["id"] == wh_id:
-            ep["name"] = name.strip()
-            ep["url"] = url.strip()
-            ep["http_method"] = http_method.upper()
-            ep["content_type"] = content_type.strip()
-            ep["retry_attempts"] = max(1, min(retry_attempts, 10))
-            ep["retry_delay_seconds"] = max(1, min(retry_delay, 60))
-            ep["timeout_seconds"] = max(1, min(timeout, 60))
-            ep["payload_mode"] = payload_mode
-            ep["payload_fields"] = fields_list
-            ep["payload_template"] = payload_template
-            ep["filter_categories_mode"] = filter_categories_mode
-            ep["filter_categories"] = cat_list
-            ep["filter_sources_mode"] = filter_sources_mode
-            ep["filter_sources"] = src_list
-            ep["filter_article_types_mode"] = filter_article_types_mode
-            ep["filter_article_types"] = types_list
-            ep["ai_mode"] = ai_mode if ai_mode in ("rewrite", "synthetic", "off") else "rewrite"
-            ep["ai_config_id"] = ai_config_id.strip() or ""
-            ep["target_language"] = target_language.strip() or ""
-            ep["rate_limit_max"] = max(0, rate_limit_max)
-            ep["rate_limit_window_minutes"] = max(1, rate_limit_window_minutes)
-            break
-    _save_webhook_endpoints(endpoints)
-    logger.info(f"Webhook updated: {wh_id}")
-    ctx = await _webhook_ctx(request, success=f"Webhook '{name}' updated")
-    return templates.TemplateResponse("partials/settings_webhook.html", ctx)
-
-
-@app.delete("/webhooks/{wh_id}", response_class=HTMLResponse)
-async def webhook_delete(request: Request, wh_id: str):
-    endpoints = _get_webhook_endpoints()
-    endpoints = [ep for ep in endpoints if ep["id"] != wh_id]
-    _save_webhook_endpoints(endpoints)
-    logger.info(f"Webhook deleted: {wh_id}")
-    ctx = await _webhook_ctx(request, success=f"Webhook '{wh_id}' deleted")
-    return templates.TemplateResponse("partials/settings_webhook.html", ctx)
-
-
-# --- Telegram channel management ---
-
-
-def _get_telegram_channels() -> list[dict]:
-    return _read_settings().get("telegram", {}).get("channels", [])
-
-
-def _save_telegram_channels(channels: list[dict]) -> None:
-    cfg = _read_settings()
-    cfg.setdefault("telegram", {})["channels"] = channels
-    _write_settings(cfg)
-
-
-def _telegram_ctx(request, **extra) -> dict:
-    ctx = {
-        "request": request,
-        "channels": _get_telegram_channels(),
-        "all_categories": _get_all_categories(),
-        "all_sources": _get_all_source_ids(),
-        "ai_configs": _get_ai_configs(),
-    }
-    ctx.update(extra)
-    return ctx
-
-
-@app.get("/partials/settings-telegram", response_class=HTMLResponse)
-async def settings_telegram_partial(request: Request):
-    return templates.TemplateResponse(
-        "partials/settings_telegram.html", _telegram_ctx(request)
-    )
-
-
-@app.get("/partials/telegram-logs", response_class=HTMLResponse)
-async def telegram_logs_partial(
-    request: Request, page: int = 1, channel_id: str | None = None
-):
-    offset = (page - 1) * LOG_PAGE_SIZE
-    logs, total = await get_recent_telegram_logs(
-        limit=LOG_PAGE_SIZE, offset=offset, channel_id=channel_id
-    )
-    logs = await _enrich_logs(logs, full=True, include_content=True)
-
-    # Map channel_id to channel metadata (name + target_language)
-    channels = _get_telegram_channels()
-    id_to_ch = {ch["id"]: ch for ch in channels}
-    for log in logs:
-        ch = id_to_ch.get(log.get("channel_id"))
-        log["channel_name"] = ch["name"] if ch else log.get("channel_id", "—")
-
-        # Re-apply title using the channel's target_language for synthetic articles
-        if log.get("article_type") == "synthetic" and ch:
-            tgt_lang = ch.get("target_language") or None
-            if tgt_lang:
-                lang_title = log.get(f"_title_{tgt_lang}")
-                if lang_title:
-                    log["article_title"] = lang_title
-
-    return templates.TemplateResponse(
-        "partials/telegram_logs_table.html",
-        {
-            "request": request,
-            "logs": logs,
-            "tg_log_page": page,
-            "tg_log_total_pages": max(1, math.ceil(total / LOG_PAGE_SIZE)),
-            "tg_log_total": total,
-        },
-    )
-
-
-@app.post("/telegram/test-connection", response_class=HTMLResponse)
-async def telegram_test_connection(
-    bot_token: str = Form(...),
-    chat_id: str = Form(...),
-):
-    from webhook.telegram import send_telegram
-
-    if not bot_token.strip() or not chat_id.strip():
-        return HTMLResponse(
-            '<span style="color:var(--red)">Bot token and Chat ID are required</span>'
-        )
-    text = (
-        "\u2705 <b>News Aggregator — Test Message</b>\n\n"
-        "If you see this, your Telegram integration is working!"
-    )
-    try:
-        status, ok, error = await send_telegram(
-            bot_token.strip(), chat_id.strip(), text, timeout=10
-        )
-        if ok:
-            return HTMLResponse(
-                '<span style="color:var(--green);font-weight:600">&#10003; Test sent!</span>'
-            )
-        return HTMLResponse(f'<span style="color:var(--red)">{error}</span>')
-    except Exception as e:
-        return HTMLResponse(f'<span style="color:var(--red)">{e}</span>')
-
-
-@app.post("/telegram/add", response_class=HTMLResponse)
-async def telegram_add(
-    request: Request,
-    id: str = Form(...),
-    name: str = Form(...),
-    bot_token: str = Form(...),
-    chat_id: str = Form(...),
-    retry_attempts: int = Form(3),
-    timeout: int = Form(10),
-    payload_mode: str = Form("full"),
-    payload_fields: str = Form(""),
-    payload_template: str = Form(""),
-    filter_categories_mode: str = Form("all"),
-    filter_categories: str = Form(""),
-    filter_sources_mode: str = Form("all"),
-    filter_sources: str = Form(""),
-    filter_article_types_mode: str = Form("all"),
-    filter_article_types: str = Form(""),
-    ai_mode: str = Form("rewrite"),
-    ai_config_id: str = Form(""),
-    target_language: str = Form(""),
-    rate_limit_max: int = Form(0),
-    rate_limit_window_minutes: int = Form(60),
-):
-    channels = _get_telegram_channels()
-    if any(ch["id"] == id for ch in channels):
-        return templates.TemplateResponse(
-            "partials/settings_telegram.html",
-            _telegram_ctx(request, error=f"Channel '{id}' already exists"),
-        )
-    fields_list = (
-        [f.strip() for f in payload_fields.split(",") if f.strip()]
-        if payload_fields
-        else []
-    )
-    cat_list = (
-        [c.strip() for c in filter_categories.split(",") if c.strip()]
-        if filter_categories
-        else []
-    )
-    src_list = (
-        [s.strip() for s in filter_sources.split(",") if s.strip()]
-        if filter_sources
-        else []
-    )
-    types_list = (
-        [t.strip() for t in filter_article_types.split(",") if t.strip() in ("original", "synthetic")]
-        if filter_article_types
-        else []
-    )
-    channels.append(
-        {
-            "id": id.strip(),
-            "name": name.strip(),
-            "bot_token": bot_token.strip(),
-            "chat_id": chat_id.strip(),
-            "enabled": True,
-            "retry_attempts": max(1, min(retry_attempts, 10)),
-            "timeout_seconds": max(1, min(timeout, 60)),
-            "payload_mode": payload_mode,
-            "payload_fields": fields_list,
-            "payload_template": payload_template,
-            "filter_categories_mode": filter_categories_mode,
-            "filter_categories": cat_list,
-            "filter_sources_mode": filter_sources_mode,
-            "filter_sources": src_list,
-            "filter_article_types_mode": filter_article_types_mode,
-            "filter_article_types": types_list,
-            "ai_mode": ai_mode if ai_mode in ("rewrite", "synthetic", "off") else "rewrite",
-            "ai_config_id": ai_config_id.strip() or "",
-            "target_language": target_language.strip() or "",
-            "rate_limit_max": max(0, rate_limit_max),
-            "rate_limit_window_minutes": max(1, rate_limit_window_minutes),
-        }
-    )
-    _save_telegram_channels(channels)
-    logger.info(f"Telegram channel added: {id}")
-    return templates.TemplateResponse(
-        "partials/settings_telegram.html",
-        _telegram_ctx(request, success=f"Channel '{name}' added"),
-    )
-
-
-@app.post("/telegram/{ch_id}/toggle", response_class=HTMLResponse)
-async def telegram_toggle(request: Request, ch_id: str):
-    channels = _get_telegram_channels()
-    for ch in channels:
-        if ch["id"] == ch_id:
-            ch["enabled"] = not ch.get("enabled", True)
-            break
-    _save_telegram_channels(channels)
-    return templates.TemplateResponse(
-        "partials/settings_telegram.html", _telegram_ctx(request)
-    )
-
-
-@app.put("/telegram/{ch_id}", response_class=HTMLResponse)
-async def telegram_update(
-    request: Request,
-    ch_id: str,
-    name: str = Form(...),
-    bot_token: str = Form(...),
-    chat_id: str = Form(...),
-    retry_attempts: int = Form(3),
-    timeout: int = Form(10),
-    payload_mode: str = Form("full"),
-    payload_fields: str = Form(""),
-    payload_template: str = Form(""),
-    filter_categories_mode: str = Form("all"),
-    filter_categories: str = Form(""),
-    filter_sources_mode: str = Form("all"),
-    filter_sources: str = Form(""),
-    filter_article_types_mode: str = Form("all"),
-    filter_article_types: str = Form(""),
-    ai_mode: str = Form("rewrite"),
-    ai_config_id: str = Form(""),
-    target_language: str = Form(""),
-    rate_limit_max: int = Form(0),
-    rate_limit_window_minutes: int = Form(60),
-):
-    channels = _get_telegram_channels()
-    fields_list = (
-        [f.strip() for f in payload_fields.split(",") if f.strip()]
-        if payload_fields
-        else []
-    )
-    cat_list = (
-        [c.strip() for c in filter_categories.split(",") if c.strip()]
-        if filter_categories
-        else []
-    )
-    src_list = (
-        [s.strip() for s in filter_sources.split(",") if s.strip()]
-        if filter_sources
-        else []
-    )
-    types_list = (
-        [t.strip() for t in filter_article_types.split(",") if t.strip() in ("original", "synthetic")]
-        if filter_article_types
-        else []
-    )
-    for ch in channels:
-        if ch["id"] == ch_id:
-            ch["name"] = name.strip()
-            ch["bot_token"] = bot_token.strip()
-            ch["chat_id"] = chat_id.strip()
-            ch["retry_attempts"] = max(1, min(retry_attempts, 10))
-            ch["timeout_seconds"] = max(1, min(timeout, 60))
-            ch["payload_mode"] = payload_mode
-            ch["payload_fields"] = fields_list
-            ch["payload_template"] = payload_template
-            ch["filter_categories_mode"] = filter_categories_mode
-            ch["filter_categories"] = cat_list
-            ch["filter_sources_mode"] = filter_sources_mode
-            ch["filter_sources"] = src_list
-            ch["filter_article_types_mode"] = filter_article_types_mode
-            ch["filter_article_types"] = types_list
-            ch["ai_mode"] = ai_mode if ai_mode in ("rewrite", "synthetic", "off") else "rewrite"
-            ch["ai_config_id"] = ai_config_id.strip() or ""
-            ch["target_language"] = target_language.strip() or ""
-            ch["rate_limit_max"] = max(0, rate_limit_max)
-            ch["rate_limit_window_minutes"] = max(1, rate_limit_window_minutes)
-            break
-    _save_telegram_channels(channels)
-    logger.info(f"Telegram channel updated: {ch_id}")
-    return templates.TemplateResponse(
-        "partials/settings_telegram.html",
-        _telegram_ctx(request, success=f"Channel '{name}' updated"),
-    )
-
-
-@app.delete("/telegram/{ch_id}", response_class=HTMLResponse)
-async def telegram_delete(request: Request, ch_id: str):
-    channels = _get_telegram_channels()
-    channels = [ch for ch in channels if ch["id"] != ch_id]
-    _save_telegram_channels(channels)
-    logger.info(f"Telegram channel deleted: {ch_id}")
-    return templates.TemplateResponse(
-        "partials/settings_telegram.html",
-        _telegram_ctx(request, success=f"Channel '{ch_id}' deleted"),
-    )
-
-
-@app.post("/telegram/{ch_id}/test", response_class=HTMLResponse)
-async def telegram_test(request: Request, ch_id: str):
-    from webhook.telegram import send_telegram
-
-    channels = _get_telegram_channels()
-    target = next((ch for ch in channels if ch["id"] == ch_id), None)
-    if not target:
-        return HTMLResponse('<span style="color:var(--red)">Channel not found</span>')
-
-    text = (
-        "\u2705 <b>News Aggregator — Test Message</b>\n\n"
-        f"Channel: <i>{target['name']}</i>\n"
-        f"Chat ID: <code>{target['chat_id']}</code>\n\n"
-        "If you see this, your Telegram integration is working!"
-    )
-    try:
-        status, ok, error = await send_telegram(
-            target["bot_token"],
-            target["chat_id"],
-            text,
-            timeout=target.get("timeout_seconds", 10),
-        )
-        if ok:
-            return HTMLResponse(
-                '<span style="color:var(--green);font-weight:600">&#10003; Test sent!</span>'
-            )
-        return HTMLResponse(f'<span style="color:var(--red)">{error}</span>')
-    except Exception as e:
-        return HTMLResponse(f'<span style="color:var(--red)">{e}</span>')

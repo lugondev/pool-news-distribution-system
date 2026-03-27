@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 # Import app sau load_dotenv để env vars có sẵn
 from dashboard.app import app as dashboard_app, get_redis
-from scheduler import get_scheduler
+from jobs.scheduler import get_scheduler
 from storage.sqlite_stats import init_db
 from webhook.dispatcher import dispatch_worker
 

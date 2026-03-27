@@ -24,6 +24,11 @@ from webhook.dispatcher import enqueue_dispatch
 
 logger = logging.getLogger(__name__)
 
+try:
+    from realtime.manager import ws_manager
+except ImportError:
+    ws_manager = None
+
 _client: AsyncOpenAI | None = None
 _client_fingerprint: str | None = None
 
@@ -385,6 +390,116 @@ def _max_age_for_category(
         return quiet_mins * 60
 
 
+async def _is_age_stale(
+    redis: aioredis.Redis,
+    article: dict,
+    category_counts: dict,
+    ai_cfg: dict,
+) -> bool:
+    """Return True and mark age_skipped if the article is too old to process."""
+    fetched_at_str = article.get("fetched_at", "")
+    if not fetched_at_str:
+        return False
+    try:
+        fetched_dt = datetime.fromisoformat(fetched_at_str)
+        if fetched_dt.tzinfo is None:
+            fetched_dt = fetched_dt.replace(tzinfo=timezone.utc)
+        age_sec = (datetime.now(timezone.utc) - fetched_dt).total_seconds()
+        max_age = _max_age_for_category(article.get("category", ""), category_counts, ai_cfg)
+        if age_sec > max_age:
+            await redis.hset(f"news:{article['id']}", "ai_status", "age_skipped")
+            logger.debug(
+                f"Age-skipped {article['id']} "
+                f"(age={age_sec:.0f}s > max={max_age}s, cat={article.get('category')})"
+            )
+            return True
+    except (ValueError, TypeError):
+        pass
+    return False
+
+
+async def _is_ai_duplicate(
+    redis: aioredis.Redis,
+    article: dict,
+    title: str,
+    perform_ai_dedup: bool,
+    ai_dedup_threshold: int,
+) -> bool:
+    """Return True and mark dedup_skipped if a similar story was already processed."""
+    if not (perform_ai_dedup and ai_dedup_threshold > 0 and title):
+        return False
+    ai_dup = await check_ai_duplicate(redis, title, threshold=ai_dedup_threshold)
+    if ai_dup.is_duplicate:
+        await redis.hset(f"news:{article['id']}", "ai_status", "dedup_skipped")
+        logger.info(f"AI dedup skip {article['id']}: similar story already summarised")
+        return True
+    return False
+
+
+async def _run_ai_rewrite(
+    redis: aioredis.Redis,
+    article: dict,
+    title: str,
+    origin_lang: str,
+    tgt_lang: str | None,
+    config_id: str | None,
+    dedup_key: str,
+    perform_ai_dedup: bool,
+    model: str | None,
+    max_tokens: int,
+    temperature: float,
+    tone: str,
+    api_key: str | None,
+    base_url: str | None,
+    prompt_system_override: str | None,
+    prompt_template_override: str | None,
+) -> dict | None:
+    """Call AI, store results, register dedup hash. Returns enriched article or None on failure."""
+    if ws_manager:
+        asyncio.create_task(ws_manager.emit_ai_start(article["id"], title))
+
+    ai_t0 = datetime.now(timezone.utc)
+    try:
+        summaries, tokens = await rewrite_article(
+            article,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tone=tone,
+            api_key=api_key,
+            base_url=base_url,
+            prompt_system_override=prompt_system_override,
+            prompt_template_override=prompt_template_override,
+            origin_lang=origin_lang,
+            target_lang=tgt_lang,
+        )
+    except Exception as e:
+        logger.warning(f"AI failed for {article['id']}: {e}")
+        await redis.hset(f"news:{article['id']}", "ai_status", "failed")
+        if ws_manager:
+            asyncio.create_task(ws_manager.emit_ai_error(article["id"], title, str(e)[:200]))
+        return None
+
+    ai_duration_ms = int((datetime.now(timezone.utc) - ai_t0).total_seconds() * 1000)
+    if ws_manager:
+        asyncio.create_task(ws_manager.emit_ai_success(article["id"], title, ai_duration_ms))
+
+    await update_article_ai(redis, article["id"], summaries)
+    if config_id or tgt_lang:
+        await update_article_ai_config(redis, article["id"], summaries, config_id or "builtin")
+        await redis.hset(f"news:{article['id']}", dedup_key, "1")
+    await log_ai_usage(article["id"], model, tokens)
+    if title and perform_ai_dedup:
+        await register_ai_simhash(redis, title)
+
+    # Enrich article dict for downstream dispatch
+    for lang, text in summaries.items():
+        article[f"ai_summary_{lang}"] = text
+    article["ai_summary_origin"] = summaries.get(origin_lang, "")
+    article["ai_summary_target"] = summaries.get(tgt_lang, "") if tgt_lang else ""
+    return article
+
+
 async def process_pending_articles(
     redis: aioredis.Redis,
     model: str | None = None,
@@ -408,157 +523,71 @@ async def process_pending_articles(
     target_language: str | None = None,
 ) -> int:
     """
-    Lấy các bài pending, rewrite rồi dispatch webhook + telegram.
-    If spread_seconds > 0, articles are processed one-by-one with even delays
-    instead of all-at-once, to avoid bursts.
-    If pre_fetched_articles is provided, uses those instead of popping from queue.
-    If config_id is set, stores summaries under config-specific fields for per-config dispatch.
-    Returns số bài đã xử lý.
+    Fetch pending articles, rewrite with AI, then dispatch to webhooks + Telegram.
+
+    - spread_seconds > 0: space out AI calls evenly across the window
+    - pre_fetched_articles: use these instead of popping from the queue
+    - config_id: store summaries under config-specific fields for per-config dispatch
+    Returns the number of articles processed.
     """
-    if pre_fetched_articles is not None:
-        articles = pre_fetched_articles
-    else:
-        articles = await pop_pending_ai_articles(redis, limit=batch_size)
+    articles = pre_fetched_articles if pre_fetched_articles is not None else await pop_pending_ai_articles(redis, limit=batch_size)
     if not articles:
         return 0
 
-    # Load AI config for age thresholds
     ai_cfg = _load_ai_config()
-
-    # Sample category volumes once per batch to determine freshness thresholds.
     category_counts = await _get_category_counts(redis)
-
-    # inter_delay spaces out actual AI calls — computed against full batch size
-    # so throughput matches the spread window even if some articles are dedup-skipped.
-    inter_delay = (
-        spread_seconds / len(articles)
-        if spread_seconds > 0 and len(articles) > 1
-        else 0
-    )
+    # Spread delay is computed against the full batch so throughput holds even when articles are skipped.
+    inter_delay = spread_seconds / len(articles) if spread_seconds > 0 and len(articles) > 1 else 0
 
     processed = 0
-    ai_call_count = 0  # tracks actual AI calls made (for rate limiting)
+    ai_call_count = 0
 
     for article in articles:
         title = article.get("title", "")
+        dedup_key = f"ai_done_{config_id or 'builtin'}_{target_language or 'origin'}"
 
-        # Per-config+lang dedup: skip if already processed with this exact (config, lang) combo
-        _dedup_key = f"ai_done_{config_id or 'builtin'}_{target_language or 'origin'}"
+        # Per-config+lang dedup: skip if already processed with this exact combo
         if config_id or target_language:
-            cfg_done = await redis.hget(f"news:{article['id']}", _dedup_key)
-            if cfg_done:
+            if await redis.hget(f"news:{article['id']}", dedup_key):
                 processed += 1
                 continue
 
-        # Raw dispatch: send immediately without AI processing, for hooks with ai_mode="off"
+        # Raw dispatch for ai_mode="off" hooks — no AI processing needed
         if raw_webhook_endpoints or raw_telegram_channels:
-            await enqueue_dispatch(
-                article,
-                raw_webhook_endpoints or [],
-                telegram_channels=raw_telegram_channels,
-            )
+            await enqueue_dispatch(article, raw_webhook_endpoints or [], telegram_channels=raw_telegram_channels)
 
-        # Age-based skip: avoid wasting quota on stale articles.
-        # Threshold scales with category volume — busy categories expire faster.
-        fetched_at_str = article.get("fetched_at", "")
-        if fetched_at_str:
-            try:
-                fetched_dt = datetime.fromisoformat(fetched_at_str)
-                if fetched_dt.tzinfo is None:
-                    fetched_dt = fetched_dt.replace(tzinfo=timezone.utc)
-                age_sec = (datetime.now(timezone.utc) - fetched_dt).total_seconds()
-                max_age = _max_age_for_category(
-                    article.get("category", ""), category_counts, ai_cfg
-                )
-                if age_sec > max_age:
-                    await redis.hset(
-                        f"news:{article['id']}", "ai_status", "age_skipped"
-                    )
-                    logger.debug(
-                        f"Age-skipped {article['id']} "
-                        f"(age={age_sec:.0f}s > max={max_age}s, cat={article.get('category')})"
-                    )
-                    processed += 1
-                    continue
-            except (ValueError, TypeError):
-                pass
+        if await _is_age_stale(redis, article, category_counts, ai_cfg):
+            processed += 1
+            continue
 
-        # Skip AI processing if no rewrite hooks are configured
         if not webhook_endpoints and not telegram_channels:
             processed += 1
             continue
 
-        # Pre-AI semantic dedup: check BEFORE sleeping to avoid wasted delay
-        if perform_ai_dedup and ai_dedup_threshold > 0 and title:
-            ai_dup = await check_ai_duplicate(
-                redis, title, threshold=ai_dedup_threshold
-            )
-            if ai_dup.is_duplicate:
-                await redis.hset(f"news:{article['id']}", "ai_status", "dedup_skipped")
-                logger.info(
-                    f"AI dedup skip {article['id']}: similar story already summarised"
-                )
-                processed += 1
-                continue
+        if await _is_ai_duplicate(redis, article, title, perform_ai_dedup, ai_dedup_threshold):
+            processed += 1
+            continue
 
-        # Rate-limit only actual AI calls
         if ai_call_count > 0 and inter_delay > 0:
             await asyncio.sleep(inter_delay)
 
-        # Determine the article's origin language
         raw_lang = article.get("lang") or article.get("declared_lang") or "en"
         origin_lang = raw_lang[:2].lower() if raw_lang and raw_lang != "und" else "en"
-        tgt_lang = (
-            target_language
-            if target_language and target_language != origin_lang
-            else None
+        tgt_lang = target_language if target_language and target_language != origin_lang else None
+
+        enriched = await _run_ai_rewrite(
+            redis, article, title, origin_lang, tgt_lang,
+            config_id, dedup_key, perform_ai_dedup,
+            model, max_tokens, temperature, tone, api_key, base_url,
+            prompt_system_override, prompt_template_override,
         )
-
-        try:
-            summaries, tokens = await rewrite_article(
-                article,
-                model=model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                tone=tone,
-                api_key=api_key,
-                base_url=base_url,
-                prompt_system_override=prompt_system_override,
-                prompt_template_override=prompt_template_override,
-                origin_lang=origin_lang,
-                target_lang=tgt_lang,
-            )
-        except Exception as e:
-            logger.warning(f"AI failed for {article['id']}: {e}")
-            await redis.hset(f"news:{article['id']}", "ai_status", "failed")
-            ai_call_count += 1
-            continue
-
         ai_call_count += 1
-        await update_article_ai(redis, article["id"], summaries)
-        if config_id or target_language:
-            await update_article_ai_config(
-                redis, article["id"], summaries, config_id or "builtin"
-            )
-            await redis.hset(f"news:{article['id']}", _dedup_key, "1")
-        await log_ai_usage(article["id"], model, tokens)
-        if title and perform_ai_dedup:
-            await register_ai_simhash(redis, title)
 
-        # Populate article dict for payload dispatch
-        for lang, text in summaries.items():
-            article[f"ai_summary_{lang}"] = text
-        article["ai_summary_origin"] = summaries.get(origin_lang, "")
-        article["ai_summary_target"] = summaries.get(tgt_lang, "") if tgt_lang else ""
-
-        if webhook_endpoints or telegram_channels:
-            await enqueue_dispatch(
-                article,
-                webhook_endpoints or [],
-                telegram_channels=telegram_channels,
-            )
+        if enriched and (webhook_endpoints or telegram_channels):
+            await enqueue_dispatch(enriched, webhook_endpoints or [], telegram_channels=telegram_channels)
 
         processed += 1
-        logger.info(f"Processed article {article['id']}: {article['title'][:60]}...")
+        if enriched:
+            logger.info(f"Processed article {article['id']}: {article['title'][:60]}...")
 
     return processed

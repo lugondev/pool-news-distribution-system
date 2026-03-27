@@ -1,0 +1,1165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pipeline Monitor · News Aggregator</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0d1117; --surface: #161b27; --surface2: #1e2438; --surface3: #242940;
+      --border: #2a2f45; --border2: #333852;
+      --text: #e2e8f0; --muted: #64748b; --muted2: #8892a4;
+      --accent: #6366f1;
+      --green: #10b981; --red: #ef4444; --yellow: #f59e0b; --blue: #3b82f6;
+      --purple: #818cf8; --orange: #f97316; --cyan: #06b6d4;
+      --c-sources: #3b82f6; --c-crawl: #10b981;
+      --c-dedup: #f59e0b; --c-redis: #ef4444;
+      --c-ai: #818cf8; --c-webhook: #f97316; --c-telegram: #06b6d4;
+    }
+    html, body { height: 100%; background: var(--bg); color: var(--text);
+      font-family: 'Inter', system-ui, sans-serif; font-size: 13px; overflow: hidden; }
+
+    /* ── Header ── */
+    header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 0 20px; display: flex; align-items: center; gap: 12px; height: 46px;
+      flex-shrink: 0;
+    }
+    .logo { font-size: 13px; font-weight: 700; letter-spacing: -.2px; }
+    .ws-pill {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 99px; padding: 3px 10px; font-size: 11px; color: var(--muted2);
+    }
+    .ws-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+    .ws-dot.connected { background: var(--green); box-shadow: 0 0 5px var(--green); }
+    .ws-dot.connecting { background: var(--yellow); animation: blink 1s infinite; }
+    .nav { margin-left: auto; display: flex; gap: 2px; }
+    .nav a { color: var(--muted); text-decoration: none; padding: 4px 11px;
+      border-radius: 6px; font-size: 12px; transition: all .15s; }
+    .nav a:hover { color: var(--text); background: var(--surface2); }
+    .nav a.active { color: var(--text); background: var(--surface2); }
+
+    /* ── Outer layout ── */
+    .outer { display: flex; flex-direction: column; height: calc(100vh - 46px); }
+    .main  { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── Scheduler bar ── */
+    .sched-bar {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 0 20px; display: flex; align-items: center; gap: 12px;
+      height: 46px; flex-shrink: 0; overflow-x: auto;
+    }
+    .sched-label { font-size: 10px; font-weight: 600; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .05em; margin-right: 4px; flex-shrink: 0; }
+    .sched-sep { width: 1px; height: 24px; background: var(--border); flex-shrink: 0; }
+    .sched-job {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 5px 12px; flex-shrink: 0;
+      transition: border-color .3s;
+    }
+    .sched-job.running { border-color: var(--accent); }
+    .sched-job.error   { border-color: var(--red); }
+    .sj-icon { font-size: 14px; }
+    .sj-info { display: flex; flex-direction: column; gap: 1px; }
+    .sj-name { font-size: 11px; font-weight: 600; }
+    .sj-detail { font-size: 10px; color: var(--muted); }
+    .sj-badge {
+      font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 99px;
+      background: var(--surface3); color: var(--muted);
+    }
+    .sj-badge.running { background: rgba(99,102,241,.15); color: var(--accent); animation: blink .8s infinite; }
+    .sj-badge.error   { background: rgba(239,68,68,.15); color: var(--red); }
+    .sj-badge.idle    { background: var(--surface3); color: var(--muted2); }
+    .sj-countdown { font-size: 11px; font-weight: 600; color: var(--text);
+      font-variant-numeric: tabular-nums; min-width: 38px; }
+    .sj-countdown.imminent { color: var(--yellow); }
+    .sj-countdown.running  { color: var(--accent); }
+    .sched-stats { margin-left: auto; display: flex; gap: 16px; flex-shrink: 0; }
+    .ss-item { display: flex; flex-direction: column; align-items: flex-end; }
+    .ss-val { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .ss-lbl { font-size: 10px; color: var(--muted); }
+
+    /* ── Canvas area ── */
+    .canvas-wrap { flex: 1; overflow: auto; position: relative; min-width: 0; }
+    .canvas-bg {
+      position: fixed; inset: 0;
+      background-image: radial-gradient(circle, rgba(42,47,69,.8) 1px, transparent 1px);
+      background-size: 22px 22px; pointer-events: none; z-index: 0;
+    }
+    .canvas {
+      position: relative; margin: 24px auto; z-index: 1;
+      width: 854px; height: 490px;
+    }
+    #svg-layer {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%; overflow: visible; pointer-events: none;
+    }
+
+    /* ── Node cards ── */
+    .node {
+      position: absolute; background: var(--surface);
+      border: 1.5px solid var(--border); border-radius: 12px; overflow: hidden;
+      transition: border-color .35s, box-shadow .35s;
+    }
+    .node::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+      border-radius: 12px 12px 0 0; opacity: 0; transition: opacity .35s;
+    }
+    .node.active::before, .node.success::before, .node.error::before { opacity: 1; }
+    .node.active  { animation: node-pop .5s ease-out; }
+    .node.success { border-color: rgba(16,185,129,.5); box-shadow: 0 0 18px rgba(16,185,129,.15); }
+    .node.success::before { background: var(--green); }
+    .node.error   { border-color: rgba(239,68,68,.5); box-shadow: 0 0 18px rgba(239,68,68,.15); }
+    .node.error::before { background: var(--red); }
+    .node.active::before { background: var(--accent); }
+    @keyframes node-pop {
+      0% { transform: scale(1); } 45% { transform: scale(1.02); } 100% { transform: scale(1); }
+    }
+
+    .node-head {
+      display: flex; align-items: center; gap: 8px;
+      padding: 9px 12px 7px; border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,.02);
+    }
+    .node-icon { width: 26px; height: 26px; border-radius: 7px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center; font-size: 13px; }
+    .node-title { font-size: 12px; font-weight: 600; flex: 1; white-space: nowrap; }
+    .node-type  { font-size: 9px; color: var(--muted); background: var(--surface3);
+      border-radius: 4px; padding: 1px 5px; font-weight: 500; }
+    .node-live { width: 6px; height: 6px; border-radius: 50%; background: var(--muted);
+      flex-shrink: 0; transition: background .3s; }
+    .node-live.on { background: var(--green); animation: blink 1.5s infinite; }
+
+    .node-body { padding: 9px 12px 10px; }
+
+    /* metric rows */
+    .mrow { display: flex; align-items: center; justify-content: space-between;
+      gap: 6px; padding: 2.5px 0; }
+    .mrow + .mrow { border-top: 1px solid rgba(42,47,69,.6); }
+    .ml { font-size: 10px; color: var(--muted); white-space: nowrap; }
+    .mv { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums;
+      white-space: nowrap; }
+    .mv.green  { color: var(--green); }
+    .mv.red    { color: var(--red); }
+    .mv.yellow { color: var(--yellow); }
+    .mv.blue   { color: var(--blue); }
+    .mv.purple { color: var(--purple); }
+    .mv.cyan   { color: var(--cyan); }
+    .mv.orange { color: var(--orange); }
+    .mv.pair span + span::before { content: '/'; margin: 0 3px; color: var(--border2); }
+
+    /* 2-col metric grid */
+    .mgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin: 5px 0; }
+    .mgrid .mitem { background: var(--surface2); border-radius: 6px; padding: 5px 8px; }
+    .mgrid .mitem .lbl { font-size: 9px; color: var(--muted); margin-bottom: 1px; }
+    .mgrid .mitem .val { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+    /* preview strip */
+    .preview {
+      margin-top: 6px; padding: 5px 8px;
+      background: rgba(255,255,255,.025); border-radius: 6px;
+      font-size: 10px; color: var(--muted2);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    /* progress bar */
+    .pbar-wrap { margin-top: 6px; background: var(--surface3); border-radius: 3px; height: 3px; overflow: hidden; }
+    .pbar-fill { height: 100%; border-radius: 3px; transition: width .4s; }
+
+    /* ── Node color themes (icon + accent line) ── */
+    #node-sources .node-icon  { background: rgba(59,130,246,.14); color: var(--c-sources); }
+    #node-sources { --c: var(--c-sources); }
+    #node-crawl   .node-icon  { background: rgba(16,185,129,.14); color: var(--c-crawl); }
+    #node-crawl   { --c: var(--c-crawl); }
+    #node-dedup   .node-icon  { background: rgba(245,158,11,.14); color: var(--c-dedup); }
+    #node-dedup   { --c: var(--c-dedup); }
+    #node-redis   .node-icon  { background: rgba(239,68,68,.14); color: var(--c-redis); }
+    #node-redis   { --c: var(--c-redis); }
+    #node-ai      .node-icon  { background: rgba(129,140,248,.14); color: var(--c-ai); }
+    #node-ai      { --c: var(--c-ai); }
+    #node-webhook .node-icon  { background: rgba(249,115,22,.14); color: var(--c-webhook); }
+    #node-webhook { --c: var(--c-webhook); }
+    #node-telegram .node-icon { background: rgba(6,182,212,.14); color: var(--c-telegram); }
+    #node-telegram { --c: var(--c-telegram); }
+
+    /* ── SVG edges ── */
+    .edge { fill: none; stroke: var(--border2); stroke-width: 1.5; }
+    .edge-label { font-size: 9.5px; fill: var(--muted); font-family: system-ui; }
+
+    /* ── Edge count badges ── */
+    .ebadge {
+      position: absolute; transform: translate(-50%, -50%);
+      background: var(--surface2); border: 1px solid var(--border2);
+      color: var(--muted); font-size: 10px; font-weight: 600;
+      padding: 1px 7px; border-radius: 99px; pointer-events: none;
+      font-variant-numeric: tabular-nums; transition: color .2s, border-color .2s;
+      white-space: nowrap;
+    }
+    .ebadge.lit { color: var(--accent); border-color: var(--accent); }
+
+    /* ── Log panel ── */
+    .log-panel { width: 300px; border-left: 1px solid var(--border);
+      display: flex; flex-direction: column; flex-shrink: 0; background: var(--surface); }
+    .log-head { padding: 10px 14px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 8px; }
+    .log-head h3 { font-size: 12px; font-weight: 600; flex: 1; }
+    .log-count { font-size: 10px; color: var(--muted); }
+    .log-clear { background: none; border: 1px solid var(--border); color: var(--muted);
+      font-size: 10px; padding: 2px 8px; border-radius: 5px; cursor: pointer;
+      transition: all .15s; }
+    .log-clear:hover { color: var(--text); border-color: var(--muted); }
+    #event-log { flex: 1; overflow-y: auto; }
+    #event-log::-webkit-scrollbar { width: 3px; }
+    #event-log::-webkit-scrollbar-thumb { background: var(--border); }
+    .lentry {
+      display: flex; align-items: flex-start; gap: 8px; padding: 6px 12px;
+      border-bottom: 1px solid rgba(42,47,69,.4);
+      animation: slide-in .2s ease-out;
+    }
+    @keyframes slide-in { from { opacity:0; transform:translateX(6px); } }
+    .lentry:hover { background: var(--surface2); }
+    .lico { width: 22px; height: 22px; border-radius: 6px; display: flex;
+      align-items: center; justify-content: center; font-size: 11px;
+      flex-shrink: 0; margin-top: 1px; }
+    .lbody { flex: 1; min-width: 0; }
+    .ltype { font-size: 10px; font-weight: 600; line-height: 1.2; }
+    .ldesc { font-size: 10px; color: var(--muted); white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; }
+    .ltime { font-size: 10px; color: var(--muted); flex-shrink: 0;
+      margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+    /* log entry colors */
+    .lt-crawl-start .lico    { background: rgba(59,130,246,.12); }
+    .lt-crawl-success .lico  { background: rgba(16,185,129,.12); }
+    .lt-crawl-error .lico    { background: rgba(239,68,68,.12); }
+    .lt-article-saved .lico  { background: rgba(245,158,11,.12); }
+    .lt-ai-start .lico       { background: rgba(129,140,248,.12); }
+    .lt-ai-success .lico     { background: rgba(129,140,248,.18); }
+    .lt-ai-error .lico       { background: rgba(239,68,68,.12); }
+    .lt-webhook-start .lico  { background: rgba(249,115,22,.12); }
+    .lt-webhook-success .lico{ background: rgba(249,115,22,.18); }
+    .lt-webhook-error .lico  { background: rgba(239,68,68,.12); }
+    .lt-telegram-start .lico { background: rgba(6,182,212,.12); }
+    .lt-telegram-success .lico{background: rgba(6,182,212,.18); }
+    .lt-telegram-error .lico { background: rgba(239,68,68,.12); }
+    .lt-scheduler-job-start .lico{ background: rgba(99,102,241,.12); }
+    .lt-scheduler-job-done .lico { background: rgba(99,102,241,.15); }
+    .lt-synthesis-start .lico { background: rgba(129,140,248,.12); }
+    .lt-synthesis-success .lico { background: rgba(129,140,248,.15); }
+
+    .lt-crawl-start .ltype    { color: var(--blue); }
+    .lt-crawl-success .ltype  { color: var(--green); }
+    .lt-crawl-error .ltype    { color: var(--red); }
+    .lt-article-saved .ltype  { color: var(--yellow); }
+    .lt-ai-start .ltype       { color: var(--purple); }
+    .lt-ai-success .ltype     { color: var(--purple); }
+    .lt-ai-error .ltype       { color: var(--red); }
+    .lt-webhook-start .ltype  { color: var(--orange); }
+    .lt-webhook-success .ltype{ color: var(--orange); }
+    .lt-webhook-error .ltype  { color: var(--red); }
+    .lt-telegram-start .ltype { color: var(--cyan); }
+    .lt-telegram-success .ltype{color: var(--cyan); }
+    .lt-telegram-error .ltype { color: var(--red); }
+    .lt-scheduler-job-start .ltype { color: var(--accent); }
+    .lt-scheduler-job-done .ltype  { color: var(--accent); }
+    .lt-synthesis-start .ltype  { color: var(--purple); }
+    .lt-synthesis-success .ltype{ color: var(--purple); }
+
+    /* ── Stats footer ── */
+    .stats-footer {
+      background: var(--surface); border-top: 1px solid var(--border);
+      padding: 6px 20px; display: flex; align-items: center; gap: 20px;
+      font-size: 11px; color: var(--muted); flex-shrink: 0;
+    }
+    .sf-item { display: flex; align-items: center; gap: 5px; }
+    .sf-item .dot { width: 5px; height: 5px; border-radius: 50%; }
+    .sf-val { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+    .sf-right { margin-left: auto; }
+
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────────────── -->
+<header>
+  <span class="logo">⚡ News Pipeline</span>
+  <div class="ws-pill">
+    <div class="ws-dot connecting" id="ws-dot"></div>
+    <span id="ws-status">Connecting…</span>
+  </div>
+  <nav class="nav">
+    <a href="/">Dashboard</a>
+    <a href="/pipeline" class="active">Pipeline</a>
+    <a href="/logs">Logs</a>
+    <a href="/sources">Sources</a>
+    <a href="/settings">Settings</a>
+  </nav>
+</header>
+
+<div class="outer">
+
+  <!-- ── Scheduler bar ────────────────────────────────────────── -->
+  <div class="sched-bar">
+    <span class="sched-label">Scheduler</span>
+    <div class="sched-sep"></div>
+
+    <!-- Crawl job -->
+    <div class="sched-job" id="sj-crawl_all">
+      <span class="sj-icon">📡</span>
+      <div class="sj-info">
+        <span class="sj-name">Crawl Job</span>
+        <span class="sj-detail" id="sjd-crawl_all">—</span>
+      </div>
+      <span class="sj-badge idle" id="sjb-crawl_all">IDLE</span>
+      <span class="sj-countdown" id="sjc-crawl_all">—</span>
+    </div>
+
+    <!-- AI job -->
+    <div class="sched-job" id="sj-ai_rewrite">
+      <span class="sj-icon">🤖</span>
+      <div class="sj-info">
+        <span class="sj-name">AI Rewrite</span>
+        <span class="sj-detail" id="sjd-ai_rewrite">—</span>
+      </div>
+      <span class="sj-badge idle" id="sjb-ai_rewrite">IDLE</span>
+      <span class="sj-countdown" id="sjc-ai_rewrite">—</span>
+    </div>
+
+    <!-- Synthesis job -->
+    <div class="sched-job" id="sj-topic_synthesis">
+      <span class="sj-icon">🔬</span>
+      <div class="sj-info">
+        <span class="sj-name">Synthesis</span>
+        <span class="sj-detail" id="sjd-topic_synthesis">—</span>
+      </div>
+      <span class="sj-badge idle" id="sjb-topic_synthesis">IDLE</span>
+      <span class="sj-countdown" id="sjc-topic_synthesis">—</span>
+    </div>
+
+    <!-- Session totals (right side) -->
+    <div class="sched-stats">
+      <div class="ss-item"><span class="ss-val" id="bar-crawled">0</span><span class="ss-lbl">Crawled</span></div>
+      <div class="ss-item"><span class="ss-val" id="bar-saved">0</span><span class="ss-lbl">Saved</span></div>
+      <div class="ss-item"><span class="ss-val" id="bar-ai">0</span><span class="ss-lbl">AI done</span></div>
+      <div class="ss-item"><span class="ss-val" id="bar-wh">0</span><span class="ss-lbl">Webhooks</span></div>
+      <div class="ss-item"><span class="ss-val" id="bar-tg">0</span><span class="ss-lbl">Telegram</span></div>
+    </div>
+  </div>
+
+  <div class="main">
+
+    <!-- ── Canvas ─────────────────────────────────────────────── -->
+    <div class="canvas-wrap">
+      <div class="canvas-bg"></div>
+      <div class="canvas" id="canvas">
+
+        <!-- SVG connections layer -->
+        <svg id="svg-layer" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="2.5" result="b"/>
+              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+            <!-- Universal directional arrow (orient auto = follows path direction) -->
+            <marker id="arr" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
+              <path d="M0,0.5 L0,6.5 L6,3.5 z" fill="#2a2f45"/>
+            </marker>
+            <marker id="arr-hi" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
+              <path d="M0,0.5 L0,6.5 L6,3.5 z" fill="#6366f1"/>
+            </marker>
+          </defs>
+
+          <!-- TOP ROW connections (left → right) -->
+          <!-- sources → crawl -->
+          <path id="path-sources-crawl" class="edge" d="M200,110 H220" marker-end="url(#arr)"/>
+          <!-- crawl → dedup -->
+          <path id="path-crawl-dedup" class="edge" d="M410,110 H430" marker-end="url(#arr)"/>
+          <!-- dedup → redis -->
+          <path id="path-dedup-redis" class="edge" d="M612,110 H632" marker-end="url(#arr)"/>
+
+          <!-- VERTICAL bend (redis bottom → ai top) -->
+          <path id="path-redis-ai" class="edge"
+            d="M733,188 V305" marker-end="url(#arr)"/>
+
+          <!-- BOTTOM ROW connections (right → left) -->
+          <!-- ai → webhook -->
+          <path id="path-ai-webhook" class="edge" d="M632,385 H612" marker-end="url(#arr)"/>
+          <!-- webhook → telegram -->
+          <path id="path-webhook-telegram" class="edge" d="M430,385 H410" marker-end="url(#arr)"/>
+
+          <!-- Packets group -->
+          <g id="packets"></g>
+        </svg>
+
+        <!-- Edge count badges -->
+        <div class="ebadge" id="eb-sources-crawl" style="left:210px;top:110px">0</div>
+        <div class="ebadge" id="eb-crawl-dedup"   style="left:420px;top:110px">0</div>
+        <div class="ebadge" id="eb-dedup-redis"   style="left:622px;top:110px">0</div>
+        <div class="ebadge" id="eb-redis-ai"      style="left:744px;top:247px">0</div>
+        <div class="ebadge" id="eb-ai-webhook"    style="left:622px;top:385px">0</div>
+        <div class="ebadge" id="eb-webhook-telegram" style="left:420px;top:385px">0</div>
+
+        <!-- ══════════════ TOP ROW NODES ══════════════ -->
+
+        <!-- ── RSS Sources (x=8, y=32, w=192, h=155) ── -->
+        <div class="node" id="node-sources" style="left:8px;top:32px;width:192px;">
+          <div class="node-head">
+            <div class="node-icon">📡</div>
+            <span class="node-title">RSS Sources</span>
+            <span class="node-type">Input</span>
+            <div class="node-live" id="live-sources"></div>
+          </div>
+          <div class="node-body">
+            <div class="mrow">
+              <span class="ml">Currently fetching</span>
+              <span class="mv blue" id="m-src-active" style="max-width:110px;overflow:hidden;text-overflow:ellipsis">—</span>
+            </div>
+            <div class="mgrid">
+              <div class="mitem">
+                <div class="lbl">Crawled</div>
+                <div class="val" style="color:var(--green)" id="m-src-ok">0</div>
+              </div>
+              <div class="mitem">
+                <div class="lbl">Errors</div>
+                <div class="val" style="color:var(--red)" id="m-src-err">0</div>
+              </div>
+              <div class="mitem">
+                <div class="lbl">Found</div>
+                <div class="val" id="m-src-found">0</div>
+              </div>
+              <div class="mitem">
+                <div class="lbl">Dupes</div>
+                <div class="val" style="color:var(--yellow)" id="m-src-dupes">0</div>
+              </div>
+            </div>
+            <div class="preview" id="p-sources">Waiting for activity…</div>
+          </div>
+        </div>
+
+        <!-- ── Crawl & Parse (x=220, y=32, w=190, h=155) ── -->
+        <div class="node" id="node-crawl" style="left:220px;top:32px;width:190px;">
+          <div class="node-head">
+            <div class="node-icon">🔍</div>
+            <span class="node-title">Fetch &amp; Parse</span>
+            <span class="node-type">Crawl</span>
+            <div class="node-live" id="live-crawl"></div>
+          </div>
+          <div class="node-body">
+            <div class="mrow">
+              <span class="ml">Articles found</span>
+              <span class="mv" id="m-crawl-found">0</span>
+            </div>
+            <div class="mrow">
+              <span class="ml">Saved</span>
+              <span class="mv green" id="m-crawl-saved">0</span>
+            </div>
+            <div class="mrow">
+              <span class="ml">Avg fetch time</span>
+              <span class="mv" id="m-crawl-avgms">—</span>
+            </div>
+            <div class="mrow">
+              <span class="ml">Errors</span>
+              <span class="mv red" id="m-crawl-errors">0</span>
+            </div>
+            <div class="preview" id="p-crawl">—</div>
+          </div>
+        </div>
+
+        <!-- ── SimHash Dedup (x=430, y=32, w=182, h=155) ── -->
+        <div class="node" id="node-dedup" style="left:430px;top:32px;width:182px;">
+          <div class="node-head">
+            <div class="node-icon">🔁</div>
+            <span class="node-title">SimHash Dedup</span>
+            <span class="node-type">Filter</span>
+            <div class="node-live" id="live-dedup"></div>
+          </div>
+          <div class="node-body">
+            <div class="mgrid">
+              <div class="mitem">
+                <div class="lbl">Checked</div>
+                <div class="val" id="m-dd-checked">0</div>
+              </div>
+              <div class="mitem">
+                <div class="lbl">Passed</div>
+                <div class="val" style="color:var(--green)" id="m-dd-passed">0</div>
+              </div>
+              <div class="mitem">
+                <div class="lbl">Filtered</div>
+                <div class="val" style="color:var(--yellow)" id="m-dd-filtered">0</div>
+              </div>
+              <div class="mitem">
+                <div class="lbl">Pass rate</div>
+                <div class="val" id="m-dd-rate">—%</div>
+              </div>
+            </div>
+            <div class="mrow" style="margin-top:4px">
+              <span class="ml">Method</span>
+              <span class="mv" style="color:var(--muted2);font-weight:400">Hamming ≤3</span>
+            </div>
+            <div class="pbar-wrap"><div class="pbar-fill" id="pb-dedup" style="width:0%;background:var(--green)"></div></div>
+          </div>
+        </div>
+
+        <!-- ── Redis Store (x=632, y=32, w=202, h=155) ── -->
+        <div class="node" id="node-redis" style="left:632px;top:32px;width:202px;">
+          <div class="node-head">
+            <div class="node-icon">🗄️</div>
+            <span class="node-title">Redis Store</span>
+            <span class="node-type">Storage</span>
+            <div class="node-live" id="live-redis"></div>
+          </div>
+          <div class="node-body">
+            <div class="mgrid">
+              <div class="mitem">
+                <div class="lbl">Stored</div>
+                <div class="val" style="color:var(--green)" id="m-rd-stored">0</div>
+              </div>
+              <div class="mitem">
+                <div class="lbl">AI queue</div>
+                <div class="val" style="color:var(--purple)" id="m-rd-queue">0</div>
+              </div>
+            </div>
+            <div class="mrow" style="margin-top:4px">
+              <span class="ml">TTL</span>
+              <span class="mv" style="color:var(--muted2);font-weight:400">24 h</span>
+            </div>
+            <div class="preview" id="p-redis">—</div>
+          </div>
+        </div>
+
+        <!-- ══════════════ BOTTOM ROW NODES ══════════════ -->
+
+        <!-- ── AI Rewrite (x=632, y=305, w=202, h=175) ── -->
+        <div class="node" id="node-ai" style="left:632px;top:305px;width:202px;">
+          <div class="node-head">
+            <div class="node-icon">🤖</div>
+            <span class="node-title">AI Rewrite</span>
+            <span class="node-type">AI</span>
+            <div class="node-live" id="live-ai"></div>
+          </div>
+          <div class="node-body">
+            <div class="mrow">
+              <span class="ml">Processed</span>
+              <span class="mv purple" id="m-ai-proc">0</span>
+            </div>
+            <div class="mrow">
+              <span class="ml">Age skipped</span>
+              <span class="mv yellow" id="m-ai-age">0</span>
+            </div>
+            <div class="mrow">
+              <span class="ml">Dedup skipped</span>
+              <span class="mv yellow" id="m-ai-dedup">0</span>
+            </div>
+            <div class="mrow">
+              <span class="ml">Errors</span>
+              <span class="mv red" id="m-ai-err">0</span>
+            </div>
+            <div class="mrow">
+              <span class="ml">Avg latency</span>
+              <span class="mv" id="m-ai-lat">—</span>
+            </div>
+            <div class="preview" id="p-ai">—</div>
+          </div>
+        </div>
+
+        <!-- ── Webhooks (x=430, y=305, w=182, h=175) ── -->
+        <div class="node" id="node-webhook" style="left:430px;top:305px;width:182px;">
+          <div class="node-head">
+            <div class="node-icon">🔗</div>
+            <span class="node-title">Webhooks</span>
+            <span class="node-type">Output</span>
+            <div class="node-live" id="live-webhook"></div>
+          </div>
+          <div class="node-body">
+            <div class="mgrid">
+              <div class="mitem">
+                <div class="lbl">Sent</div>
+                <div class="val" style="color:var(--green)" id="m-wh-sent">0</div>
+              </div>
+              <div class="mitem">
+                <div class="lbl">Failed</div>
+                <div class="val" style="color:var(--red)" id="m-wh-fail">0</div>
+              </div>
+            </div>
+            <div class="mrow" style="margin-top:4px">
+              <span class="ml">Success rate</span>
+              <span class="mv green" id="m-wh-rate">—%</span>
+            </div>
+            <div class="mrow">
+              <span class="ml">Avg response</span>
+              <span class="mv" id="m-wh-avg">—</span>
+            </div>
+            <div class="preview" id="p-webhook">—</div>
+            <div class="pbar-wrap"><div class="pbar-fill" id="pb-webhook" style="width:0%;background:var(--green)"></div></div>
+          </div>
+        </div>
+
+        <!-- ── Telegram (x=218, y=305, w=192, h=175) ── -->
+        <div class="node" id="node-telegram" style="left:218px;top:305px;width:192px;">
+          <div class="node-head">
+            <div class="node-icon">✈️</div>
+            <span class="node-title">Telegram</span>
+            <span class="node-type">Output</span>
+            <div class="node-live" id="live-telegram"></div>
+          </div>
+          <div class="node-body">
+            <div class="mgrid">
+              <div class="mitem">
+                <div class="lbl">Sent</div>
+                <div class="val" style="color:var(--green)" id="m-tg-sent">0</div>
+              </div>
+              <div class="mitem">
+                <div class="lbl">Failed</div>
+                <div class="val" style="color:var(--red)" id="m-tg-fail">0</div>
+              </div>
+            </div>
+            <div class="mrow" style="margin-top:4px">
+              <span class="ml">Success rate</span>
+              <span class="mv cyan" id="m-tg-rate">—%</span>
+            </div>
+            <div class="mrow">
+              <span class="ml">Last channel</span>
+              <span class="mv" style="color:var(--muted2);max-width:100px;overflow:hidden;text-overflow:ellipsis" id="m-tg-ch">—</span>
+            </div>
+            <div class="preview" id="p-telegram">—</div>
+            <div class="pbar-wrap"><div class="pbar-fill" id="pb-telegram" style="width:0%;background:var(--cyan)"></div></div>
+          </div>
+        </div>
+
+        <!-- ── "End" cap ── -->
+        <div style="position:absolute;left:8px;top:372px;width:192px;
+          display:flex;align-items:center;justify-content:center;
+          background:var(--surface2);border:1.5px dashed var(--border2);
+          border-radius:10px;padding:10px;font-size:10px;color:var(--muted);gap:6px">
+          <span>🏁</span> Dispatched to subscribers
+        </div>
+
+      </div><!-- /canvas -->
+    </div><!-- /canvas-wrap -->
+
+    <!-- ── Event log panel ──────────────────────────────────── -->
+    <div class="log-panel">
+      <div class="log-head">
+        <h3>Live Events</h3>
+        <span class="log-count" id="log-count">0 events</span>
+        <button class="log-clear" onclick="clearLog()">Clear</button>
+      </div>
+      <div id="event-log"></div>
+    </div>
+
+  </div><!-- /main -->
+
+  <!-- ── Stats footer ─────────────────────────────────────────── -->
+  <div class="stats-footer">
+    <div class="sf-item"><div class="dot" style="background:var(--blue)"></div>Sources crawled: <strong class="sf-val" id="ft-crawled">0</strong></div>
+    <div class="sf-item"><div class="dot" style="background:var(--green)"></div>Articles saved: <strong class="sf-val" id="ft-saved">0</strong></div>
+    <div class="sf-item"><div class="dot" style="background:var(--yellow)"></div>Dupes filtered: <strong class="sf-val" id="ft-dupes">0</strong></div>
+    <div class="sf-item"><div class="dot" style="background:var(--purple)"></div>AI processed: <strong class="sf-val" id="ft-ai">0</strong></div>
+    <div class="sf-item"><div class="dot" style="background:var(--orange)"></div>Webhooks: <strong class="sf-val" id="ft-wh">0</strong></div>
+    <div class="sf-item"><div class="dot" style="background:var(--cyan)"></div>Telegram: <strong class="sf-val" id="ft-tg">0</strong></div>
+    <div class="sf-item sf-right">Session: <strong class="sf-val" id="ft-uptime">0s</strong></div>
+  </div>
+
+</div><!-- /outer -->
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════
+const S = {
+  crawled:0, saved:0, dupes:0, aiProc:0, aiAge:0, aiDedup:0, aiErr:0,
+  whSent:0, whFail:0, tgSent:0, tgFail:0,
+  srcOk:0, srcErr:0, srcFound:0, srcDupes:0,
+  crawlErrors:0, crawlDurations:[],
+  ddChecked:0, ddPassed:0, ddFiltered:0,
+  aiLats:[], whLats:[], logCount:0,
+  aiPending:0,   // virtual AI queue
+};
+const sessionStart = Date.now();
+
+// Scheduler job state: { nextRun: Date|null, state: 'idle'|'running'|'error', lastDur: null|ms }
+const jobState = {
+  crawl_all:       { nextRun: null, state: 'idle', lastDur: null, runStart: null },
+  ai_rewrite:      { nextRun: null, state: 'idle', lastDur: null, runStart: null },
+  topic_synthesis: { nextRun: null, state: 'idle', lastDur: null, runStart: null },
+};
+
+// ═══════════════════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════════════════
+function $id(id) { return document.getElementById(id); }
+function setText(id, v) { const el = $id(id); if (el) el.textContent = v; }
+function setPreview(id, v) { const el = $id('p-' + id); if (el) el.textContent = v; }
+function avg(arr) { return arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : null; }
+
+function fmtMs(ms) {
+  if (!ms) return '—';
+  if (ms < 1000) return ms + 'ms';
+  return (ms/1000).toFixed(1) + 's';
+}
+
+function fmtCountdown(ms) {
+  if (ms <= 0) return 'now';
+  const s = Math.ceil(ms / 1000);
+  const m = Math.floor(s / 60), sec = s % 60;
+  return m ? `${m}m ${sec.toString().padStart(2,'0')}s` : `${sec}s`;
+}
+
+function fmtPct(n, d) {
+  if (!d) return '—%';
+  return Math.round(n/d*100) + '%';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SCHEDULER COUNTDOWN
+// ═══════════════════════════════════════════════════════════════
+const JOB_ICONS = { crawl_all:'📡', ai_rewrite:'🤖', topic_synthesis:'🔬' };
+const JOB_LABELS = { crawl_all:'Crawl Job', ai_rewrite:'AI Rewrite', topic_synthesis:'Synthesis' };
+
+function updateSchedUI(jobId) {
+  const js = jobState[jobId];
+  const card = $id('sj-' + jobId);
+  const badge = $id('sjb-' + jobId);
+  const countdown = $id('sjc-' + jobId);
+  const detail = $id('sjd-' + jobId);
+  if (!card) return;
+
+  // card border
+  card.className = 'sched-job' + (js.state === 'running' ? ' running' : js.state === 'error' ? ' error' : '');
+
+  // badge
+  badge.className = 'sj-badge ' + js.state;
+  badge.textContent = js.state.toUpperCase();
+
+  // detail line
+  if (js.state === 'running' && js.runStart) {
+    const elapsed = Math.round((Date.now() - js.runStart) / 1000);
+    detail.textContent = 'Running ' + elapsed + 's…';
+  } else if (js.lastDur !== null) {
+    detail.textContent = 'Last: ' + fmtMs(js.lastDur);
+  } else {
+    detail.textContent = '—';
+  }
+
+  // countdown
+  if (js.state === 'running') {
+    countdown.textContent = '⏳';
+    countdown.className = 'sj-countdown running';
+  } else if (js.nextRun) {
+    const remain = js.nextRun - Date.now();
+    const txt = fmtCountdown(remain);
+    countdown.textContent = txt;
+    countdown.className = 'sj-countdown' + (remain < 15000 ? ' imminent' : '');
+  } else {
+    countdown.textContent = '—';
+    countdown.className = 'sj-countdown';
+  }
+}
+
+// Tick all countdowns + update running elapsed every second
+setInterval(() => {
+  for (const jobId of Object.keys(jobState)) {
+    updateSchedUI(jobId);
+  }
+  // session uptime
+  const sec = Math.floor((Date.now() - sessionStart) / 1000);
+  const h = Math.floor(sec/3600), m = Math.floor(sec%3600/60), s = sec%60;
+  const uptime = h ? `${h}h ${m}m ${s}s` : m ? `${m}m ${s}s` : `${s}s`;
+  setText('ft-uptime', uptime);
+}, 1000);
+
+// Load initial scheduler status
+async function loadSchedStatus() {
+  try {
+    const r = await fetch('/api/scheduler/status');
+    const data = await r.json();
+    for (const job of (data.jobs || [])) {
+      if (jobState[job.id]) {
+        jobState[job.id].nextRun = job.next_run ? new Date(job.next_run) : null;
+        jobState[job.id].state = job.state || 'idle';
+        jobState[job.id].lastDur = job.last_duration_ms || null;
+        updateSchedUI(job.id);
+      }
+    }
+  } catch(_) {}
+}
+loadSchedStatus();
+setInterval(loadSchedStatus, 30000);
+
+// ═══════════════════════════════════════════════════════════════
+// PACKET ANIMATION
+// ═══════════════════════════════════════════════════════════════
+const PACKET_COLOR = {
+  'sources-crawl':'#3b82f6', 'crawl-dedup':'#10b981',
+  'dedup-redis':'#f59e0b', 'redis-ai':'#ef4444',
+  'ai-webhook':'#f97316', 'webhook-telegram':'#06b6d4',
+};
+const PACKET_DUR = {
+  'sources-crawl':'0.45s', 'crawl-dedup':'0.5s',
+  'dedup-redis':'0.5s', 'redis-ai':'0.6s',
+  'ai-webhook':'0.5s', 'webhook-telegram':'0.5s',
+};
+
+function firePacket(edge) {
+  const path = $id('path-' + edge);
+  if (!path) return;
+  const ns = 'http://www.w3.org/2000/svg';
+  const g = $id('packets');
+  const color = PACKET_COLOR[edge] || '#6366f1';
+  const dur = PACKET_DUR[edge] || '0.55s';
+
+  const c = document.createElementNS(ns, 'circle');
+  c.setAttribute('r', '5'); c.setAttribute('fill', color);
+  c.setAttribute('filter', 'url(#glow)'); c.setAttribute('opacity', '.9');
+
+  const mo = document.createElementNS(ns, 'animateMotion');
+  mo.setAttribute('dur', dur); mo.setAttribute('fill', 'remove');
+  const mp = document.createElementNS(ns, 'mpath');
+  mp.setAttributeNS('http://www.w3.org/1999/xlink', 'href', '#path-' + edge);
+  mo.appendChild(mp); c.appendChild(mo);
+  g.appendChild(c); mo.beginElement();
+  setTimeout(() => { try { g.removeChild(c); } catch(_){} }, parseFloat(dur)*1000 + 80);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EDGE BADGES
+// ═══════════════════════════════════════════════════════════════
+const edgeCounts = {};
+function bumpEdge(edge) {
+  edgeCounts[edge] = (edgeCounts[edge]||0) + 1;
+  const el = $id('eb-' + edge);
+  if (!el) return;
+  el.textContent = edgeCounts[edge];
+  el.classList.add('lit');
+  setTimeout(() => el.classList.remove('lit'), 1400);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// NODE FLASH
+// ═══════════════════════════════════════════════════════════════
+const nodeTimers = {};
+function flashNode(id, cls, durationMs = 2000) {
+  const el = $id('node-' + id);
+  const dot = $id('live-' + id);
+  if (!el) return;
+  clearTimeout(nodeTimers[id]);
+  el.classList.remove('active', 'success', 'error');
+  el.classList.add(cls);
+  if (dot) dot.classList.add('on');
+  nodeTimers[id] = setTimeout(() => {
+    el.classList.remove(cls);
+    if (dot) dot.classList.remove('on');
+  }, durationMs);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GLOBAL COUNTER SYNC
+// ═══════════════════════════════════════════════════════════════
+function syncCounters() {
+  // Footer
+  setText('ft-crawled', S.crawled); setText('ft-saved', S.saved);
+  setText('ft-dupes', S.dupes); setText('ft-ai', S.aiProc);
+  setText('ft-wh', S.whSent); setText('ft-tg', S.tgSent);
+  // Sched bar totals
+  setText('bar-crawled', S.crawled); setText('bar-saved', S.saved);
+  setText('bar-ai', S.aiProc); setText('bar-wh', S.whSent); setText('bar-tg', S.tgSent);
+  // Dedup node
+  setText('m-dd-checked', S.ddChecked);
+  setText('m-dd-passed', S.ddPassed);
+  setText('m-dd-filtered', S.ddFiltered);
+  setText('m-dd-rate', fmtPct(S.ddPassed, S.ddChecked));
+  const pb = $id('pb-dedup');
+  if (pb && S.ddChecked) pb.style.width = fmtPct(S.ddPassed, S.ddChecked);
+  // AI node
+  setText('m-ai-proc', S.aiProc); setText('m-ai-age', S.aiAge);
+  setText('m-ai-dedup', S.aiDedup); setText('m-ai-err', S.aiErr);
+  const aiAvg = avg(S.aiLats);
+  setText('m-ai-lat', aiAvg ? fmtMs(aiAvg) : '—');
+  // Webhook node
+  setText('m-wh-sent', S.whSent); setText('m-wh-fail', S.whFail);
+  setText('m-wh-rate', fmtPct(S.whSent, S.whSent + S.whFail));
+  const whAvg = avg(S.whLats);
+  setText('m-wh-avg', whAvg ? fmtMs(whAvg) : '—');
+  const pbw = $id('pb-webhook');
+  if (pbw && (S.whSent + S.whFail)) pbw.style.width = fmtPct(S.whSent, S.whSent + S.whFail);
+  // Telegram node
+  setText('m-tg-sent', S.tgSent); setText('m-tg-fail', S.tgFail);
+  setText('m-tg-rate', fmtPct(S.tgSent, S.tgSent + S.tgFail));
+  const pbt = $id('pb-telegram');
+  if (pbt && (S.tgSent + S.tgFail)) pbt.style.width = fmtPct(S.tgSent, S.tgSent + S.tgFail);
+  // Redis AI queue
+  setText('m-rd-queue', Math.max(0, S.aiPending));
+  // Sources
+  setText('m-src-ok', S.srcOk); setText('m-src-err', S.srcErr);
+  setText('m-src-found', S.srcFound); setText('m-src-dupes', S.srcDupes);
+  // Crawl
+  setText('m-crawl-found', S.srcFound); setText('m-crawl-saved', S.saved);
+  setText('m-crawl-errors', S.crawlErrors);
+  const cAvg = avg(S.crawlDurations);
+  setText('m-crawl-avgms', cAvg ? fmtMs(cAvg) : '—');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EVENT HANDLER
+// ═══════════════════════════════════════════════════════════════
+function handleEvent(type, data) {
+  switch (type) {
+
+    // ── Crawl events ──────────────────────────────────────────
+    case 'crawl.start':
+      flashNode('sources', 'active', 3000);
+      flashNode('crawl', 'active', 3000);
+      firePacket('sources-crawl'); bumpEdge('sources-crawl');
+      setText('m-src-active', data.source_name || data.source_id || '…');
+      setPreview('sources', '↗ ' + (data.source_name || data.url || ''));
+      break;
+
+    case 'crawl.success':
+      flashNode('sources', 'success');
+      flashNode('crawl', 'success');
+      S.crawled++; S.srcOk++;
+      S.srcFound += data.articles_found || 0;
+      S.srcDupes += data.duplicates || 0;
+      if (data.duration_ms) S.crawlDurations.push(data.duration_ms);
+      if (S.crawlDurations.length > 30) S.crawlDurations.shift();
+      setText('m-src-active', '—');
+      setPreview('sources', '✓ ' + data.source_name + ' — ' + data.articles_found + ' found');
+      setPreview('crawl', data.source_name + ': ' + data.articles_found + ' found, ' + data.duplicates + ' dupes');
+      break;
+
+    case 'crawl.error':
+      flashNode('sources', 'error');
+      flashNode('crawl', 'error');
+      S.srcErr++; S.crawlErrors++;
+      setText('m-src-active', '—');
+      setPreview('sources', '✗ ' + data.source_name + ': ' + (data.error||'').slice(0,40));
+      break;
+
+    // ── Article saved ─────────────────────────────────────────
+    case 'article.saved':
+      flashNode('dedup', 'active');
+      flashNode('redis', 'active');
+      firePacket('crawl-dedup'); bumpEdge('crawl-dedup');
+      S.ddChecked++; S.ddPassed++; S.saved++;
+      S.aiPending++;
+      setTimeout(() => { firePacket('dedup-redis'); bumpEdge('dedup-redis'); }, 200);
+      setText('m-rd-stored', S.saved);
+      setPreview('redis', (data.title||'').slice(0,50));
+      break;
+
+    // ── AI events ─────────────────────────────────────────────
+    case 'ai.start':
+      flashNode('ai', 'active', 4000);
+      firePacket('redis-ai'); bumpEdge('redis-ai');
+      S.aiPending = Math.max(0, S.aiPending - 1);
+      setPreview('ai', '⏳ ' + (data.title||'').slice(0,48));
+      break;
+
+    case 'ai.success':
+      flashNode('ai', 'success');
+      S.aiProc++;
+      S.aiLats.push(data.duration_ms);
+      if (S.aiLats.length > 20) S.aiLats.shift();
+      setPreview('ai', '✓ ' + (data.title||'').slice(0,45) + ' (' + fmtMs(data.duration_ms) + ')');
+      break;
+
+    case 'ai.error':
+      flashNode('ai', 'error');
+      S.aiErr++;
+      setPreview('ai', '✗ ' + (data.error||'').slice(0,45));
+      break;
+
+    // ── Synthesis events ──────────────────────────────────────
+    case 'synthesis.start':
+      flashNode('ai', 'active', 4000);
+      setPreview('ai', '🔬 Synthesis: ' + data.category + ' (' + data.article_count + ' arts)');
+      break;
+
+    case 'synthesis.success':
+      flashNode('ai', 'success');
+      setPreview('ai', '🔬 ' + data.category + ': ' + data.synthetics_generated + ' synthetic');
+      break;
+
+    // ── Webhook events ────────────────────────────────────────
+    case 'webhook.start':
+      flashNode('webhook', 'active');
+      firePacket('ai-webhook'); bumpEdge('ai-webhook');
+      setPreview('webhook', '↗ ' + data.webhook_name);
+      break;
+
+    case 'webhook.success':
+      flashNode('webhook', 'success');
+      S.whSent++;
+      S.whLats.push(data.duration_ms);
+      if (S.whLats.length > 20) S.whLats.shift();
+      setPreview('webhook', '✓ ' + data.webhook_name + ' [' + data.status_code + '] ' + fmtMs(data.duration_ms));
+      break;
+
+    case 'webhook.error':
+      flashNode('webhook', 'error');
+      S.whFail++;
+      setPreview('webhook', '✗ ' + data.webhook_name + ': ' + (data.error||'').slice(0,35));
+      break;
+
+    // ── Telegram events ───────────────────────────────────────
+    case 'telegram.start':
+      flashNode('telegram', 'active');
+      firePacket('webhook-telegram'); bumpEdge('webhook-telegram');
+      setText('m-tg-ch', data.channel_name || '…');
+      setPreview('telegram', '↗ ' + data.channel_name);
+      break;
+
+    case 'telegram.success':
+      flashNode('telegram', 'success');
+      S.tgSent++;
+      setText('m-tg-ch', data.channel_name || '—');
+      setPreview('telegram', '✓ ' + data.channel_name + ' (' + fmtMs(data.duration_ms) + ')');
+      break;
+
+    case 'telegram.error':
+      flashNode('telegram', 'error');
+      S.tgFail++;
+      setPreview('telegram', '✗ ' + (data.error||'').slice(0,40));
+      break;
+
+    // ── Scheduler events ──────────────────────────────────────
+    case 'scheduler.job_start': {
+      const js = jobState[data.job_id];
+      if (js) {
+        js.state = 'running';
+        js.runStart = Date.now();
+        updateSchedUI(data.job_id);
+      }
+      break;
+    }
+    case 'scheduler.job_done': {
+      const js = jobState[data.job_id];
+      if (js) {
+        js.state = data.status === 'error' ? 'error' : 'idle';
+        js.lastDur = data.duration_ms || null;
+        js.runStart = null;
+        // Reload next_run from API shortly after job finishes
+        setTimeout(loadSchedStatus, 800);
+        updateSchedUI(data.job_id);
+      }
+      break;
+    }
+  }
+
+  syncCounters();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EVENT LOG
+// ═══════════════════════════════════════════════════════════════
+const LOG_META = {
+  'crawl.start':         { ico:'📡', lbl:'Crawl start' },
+  'crawl.success':       { ico:'✅', lbl:'Crawl done' },
+  'crawl.error':         { ico:'❌', lbl:'Crawl error' },
+  'article.saved':       { ico:'💾', lbl:'Article saved' },
+  'ai.start':            { ico:'🤖', lbl:'AI start' },
+  'ai.success':          { ico:'✨', lbl:'AI done' },
+  'ai.error':            { ico:'❌', lbl:'AI error' },
+  'webhook.start':       { ico:'🔗', lbl:'Webhook send' },
+  'webhook.success':     { ico:'✅', lbl:'Webhook OK' },
+  'webhook.error':       { ico:'❌', lbl:'Webhook fail' },
+  'telegram.start':      { ico:'✈️', lbl:'Telegram send' },
+  'telegram.success':    { ico:'✅', lbl:'Telegram OK' },
+  'telegram.error':      { ico:'❌', lbl:'Telegram fail' },
+  'synthesis.start':     { ico:'🔬', lbl:'Synthesis start' },
+  'synthesis.success':   { ico:'🔬', lbl:'Synthesis done' },
+  'scheduler.job_start': { ico:'⚡', lbl:'Job started' },
+  'scheduler.job_done':  { ico:'🏁', lbl:'Job done' },
+};
+
+function fmtDesc(type, data) {
+  switch(type) {
+    case 'crawl.start':     return data.source_name || data.url;
+    case 'crawl.success':   return `${data.source_name}: ${data.articles_found} found, ${data.duplicates} dupes (${fmtMs(data.duration_ms)})`;
+    case 'crawl.error':     return `${data.source_name}: ${(data.error||'').slice(0,50)}`;
+    case 'article.saved':   return (data.title||data.article_id||'').slice(0,60);
+    case 'ai.start':        return (data.title||data.article_id||'').slice(0,58);
+    case 'ai.success':      return `${(data.title||'').slice(0,45)} (${fmtMs(data.duration_ms)})`;
+    case 'ai.error':        return (data.error||'').slice(0,55);
+    case 'webhook.start':   return `${data.webhook_name} ← ${(data.title||'').slice(0,38)}`;
+    case 'webhook.success': return `${data.webhook_name} [${data.status_code}] ${fmtMs(data.duration_ms)}`;
+    case 'webhook.error':   return `${data.webhook_name}: ${(data.error||'').slice(0,40)}`;
+    case 'telegram.start':  return `${data.channel_name} ← ${(data.title||'').slice(0,35)}`;
+    case 'telegram.success':return `${data.channel_name} (${fmtMs(data.duration_ms)})`;
+    case 'telegram.error':  return `${data.channel_name}: ${(data.error||'').slice(0,40)}`;
+    case 'synthesis.start': return `${data.category} — ${data.article_count} articles`;
+    case 'synthesis.success':return `${data.category}: ${data.synthetics_generated} generated`;
+    case 'scheduler.job_start': return `${data.job_name} job started`;
+    case 'scheduler.job_done':  return `${data.job_name}: ${data.status} (${fmtMs(data.duration_ms)})`;
+    default: return JSON.stringify(data).slice(0,60);
+  }
+}
+
+function addLogEntry(type, data, timestamp) {
+  const meta = LOG_META[type] || { ico:'⚡', lbl: type };
+  const log = $id('event-log');
+  const el = document.createElement('div');
+  const cls = 'lt-' + type.replace(/\./g, '-');
+  el.className = `lentry ${cls}`;
+  const ts = new Date(timestamp + (timestamp.endsWith('Z') ? '' : 'Z'));
+  const hms = ts.toLocaleTimeString('en', { hour12: false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  el.innerHTML = `
+    <div class="lico">${meta.ico}</div>
+    <div class="lbody">
+      <div class="ltype">${meta.lbl}</div>
+      <div class="ldesc">${fmtDesc(type, data)}</div>
+    </div>
+    <div class="ltime">${hms}</div>`;
+  log.prepend(el);
+  S.logCount++;
+  setText('log-count', S.logCount + ' events');
+  while (log.children.length > 200) log.removeChild(log.lastChild);
+}
+
+function clearLog() {
+  $id('event-log').innerHTML = '';
+  S.logCount = 0;
+  setText('log-count', '0 events');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// WEBSOCKET
+// ═══════════════════════════════════════════════════════════════
+let ws, reconnDelay = 1000;
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws/pipeline`);
+  const dot = $id('ws-dot'), st = $id('ws-status');
+  dot.className = 'ws-dot connecting'; st.textContent = 'Connecting…';
+
+  ws.onopen = () => {
+    dot.className = 'ws-dot connected'; st.textContent = 'Connected';
+    reconnDelay = 1000;
+    loadSchedStatus();
+  };
+
+  ws.onmessage = ev => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch(_) { return; }
+    handleEvent(msg.type, msg.data || {});
+    addLogEntry(msg.type, msg.data || {}, msg.timestamp || new Date().toISOString());
+  };
+
+  ws.onclose = () => {
+    dot.className = 'ws-dot'; st.textContent = `Reconnecting in ${(reconnDelay/1000).toFixed(0)}s…`;
+    setTimeout(connect, reconnDelay);
+    reconnDelay = Math.min(reconnDelay * 1.5, 15000);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+connect();
+</script>
+</body>
+</html>

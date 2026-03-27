@@ -13,7 +13,6 @@ import json
 import logging
 import hashlib
 from datetime import datetime, timezone
-from typing import Any
 
 import yaml
 from openai import AsyncOpenAI

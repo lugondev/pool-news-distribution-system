@@ -11,6 +11,8 @@ build/
 pip-log.txt
 pip-delete-this-directory.txt
 
+data
+
 # Node / JavaScript / TypeScript
 node_modules/
 npm-debug.log*

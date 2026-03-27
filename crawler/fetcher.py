@@ -2,6 +2,7 @@
 Async fetcher: crawl tất cả sources song song, dedup, lưu vào Redis.
 Per-domain rate limiting + random delays to avoid IP bans.
 """
+
 import asyncio
 import logging
 import random
@@ -16,10 +17,21 @@ import redis.asyncio as aioredis
 from crawler.content_extractor import enrich_article_content, needs_enrichment
 from crawler.dedup import check_duplicate
 from crawler.rss_parser import Article, _make_article_id, parse_rss_feed
-from storage.redis_store import get_article, save_article, set_source_next_crawl, update_article_content
+from storage.redis_store import (
+    get_article,
+    save_article,
+    set_source_next_crawl,
+    update_article_content,
+)
 from storage.sqlite_stats import log_crawl_result
 
 logger = logging.getLogger(__name__)
+
+# Import WebSocket manager - optional to avoid circular dependency
+try:
+    from realtime.manager import ws_manager
+except ImportError:
+    ws_manager = None
 
 _USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -31,7 +43,9 @@ _USER_AGENTS = [
 
 # WeakValueDictionary: lock entries are garbage-collected automatically when
 # no coroutine holds the lock — prevents unbounded memory growth over days.
-_domain_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+_domain_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
+    weakref.WeakValueDictionary()
+)
 
 
 def _get_domain_lock(domain: str) -> asyncio.Lock:
@@ -86,6 +100,7 @@ async def fetch_source(
     """
     started_at = datetime.now(timezone.utc)
     domain = _get_domain(source["url"])
+    source_name = source.get("name", source["id"])
     stats = {
         "source_id": source["id"],
         "domain": domain,
@@ -97,6 +112,11 @@ async def fetch_source(
         "error_msg": None,
     }
 
+    if ws_manager:
+        asyncio.create_task(
+            ws_manager.emit_crawl_start(source["id"], source_name, source["url"])
+        )
+
     async with _get_domain_lock(domain):
         await asyncio.sleep(random.uniform(*domain_delay))
 
@@ -106,19 +126,30 @@ async def fetch_source(
             stats["found"] = len(articles)
 
             for article in articles:
-                result = await check_duplicate(redis, article.title, threshold=dedup_threshold)
+                result = await check_duplicate(
+                    redis, article.title, threshold=dedup_threshold
+                )
                 if result.is_duplicate:
                     stats["duplicates"] += 1
                     # Enrich existing Redis article if its content is still thin
-                    if enrich_content and needs_enrichment(article.content, article.summary):
+                    if enrich_content and needs_enrichment(
+                        article.content, article.summary
+                    ):
                         article_id = _make_article_id(source["id"], article.url)
                         existing = await get_article(redis, article_id)
-                        if existing and needs_enrichment(existing.get("content", ""), existing.get("summary", "")):
+                        if existing and needs_enrichment(
+                            existing.get("content", ""), existing.get("summary", "")
+                        ):
                             enriched = await enrich_article_content(
-                                article.url, existing.get("content", ""), existing.get("summary", ""), client
+                                article.url,
+                                existing.get("content", ""),
+                                existing.get("summary", ""),
+                                client,
                             )
                             if enriched != existing.get("content", ""):
-                                await update_article_content(redis, article_id, enriched)
+                                await update_article_content(
+                                    redis, article_id, enriched
+                                )
                     continue
 
                 if enrich_content:
@@ -128,6 +159,16 @@ async def fetch_source(
 
                 await save_article(redis, article)
                 stats["saved"] += 1
+                if ws_manager:
+                    asyncio.create_task(
+                        ws_manager.emit_article_saved(
+                            article.id,
+                            article.title,
+                            source["id"],
+                            source.get("category", ""),
+                            False,
+                        )
+                    )
 
         except httpx.HTTPStatusError as e:
             status = e.response.status_code
@@ -137,7 +178,9 @@ async def fetch_source(
             if status == 429:
                 logger.warning(f"[{source['id']}] rate-limited (429) from {domain}")
             elif status == 403:
-                logger.warning(f"[{source['id']}] forbidden (403) from {domain}, possible IP block")
+                logger.warning(
+                    f"[{source['id']}] forbidden (403) from {domain}, possible IP block"
+                )
             else:
                 logger.warning(f"[{source['id']}] HTTP {status} from {domain}")
 
@@ -147,6 +190,23 @@ async def fetch_source(
             logger.warning(f"[{source['id']}] failed ({domain}): {e}")
 
     await log_crawl_result(source_id=source["id"], stats=stats, started_at=started_at)
+
+    duration_ms = int((datetime.now(timezone.utc) - started_at).total_seconds() * 1000)
+    if ws_manager:
+        if stats["errors"] == 0:
+            asyncio.create_task(
+                ws_manager.emit_crawl_success(
+                    source["id"], source_name,
+                    stats["found"], stats["duplicates"], duration_ms,
+                )
+            )
+        else:
+            asyncio.create_task(
+                ws_manager.emit_crawl_error(
+                    source["id"], source_name, stats.get("error_msg", "unknown error")
+                )
+            )
+
     return stats
 
 
@@ -187,7 +247,9 @@ async def fetch_all_sources(
         async def _fetch_with_sem(source: dict) -> dict:
             async with semaphore:
                 return await fetch_source(
-                    source, client, redis,
+                    source,
+                    client,
+                    redis,
                     dedup_threshold=dedup_threshold,
                     max_articles=max_articles_per_source,
                     domain_delay=domain_delay,

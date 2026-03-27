@@ -16,12 +16,11 @@ from datetime import datetime, timezone
 import redis.asyncio as aioredis
 
 from crawler.rss_parser import Article
-
-
-TTL_SECONDS = 43200  # 12h
-
-AI_PENDING_KEY = "news:ai:pending"
-CRAWL_SCHEDULE_KEY = "news:crawl:schedule"
+from storage.redis_keys import (
+    ARTICLE_TTL_SECONDS as TTL_SECONDS,
+    AI_PENDING_KEY,
+    CRAWL_SCHEDULE_KEY,
+)
 
 
 def _ts(dt: datetime) -> float:

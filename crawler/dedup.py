@@ -11,10 +11,7 @@ from dataclasses import dataclass
 
 import redis.asyncio as aioredis
 
-
-DEDUP_KEY = "news:dedup:simhashes"
-AI_DEDUP_KEY = "news:ai:dedup:simhashes"
-DEDUP_TTL_SECONDS = 86400  # 24h
+from storage.redis_keys import DEDUP_SIMHASHES_KEY as DEDUP_KEY, AI_DEDUP_SIMHASHES_KEY as AI_DEDUP_KEY, DEDUP_TTL_SECONDS
 
 
 def _normalize_title(title: str) -> str:
@@ -58,28 +55,6 @@ class DedupResult:
     simhash: int
     matched_hash: int | None = None
 
-
-# TODO: implement dedup check logic
-# Đây là nơi bạn implement business logic quan trọng nhất:
-# kiểm tra 1 article title có trùng với bất kỳ bài nào đã có trong Redis không.
-#
-# async def check_duplicate(redis: aioredis.Redis, title: str, threshold: int = 3) -> DedupResult:
-#     """
-#     Parameters:
-#         redis: Redis connection
-#         title: tiêu đề bài cần kiểm tra
-#         threshold: hamming distance tối đa để coi là trùng (mặc định 3)
-#
-#     Returns DedupResult với:
-#         - is_duplicate: True nếu tìm thấy bài trùng
-#         - simhash: hash của title hiện tại
-#         - matched_hash: hash của bài trùng (nếu có)
-#
-#     Hint: dùng _simhash() để tính hash, lấy tất cả stored hashes từ Redis
-#     bằng SMEMBERS, rồi so sánh hamming distance từng cái.
-#     Sau khi check xong, nếu KHÔNG trùng thì lưu hash vào Redis với SADD + EXPIRE.
-#     """
-#     pass
 
 
 async def check_ai_duplicate(

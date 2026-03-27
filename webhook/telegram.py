@@ -4,10 +4,16 @@ Supports 3 payload modes: full (default formatted), fields (selected), template 
 """
 import asyncio
 import logging
+import time
 
 import httpx
 
 from storage.sqlite_stats import log_telegram
+
+try:
+    from realtime.manager import ws_manager
+except ImportError:
+    ws_manager = None
 from webhook.filters import check_rate_limit, passes_filter
 from webhook.payload import build_payload
 
@@ -145,8 +151,16 @@ async def dispatch_to_telegram(article: dict, channels: list[dict], message_dela
         if sent > 0 and message_delay > 0:
             await asyncio.sleep(message_delay)
 
+        article_title = article.get("title", "")
+        channel_name = ch.get("name", channel_id)
+        if ws_manager:
+            asyncio.create_task(ws_manager.emit_telegram_start(
+                article["id"], article_title, channel_name
+            ))
+
         retry_delay = ch.get("retry_delay_seconds", 5)
         last_error = None
+        t0 = time.monotonic()
         for attempt in range(retry_attempts):
             if attempt > 0:
                 await asyncio.sleep(retry_delay)
@@ -155,6 +169,11 @@ async def dispatch_to_telegram(article: dict, channels: list[dict], message_dela
                 if ok:
                     await log_telegram(article["id"], channel_id, chat_id, status, True)
                     logger.info(f"Telegram OK → {channel_id} ({chat_id}) article {article['id']}")
+                    duration_ms = int((time.monotonic() - t0) * 1000)
+                    if ws_manager:
+                        asyncio.create_task(ws_manager.emit_telegram_success(
+                            article["id"], article_title, channel_name, duration_ms
+                        ))
                     sent += 1
                     break
                 last_error = error
@@ -166,4 +185,8 @@ async def dispatch_to_telegram(article: dict, channels: list[dict], message_dela
                 logger.warning(f"Telegram error → {channel_id}, attempt {attempt + 1}: {e}")
         else:
             await log_telegram(article["id"], channel_id, chat_id, 0, False, error_msg=last_error)
+            if ws_manager:
+                asyncio.create_task(ws_manager.emit_telegram_error(
+                    article["id"], article_title, channel_name, last_error or "max retries exceeded"
+                ))
             logger.error(f"Telegram permanently failed → {channel_id} ({chat_id}) article {article['id']}")
