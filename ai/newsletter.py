@@ -125,16 +125,26 @@ async def _call_newsletter_ai(
         max_per_cat=MAX_ARTICLES_PER_CATEGORY,
     )
 
-    resp = await client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=max_tokens,
-        temperature=temperature,
-        response_format={"type": "json_object"},
-    )
+    # Cloudflare Workers AI doesn't support response_format on all models
+    is_cloudflare = base_url and "cloudflare.com" in base_url
+    create_kwargs: dict = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+    if not is_cloudflare:
+        create_kwargs["response_format"] = {"type": "json_object"}
+
+    resp = await client.chat.completions.create(**create_kwargs)
 
     raw = resp.choices[0].message.content or "{}"
-    return json.loads(raw)
+    # Strip markdown fences if present (Cloudflare models may wrap JSON in ```json ... ```)
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    return json.loads(raw.strip())
 
 
 # ── HTML renderer ─────────────────────────────────────────────────────────────
@@ -212,7 +222,7 @@ async def _fetch_recent_done_articles(
     for category in categories:
         cat_key = f"news:cat:{category}"
         raw_ids = await redis.zrevrangebyscore(
-            cat_key, now_ts, cutoff, start=0, num=max_per_category * 4
+            cat_key, now_ts, cutoff
         )
         if not raw_ids:
             continue

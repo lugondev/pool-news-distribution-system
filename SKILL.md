@@ -4,7 +4,9 @@ description: >-
   Manage, monitor, and troubleshoot the News Aggregator via its JSON API.
   Use when the user asks to check system health, inspect articles, view
   crawl/AI/webhook logs, manage RSS sources, categories, webhooks, AI
-  settings, providers, AI configs, or diagnose pipeline issues.
+  settings, providers, AI configs, diagnose pipeline issues, search articles
+  semantically (RAG), or view intelligence features (trends, stories,
+  newsletter, debates).
 ---
 
 # News Aggregator Operations
@@ -29,13 +31,23 @@ If degraded, check Redis: `redis-cli ping`.
 
 ## Articles
 
-### List latest articles
+### List articles (preferred)
+
+```bash
+curl -s "$API/news?page=1&limit=20" | jq .
+```
+
+Query params: `page` (default 1), `limit` (default 20, max 100), `source`, `category`, `lang`, `ai_status`, `article_type` (`original` or `synthetic`).
+
+Response includes `articles`, `pagination` (page, limit, total, total_pages, has_prev, has_next), and `filters`.
+
+### List articles (legacy)
 
 ```bash
 curl -s "$API/articles?limit=10" | jq .
 ```
 
-Query params: `limit` (default 50), `offset`, `source`, `category`.
+Query params: `limit` (default 50), `offset`, `source`, `category`. Prefer `/api/news` for new integrations.
 
 ### Get single article
 
@@ -377,6 +389,14 @@ curl -s "$API/logs/system/summary" | jq .
 
 Returns per event_type: `total_runs`, `success_runs`, `error_runs`, `avg_duration_ms`, `max_duration_ms`, `last_run`.
 
+## Scheduler Status
+
+```bash
+curl -s $API/logs/scheduler/status | jq .
+```
+
+Returns `{"jobs": [...]}` — current state of all APScheduler jobs (next run time, status, etc.).
+
 ## API Request Logs
 
 ### Browse all API requests
@@ -635,15 +655,130 @@ curl -s -X POST $API/payload/preview \
   -d '{"payload_mode":"fields","payload_fields":["title","url","ai_summary_en"]}' | jq .
 ```
 
+## Intelligence
+
+Intelligence features provide trend analysis, story clustering, newsletter generation, and debate detection.
+
+### Trending topics & entities
+
+```bash
+curl -s "$API/intelligence/trends?limit=20" | jq .
+```
+
+Query params: `limit` (default 20, max 50).
+
+Returns `categories` (trending by volume), `trending_entities` (named entities with counts), `trending_count`.
+
+### Active stories (clustered narratives)
+
+```bash
+curl -s "$API/intelligence/stories?limit=20" | jq .
+```
+
+Query params: `category` (filter by category), `limit` (default 20, max 50).
+
+Returns `stories` list and `total`.
+
+### Story detail
+
+```bash
+curl -s "$API/intelligence/stories/{story_id}" | jq .
+```
+
+Returns `story` (with `entities`, `top_sources`) and `articles` list (id, title, source_name, published_at, url, ai_status). Returns 404 if not found.
+
+### Newsletter status
+
+```bash
+curl -s $API/intelligence/newsletter | jq .
+```
+
+Returns `{"available": true, "generated_at": "..."}` or `{"available": false}`.
+
+### View newsletter (HTML)
+
+```bash
+curl -s $API/intelligence/newsletter/view
+```
+
+Returns HTML content of the latest newsletter (or a placeholder if none available).
+
+### Generate newsletter
+
+```bash
+curl -s -X POST "$API/intelligence/newsletter/generate?language=English" | jq .
+```
+
+Query params: `language` (default "English"). Triggers AI-powered newsletter generation from recent articles.
+
+### Debates
+
+```bash
+curl -s "$API/intelligence/debates?limit=10" | jq .
+```
+
+Query params: `limit` (default 10, max 20).
+
+Returns `debates` list and `total` — recent AI-detected debates and contrasting viewpoints across sources.
+
+## RAG (Semantic Search & Q&A)
+
+RAG uses a Weaviate vector store to enable semantic article search and LLM-powered Q&A over indexed articles.
+
+### Check RAG availability
+
+```bash
+curl -s $API/rag/status | jq .
+```
+
+Returns `{"weaviate_available": bool, "collection": "...", "indexed_articles": 1234}`.
+
+### Semantic search
+
+```bash
+curl -s "$API/rag/search?q=federal+reserve+rates&limit=10" | jq .
+```
+
+Query params: `q` (required, min 2 chars), `limit` (default 10, max 50), `category` (optional filter).
+
+Hybrid semantic + keyword search. Returns `{"query": "...", "results": [...], "count": N}`.
+
+### Ask a question (full RAG pipeline)
+
+```bash
+curl -s -X POST $API/rag/ask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "What are the latest developments in US-China trade?",
+    "lang": "en",
+    "limit": 5,
+    "category": null,
+    "alpha": 0.75
+  }' | jq .
+```
+
+Body fields:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `question` | string | required | Question (3–500 chars) |
+| `lang` | string | `"en"` | Answer language: `en`, `vi`, `ja`, `ko` |
+| `limit` | int | 5 | Max source articles to retrieve (1–10) |
+| `category` | string\|null | null | Filter articles by category |
+| `alpha` | float | 0.75 | Search blend: 0.0 = BM25 keyword only, 1.0 = vector only |
+
+Returns `{"answer": "...", "sources": [...], "retrieved": N}`. Returns 503 if vector store unavailable.
+
 ## Troubleshooting Workflows
 
 ### Scheduler jobs not running or crashing
 
-1. `curl -s "$API/logs/system?event_type=crawl_job&limit=5" | jq .` — recent crawl job executions
-2. `curl -s "$API/logs/system?status=error" | jq '.logs[] | {event_type,error_msg,started_at}'` — all job errors
-3. `curl -s "$API/logs/system/summary" | jq .` — overall job health (success/error ratio, avg duration)
-4. High `avg_duration_ms` → crawl batch is slow, reduce `sources_per_tick`
-5. Repeated `status=skipped` with `reason=no sources due` → all sources are in backoff, check crawl logs
+1. `curl -s $API/logs/scheduler/status | jq .` — current job states
+2. `curl -s "$API/logs/system?event_type=crawl_job&limit=5" | jq .` — recent crawl job executions
+3. `curl -s "$API/logs/system?status=error" | jq '.logs[] | {event_type,error_msg,started_at}'` — all job errors
+4. `curl -s "$API/logs/system/summary" | jq .` — overall job health (success/error ratio, avg duration)
+5. High `avg_duration_ms` → crawl batch is slow, reduce `sources_per_tick`
+6. Repeated `status=skipped` with `reason=no sources due` → all sources are in backoff, check crawl logs
 
 ### API latency or errors
 
@@ -712,12 +847,19 @@ If pool is very large and you want to reset (re-crawl everything):
 redis-cli DEL news:dedup:simhashes
 ```
 
+### RAG / semantic search not working
+
+1. `curl -s $API/rag/status | jq .` — check if Weaviate is available
+2. If `weaviate_available: false` → Weaviate is not running or not reachable
+3. If `indexed_articles: 0` → vector store is empty, articles need to be indexed
+
 ## API Reference
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/health` | System health + Redis status |
-| GET | `/api/articles?limit=&offset=&source=&category=` | List articles |
+| GET | `/api/news?page=&limit=&source=&category=&lang=&ai_status=&article_type=` | List articles (preferred, paginated) |
+| GET | `/api/articles?limit=&offset=&source=&category=` | List articles (legacy) |
 | GET | `/api/articles/{id}` | Single article detail |
 | GET | `/api/articles/pending/list?limit=` | Pending AI articles |
 | GET | `/api/stats` | Full stats (Redis + SQLite) |
@@ -762,6 +904,7 @@ redis-cli DEL news:dedup:simhashes
 | GET | `/api/logs/crawl/timeline?hours=` | Hourly crawl performance |
 | GET | `/api/logs/system?event_type=&status=&since=` | Scheduler & system event logs |
 | GET | `/api/logs/system/summary` | Per event_type aggregated stats |
+| GET | `/api/logs/scheduler/status` | Current APScheduler job states |
 | GET | `/api/logs/api?method=&path=&status_code=&errors_only=&since=` | API request logs |
 | GET | `/api/logs/api/summary` | Per-endpoint stats (latency, error rate) |
 | GET | `/api/telegram` | List Telegram channels |
@@ -774,3 +917,13 @@ redis-cli DEL news:dedup:simhashes
 | GET | `/api/payload/fields` | List available payload fields |
 | POST | `/api/payload/preview` | Preview payload output for any mode |
 | GET | `/api/filter-options` | List categories + sources for autocomplete |
+| GET | `/api/intelligence/trends?limit=` | Trending topics and named entities |
+| GET | `/api/intelligence/stories?category=&limit=` | Clustered story narratives |
+| GET | `/api/intelligence/stories/{id}` | Story detail with article list |
+| GET | `/api/intelligence/newsletter` | Newsletter availability + metadata |
+| GET | `/api/intelligence/newsletter/view` | Newsletter HTML content |
+| POST | `/api/intelligence/newsletter/generate?language=` | Trigger newsletter generation |
+| GET | `/api/intelligence/debates?limit=` | Recent AI-detected debates |
+| GET | `/api/rag/status` | Weaviate vector store status |
+| GET | `/api/rag/search?q=&limit=&category=` | Semantic + keyword hybrid search |
+| POST | `/api/rag/ask` | Full RAG: Q&A with LLM-generated answer |

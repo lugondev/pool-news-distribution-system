@@ -126,6 +126,11 @@ async def newsletter_view(request: Request):
     return templates.TemplateResponse("newsletter.html", {"request": request})
 
 
+@app.get("/debates", response_class=HTMLResponse)
+async def debates_view(request: Request):
+    return templates.TemplateResponse("debates.html", {"request": request})
+
+
 @app.websocket("/ws/pipeline")
 async def pipeline_ws(websocket: WebSocket):
     await ws_manager.connect(websocket)
