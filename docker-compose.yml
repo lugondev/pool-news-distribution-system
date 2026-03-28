@@ -10,6 +10,27 @@ services:
       timeout: 3s
       retries: 5
 
+  weaviate:
+    image: semitechnologies/weaviate:1.24.6
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+    environment:
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: /var/lib/weaviate
+      DEFAULT_VECTORIZER_MODULE: none
+      CLUSTER_HOSTNAME: node1
+    volumes:
+      - weaviate_data:/var/lib/weaviate
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/v1/.well-known/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
   app:
     build: .
     restart: unless-stopped
@@ -18,16 +39,22 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      weaviate:
+        condition: service_healthy
     environment:
       REDIS_URL: redis://redis:6379/0
       SQLITE_PATH: /app/data/stats.db
+      WEAVIATE_HOST: weaviate
+      WEAVIATE_PORT: "8080"
+      WEAVIATE_GRPC_PORT: "50051"
     volumes:
       # Persist SQLite DB
       - ./data:/app/data
-      # Mount config (read-write) so the app can update settings from UI
+      # Mount config (read-write) so Settings UI can update settings.yaml
       - ./config:/app/config
       # Optional: mount .env if you use one
       # - ./.env:/app/.env:ro
 
 volumes:
   redis_data:
+  weaviate_data:

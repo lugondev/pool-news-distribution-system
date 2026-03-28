@@ -22,6 +22,9 @@ from storage.redis_keys import (
     ARTICLE_TTL_SECONDS as TTL_SECONDS,
     AI_PENDING_KEY,
     CRAWL_SCHEDULE_KEY,
+    ENRICH_PENDING_KEY,
+    EMBED_PREFIX,
+    DEDUP_TTL_SECONDS,
 )
 from ai.scorer import score_article
 
@@ -60,6 +63,10 @@ def _article_to_hash(article: Article, priority_score: float | None = None) -> d
         "ai_summary_en": article.ai_summary_en,
         "ai_status": article.ai_status,
         "type": article.type,
+        "entities": json.dumps(article.entities),
+        "sentiment": article.sentiment,
+        "topic_id": article.topic_id,
+        "ai_enrich_status": article.ai_enrich_status,
     }
     if priority_score is not None:
         data["priority_score"] = str(round(priority_score, 2))
@@ -186,6 +193,9 @@ async def update_article_ai(
     for lang, text in summaries.items():
         mapping[f"ai_summary_{lang}"] = text
     await redis.hset(f"news:{article_id}", mapping=mapping)
+    # Auto-enqueue for Phase 2 enrichment (entity extraction, embedding, clustering)
+    await redis.sadd(ENRICH_PENDING_KEY, article_id)
+    await redis.expire(ENRICH_PENDING_KEY, DEDUP_TTL_SECONDS)
 
 
 async def update_article_ai_config(
@@ -352,3 +362,58 @@ async def get_feed_stats(redis: aioredis.Redis) -> dict:
         "synthetic_total": synthetic_total,
         "synthetic_today": synthetic_today,
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — Enrichment storage helpers
+# ---------------------------------------------------------------------------
+
+async def pop_pending_enrichments(
+    redis: aioredis.Redis, count: int = 20
+) -> list[str]:
+    """Atomically pop up to `count` article_ids from the enrichment queue."""
+    pipe = redis.pipeline()
+    for _ in range(count):
+        pipe.spop(ENRICH_PENDING_KEY)
+    results = await pipe.execute()
+    article_ids = []
+    for r in results:
+        if r is not None:
+            article_ids.append(r.decode() if isinstance(r, bytes) else r)
+    return article_ids
+
+
+async def save_article_enrichment(
+    redis: aioredis.Redis,
+    article_id: str,
+    entities: list[str],
+    sentiment: str,
+    topic_id: str,
+) -> None:
+    """Persist enrichment results (entities, sentiment, topic_id) back onto the article hash."""
+    await redis.hset(f"news:{article_id}", mapping={
+        "entities": json.dumps(entities),
+        "sentiment": sentiment,
+        "topic_id": topic_id,
+        "ai_enrich_status": "done",
+    })
+
+
+async def save_embedding(
+    redis: aioredis.Redis,
+    article_id: str,
+    embedding: list[float],
+) -> None:
+    """Store the embedding vector separately (not in article hash — too large)."""
+    key = f"{EMBED_PREFIX}{article_id}"
+    await redis.set(key, json.dumps(embedding), ex=TTL_SECONDS)
+
+
+async def get_embedding(
+    redis: aioredis.Redis,
+    article_id: str,
+) -> list[float] | None:
+    raw = await redis.get(f"{EMBED_PREFIX}{article_id}")
+    if not raw:
+        return None
+    return json.loads(raw)

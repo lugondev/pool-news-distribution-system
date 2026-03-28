@@ -116,6 +116,16 @@ async def pipeline_view(request: Request):
     return templates.TemplateResponse("pipeline.html", {"request": request})
 
 
+@app.get("/intelligence", response_class=HTMLResponse)
+async def intelligence_view(request: Request):
+    return templates.TemplateResponse("intelligence.html", {"request": request})
+
+
+@app.get("/newsletter", response_class=HTMLResponse)
+async def newsletter_view(request: Request):
+    return templates.TemplateResponse("newsletter.html", {"request": request})
+
+
 @app.websocket("/ws/pipeline")
 async def pipeline_ws(websocket: WebSocket):
     await ws_manager.connect(websocket)

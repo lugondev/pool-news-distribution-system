@@ -57,6 +57,41 @@ if [ ! -f ".env" ] && [ -f ".env.example" ]; then
     cp .env.example .env
 fi
 
+# ── Check Weaviate (optional — soft warn only) ─────────────────────────────────
+WEAVIATE_HOST="${WEAVIATE_HOST:-localhost}"
+WEAVIATE_PORT="${WEAVIATE_PORT:-8080}"
+
+# Only check if weaviate is enabled in settings (requires yaml installed above)
+_WEAVIATE_ENABLED=$(python - <<'EOF' 2>/dev/null
+import yaml, sys
+try:
+    with open("config/settings.yaml") as f:
+        cfg = yaml.safe_load(f)
+    print("yes" if cfg.get("weaviate", {}).get("enabled", True) else "no")
+except Exception:
+    print("yes")
+EOF
+)
+
+if [ "${_WEAVIATE_ENABLED:-yes}" = "yes" ]; then
+    info "Checking Weaviate at $WEAVIATE_HOST:$WEAVIATE_PORT..."
+    if python -c "
+import urllib.request, sys
+try:
+    urllib.request.urlopen('http://$WEAVIATE_HOST:$WEAVIATE_PORT/v1/.well-known/ready', timeout=3)
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null; then
+        info "Weaviate OK"
+    else
+        warn "Weaviate not reachable at $WEAVIATE_HOST:$WEAVIATE_PORT"
+        warn "Vector/RAG features will be disabled. Start Weaviate:"
+        warn "  docker run -d -p 8080:8080 -p 50051:50051 semitechnologies/weaviate:1.24.6"
+        warn "  (or: docker compose up -d weaviate)"
+    fi
+fi
+
 # ── Start ─────────────────────────────────────────────────────────────────────
 if [ "$DEV_MODE" = "1" ]; then
     warn "DEV MODE — crawler/AI scheduler disabled. Dashboard only (port 8001)."

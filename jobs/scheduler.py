@@ -21,7 +21,23 @@ except ImportError:
 from crawler.fetcher import fetch_all_sources
 from ai.rewriter import process_pending_articles
 from ai.topic_synthesis import process_category_synthesis
-from storage.redis_store import get_due_source_ids, pop_pending_ai_articles
+from ai.enricher import batch_enrich
+from ai.embedder import get_embedding, embed_text_for_article
+from ai.clusterer import assign_topic
+from ai.story_detector import assign_story
+from ai.trend_detector import run_trend_detection
+from ai.newsletter import generate_newsletter, send_newsletter_smtp
+from ai.debate import debate_job as _run_debate_job
+from vector_db.weaviate_store import index_article
+from storage.lake_store import get_lake
+from storage.redis_store import (
+    get_due_source_ids,
+    pop_pending_ai_articles,
+    pop_pending_enrichments,
+    save_article_enrichment,
+    save_embedding,
+    get_article,
+)
 from storage.sqlite_stats import log_system_event
 
 logger = logging.getLogger(__name__)
@@ -240,14 +256,16 @@ async def ai_job(redis: aioredis.Redis) -> None:
         return
     all_endpoints = wh.get("endpoints", [])
     all_tg = tg.get("channels", [])
+    all_tw = current_cfg.get("twitter", {}).get("accounts", [])
 
     # Route hooks by ai_mode — default "rewrite" for backward compatibility
     rewrite_wh  = [e for e in all_endpoints if _active(e) and e.get("ai_mode", "rewrite") == "rewrite"]
     raw_wh      = [e for e in all_endpoints if _active(e) and e.get("ai_mode") == "off"]
     rewrite_tg  = [c for c in all_tg        if _active(c) and c.get("ai_mode", "rewrite") == "rewrite"]
     raw_tg      = [c for c in all_tg        if _active(c) and c.get("ai_mode") == "off"]
+    rewrite_tw  = [a for a in all_tw        if _active(a) and a.get("ai_mode", "rewrite") == "rewrite"]
 
-    if not (rewrite_wh or raw_wh or rewrite_tg or raw_tg):
+    if not (rewrite_wh or raw_wh or rewrite_tg or raw_tg or rewrite_tw):
         await log_system_event(
             "ai_job", started, status="skipped",
             metadata={"reason": "no rewrite/raw hooks configured"},
@@ -295,6 +313,7 @@ async def ai_job(redis: aioredis.Redis) -> None:
                 base_url=base_url or None,
                 webhook_endpoints=group["wh"],
                 telegram_channels=group["tg"],
+                twitter_accounts=rewrite_tw if is_first else [],
                 raw_webhook_endpoints=raw_wh if is_first else [],
                 raw_telegram_channels=raw_tg if is_first else [],
                 spread_seconds=spread,
@@ -472,6 +491,243 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase 2 — Enrichment job (entity extraction + embedding + clustering)
+# ---------------------------------------------------------------------------
+
+async def enrich_job(redis: aioredis.Redis) -> None:
+    """
+    Process the enrichment queue populated by update_article_ai.
+    For each article: extract entities + sentiment, generate embedding,
+    assign to a topic cluster, and persist the new fields.
+    """
+    started = datetime.now(timezone.utc)
+    _job_states["enrich"] = "running"
+
+    cfg = _load_config()
+    processing_cfg = cfg.get("processing", {})
+    if not processing_cfg.get("enabled", True):
+        _job_states["enrich"] = "idle"
+        return
+
+    ai_cfg = cfg.get("ai", {})
+    api_key, base_url, _ = _resolve_provider(ai_cfg)
+    batch_size = processing_cfg.get("enrich_batch_size", 10)
+    cluster_threshold = float(processing_cfg.get("cluster_threshold", 0.75))
+
+    article_ids = await pop_pending_enrichments(redis, count=batch_size)
+    if not article_ids:
+        _job_states["enrich"] = "idle"
+        return
+
+    # Fetch full article data from Redis
+    articles = []
+    for aid in article_ids:
+        art = await get_article(redis, aid)
+        if art:
+            articles.append(art)
+
+    if not articles:
+        _job_states["enrich"] = "idle"
+        return
+
+    logger.info(f"=== Enrich job: processing {len(articles)} articles ===")
+
+    # Step 1 — Entity extraction + sentiment (batch, up to 5 parallel)
+    enrich_results = await batch_enrich(articles, api_key=api_key, base_url=base_url)
+
+    done = 0
+    for art, enrichment in zip(articles, enrich_results):
+        article_id = art["id"]
+        category = art.get("category", "general")
+        entities = enrichment.get("entities", [])
+        sentiment = enrichment.get("sentiment", "neutral")
+        topic_id = ""
+
+        # Step 2 — Embedding
+        embed_text = embed_text_for_article(art)
+        embedding = await get_embedding(
+            embed_text, api_key=api_key, base_url=base_url,
+            model=processing_cfg.get("embedding_model"),
+        )
+
+        # Step 3 — Topic clustering (only if embedding succeeded)
+        if embedding:
+            await save_embedding(redis, article_id, embedding)
+            try:
+                topic_id = await assign_topic(
+                    redis, article_id, embedding, category,
+                    threshold=cluster_threshold,
+                )
+            except NotImplementedError:
+                logger.debug("[enrich_job] clusterer._find_matching_topic not yet implemented")
+            except Exception as exc:
+                logger.warning(f"[enrich_job] clustering failed for {article_id}: {exc}")
+
+        # Step 4 — Persist enrichment fields on article hash
+        art["entities"] = entities
+        art["sentiment"] = sentiment
+        art["topic_id"] = topic_id
+        await save_article_enrichment(redis, article_id, entities, sentiment, topic_id)
+
+        # Step 5 — Index to Weaviate (vector store for RAG)
+        if embedding:
+            indexed = await index_article(art, embedding)
+            if not indexed:
+                logger.debug(f"[enrich_job] Weaviate indexing skipped for {article_id}")
+
+        # Step 6 — Assign to story cluster
+        try:
+            story_id = await assign_story(redis, art)
+            if story_id:
+                await redis.hset(f"news:{article_id}", "story_id", story_id)
+        except Exception as exc:
+            logger.debug(f"[enrich_job] story assignment skipped for {article_id}: {exc}")
+
+        # Step 7 — Archive to News Lake (R2 cold storage)
+        lake = get_lake()
+        if lake:
+            await lake.archive_article(art)
+
+        done += 1
+
+    dur_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+    _job_states["enrich"] = "idle"
+    _job_last_duration_ms["enrich"] = dur_ms
+    logger.info(f"Enrich job: {done}/{len(articles)} articles enriched in {dur_ms}ms")
+    await log_system_event(
+        "enrich_job", started, status="ok",
+        metadata={"processed": done, "duration_ms": dur_ms},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 jobs — Trend Detection, Story (wired via enrich_job), Newsletter
+# ---------------------------------------------------------------------------
+
+async def trend_job(redis: aioredis.Redis) -> None:
+    """Compute velocity-based trend scores across all active categories."""
+    started = datetime.now(timezone.utc)
+    _job_states["trend"] = "running"
+    cfg = _load_config()
+    active_cats = [
+        c["id"] for c in cfg.get("categories", []) if c.get("enabled", True)
+    ]
+    if not active_cats:
+        _job_states["trend"] = "idle"
+        return
+    try:
+        result = await run_trend_detection(redis, active_cats)
+        dur_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+        _job_states["trend"] = "idle"
+        _job_last_duration_ms["trend"] = dur_ms
+        await log_system_event(
+            "trend_job", started, status="ok",
+            metadata={
+                "trending_categories": result["trending_categories"],
+                "duration_ms": dur_ms,
+            },
+        )
+    except Exception as exc:
+        _job_states["trend"] = "error"
+        await log_system_event("trend_job", started, status="error", error_msg=str(exc))
+        raise
+
+
+async def debate_scheduler_job(redis: aioredis.Redis) -> None:
+    """Run multi-agent debate on stories with enough articles."""
+    started = datetime.now(timezone.utc)
+    _job_states["debate"] = "running"
+    cfg = _load_config()
+    debate_cfg = cfg.get("debate", {})
+    if not debate_cfg.get("enabled", False):
+        _job_states["debate"] = "idle"
+        return
+
+    ai_cfg = cfg.get("ai", {})
+    api_key, base_url, model_override = _resolve_provider(ai_cfg)
+    wh = cfg.get("webhook", {})
+    tg = cfg.get("telegram", {})
+    tw = cfg.get("twitter", {})
+
+    debate_wh = [e for e in wh.get("endpoints", []) if _active(e) and e.get("ai_mode") == "debate"]
+    debate_tg = [c for c in tg.get("channels", []) if _active(c) and c.get("ai_mode") == "debate"]
+    debate_tw = [a for a in tw.get("accounts", []) if _active(a) and a.get("ai_mode") == "debate"]
+
+    try:
+        count = await _run_debate_job(
+            redis=redis,
+            webhook_endpoints=debate_wh,
+            telegram_channels=debate_tg,
+            twitter_accounts=debate_tw,
+            api_key=api_key or None,
+            base_url=base_url or None,
+            model=model_override or debate_cfg.get("model", "gpt-4o-mini"),
+        )
+        dur_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+        _job_states["debate"] = "idle"
+        _job_last_duration_ms["debate"] = dur_ms
+        await log_system_event(
+            "debate_job", started, status="ok",
+            metadata={"debated": count, "duration_ms": dur_ms},
+        )
+    except Exception as exc:
+        _job_states["debate"] = "error"
+        await log_system_event("debate_job", started, status="error", error_msg=str(exc))
+        raise
+
+
+async def newsletter_job(redis: aioredis.Redis) -> None:
+    """Generate and store the daily newsletter digest."""
+    started = datetime.now(timezone.utc)
+    _job_states["newsletter"] = "running"
+    cfg = _load_config()
+    nl_cfg = cfg.get("newsletter", {})
+    if not nl_cfg.get("enabled", False):
+        _job_states["newsletter"] = "idle"
+        return
+
+    ai_cfg = cfg.get("ai", {})
+    api_key, base_url, model_override = _resolve_provider(ai_cfg)
+    active_cats = [
+        c["id"] for c in cfg.get("categories", []) if c.get("enabled", True)
+    ]
+
+    try:
+        result = await generate_newsletter(
+            redis=redis,
+            categories=active_cats,
+            language=nl_cfg.get("language", "English"),
+            api_key=api_key or None,
+            base_url=base_url or None,
+            model=model_override or nl_cfg.get("model", "gpt-4o-mini"),
+            max_tokens=nl_cfg.get("max_tokens", 1500),
+            temperature=nl_cfg.get("temperature", 0.4),
+            lookback_seconds=nl_cfg.get("lookback_hours", 24) * 3600,
+        )
+        # SMTP delivery (optional — only if smtp config present)
+        smtp_cfg = nl_cfg.get("smtp", {})
+        if smtp_cfg.get("host") and not result.get("skipped"):
+            await send_newsletter_smtp(
+                subject=result.get("subject", "News Briefing"),
+                html=result.get("html", ""),
+                smtp_cfg=smtp_cfg,
+            )
+
+        dur_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+        _job_states["newsletter"] = "idle"
+        _job_last_duration_ms["newsletter"] = dur_ms
+        await log_system_event(
+            "newsletter_job", started, status="ok" if not result.get("skipped") else "skipped",
+            metadata={"subject": result.get("subject", ""), "duration_ms": dur_ms,
+                      "smtp": bool(smtp_cfg.get("host"))},
+        )
+    except Exception as exc:
+        _job_states["newsletter"] = "error"
+        await log_system_event("newsletter_job", started, status="error", error_msg=str(exc))
+        raise
+
+
+# ---------------------------------------------------------------------------
 # Scheduler factory — thin: reads intervals, registers jobs, returns scheduler
 # ---------------------------------------------------------------------------
 
@@ -518,6 +774,59 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
         max_instances=1,
         coalesce=True,
     )
+
+    processing_cfg = cfg.get("processing", {})
+    if processing_cfg.get("enabled", True):
+        enrich_interval = processing_cfg.get("enrich_interval_minutes", 5)
+        scheduler.add_job(
+            enrich_job,
+            "interval",
+            minutes=enrich_interval,
+            id="enrich",
+            args=[redis],
+            max_instances=1,
+            coalesce=True,
+        )
+
+    # Phase 3 — Multi-Agent Debate (opt-in, expensive — 4 AI calls per story)
+    debate_cfg = cfg.get("debate", {})
+    if debate_cfg.get("enabled", False):
+        debate_interval = debate_cfg.get("interval_minutes", 30)
+        scheduler.add_job(
+            debate_scheduler_job,
+            "interval",
+            minutes=debate_interval,
+            id="debate",
+            args=[redis],
+            max_instances=1,
+            coalesce=True,
+        )
+
+    # Phase 3 — Trend detection (runs frequently, lightweight Redis ops only)
+    trend_interval = cfg.get("intelligence", {}).get("trend_interval_minutes", 5)
+    scheduler.add_job(
+        trend_job,
+        "interval",
+        minutes=trend_interval,
+        id="trend",
+        args=[redis],
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # Phase 3 — Newsletter (opt-in, daily by default)
+    nl_cfg = cfg.get("newsletter", {})
+    if nl_cfg.get("enabled", False):
+        nl_interval = nl_cfg.get("interval_minutes", 360)  # default every 6h
+        scheduler.add_job(
+            newsletter_job,
+            "interval",
+            minutes=nl_interval,
+            id="newsletter",
+            args=[redis],
+            max_instances=1,
+            coalesce=True,
+        )
 
     _scheduler = scheduler
     return scheduler

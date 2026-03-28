@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 from dashboard.app import app as dashboard_app, get_redis
 from jobs.scheduler import get_scheduler
 from storage.sqlite_stats import init_db
+from vector_db.weaviate_store import init_weaviate, close_weaviate
+from storage.lake_store import init_lake
 from webhook.dispatcher import dispatch_worker
 
 
@@ -35,6 +37,14 @@ async def lifespan(app: FastAPI):
     logger.info("Starting News Aggregator%s...", " [DEV MODE]" if DEV_MODE else "")
     await init_db()
     logger.info("SQLite initialized")
+
+    await init_weaviate()
+
+    with open("config/settings.yaml") as f:
+        _startup_cfg = yaml.safe_load(f)
+    lake_cfg = _startup_cfg.get("lake", {})
+    if lake_cfg.get("enabled", False):
+        init_lake(lake_cfg)
 
     redis = get_redis()
 
@@ -70,6 +80,7 @@ async def lifespan(app: FastAPI):
             pass
     if scheduler:
         scheduler.shutdown(wait=False)
+    await close_weaviate()
     await redis.aclose()
     logger.info("Shutdown complete")
 

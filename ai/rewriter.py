@@ -58,6 +58,10 @@ def get_openai_client(
     if _client is not None and _client_fingerprint == fingerprint:
         return _client
 
+    # Cloudflare Workers AI uses "Bearer <token>" — the SDK sends "Bearer <api_key>"
+    # by default, so api_key should be set to just the token (no "Bearer " prefix).
+    # Cloudflare also does not support response_format={"type":"json_object"} on all
+    # models — callers should handle JSON parse errors gracefully.
     _client = AsyncOpenAI(
         api_key=api_key,
         base_url=base_url,
@@ -227,18 +231,33 @@ async def rewrite_article(
             content=article_content[:1500],
         )
 
-    response = await client.chat.completions.create(
-        model=resolved_model,
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=max_tokens,
-        response_format={"type": "json_object"},
-        temperature=temperature,
-    )
+    # Cloudflare Workers AI models don't support response_format on all models —
+    # fall back to plain completion and extract JSON from the response text.
+    is_cloudflare = base_url and "cloudflare.com" in (base_url or "")
+    create_kwargs: dict = {
+        "model": resolved_model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+    if not is_cloudflare:
+        create_kwargs["response_format"] = {"type": "json_object"}
+
+    response = await client.chat.completions.create(**create_kwargs)
 
     resp_content = response.choices[0].message.content if response.choices else None
     if not resp_content:
         raise ValueError(f"Model returned empty content (model={resolved_model})")
-    result = json.loads(resp_content)
+
+    # Extract JSON block — handles models that wrap JSON in markdown code fences
+    raw = resp_content.strip()
+    if raw.startswith("```"):
+        # Strip ```json ... ``` fences
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+        raw = raw.strip()
+    result = json.loads(raw)
     tokens = response.usage.total_tokens if response.usage else 0
 
     summaries: dict[str, str] = {}
@@ -513,6 +532,7 @@ async def process_pending_articles(
     telegram_channels: list[dict] | None = None,
     raw_webhook_endpoints: list[dict] | None = None,
     raw_telegram_channels: list[dict] | None = None,
+    twitter_accounts: list[dict] | None = None,
     spread_seconds: float = 0,
     ai_dedup_threshold: int = 6,
     pre_fetched_articles: list[dict] | None = None,
@@ -583,8 +603,13 @@ async def process_pending_articles(
         )
         ai_call_count += 1
 
-        if enriched and (webhook_endpoints or telegram_channels):
-            await enqueue_dispatch(enriched, webhook_endpoints or [], telegram_channels=telegram_channels)
+        if enriched and (webhook_endpoints or telegram_channels or twitter_accounts):
+            await enqueue_dispatch(
+                enriched,
+                webhook_endpoints or [],
+                telegram_channels=telegram_channels,
+                twitter_accounts=twitter_accounts,
+            )
 
         processed += 1
         if enriched:

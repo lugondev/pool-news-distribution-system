@@ -37,6 +37,11 @@ class Article:
     type: str = (
         "original"  # article type: "original" (RSS) or "synthetic" (AI-generated)
     )
+    # Phase 2 enrichment (filled after AI summarize)
+    entities: list[str] = field(default_factory=list)
+    sentiment: str = ""          # positive | negative | neutral
+    topic_id: str = ""
+    ai_enrich_status: str = "pending"  # pending | done | error | skip
 
 
 def _make_article_id(source_id: str, url: str) -> str:

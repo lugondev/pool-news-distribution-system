@@ -1,0 +1,51 @@
+name = "news-aggregator"
+main = "src/index.ts"
+compatibility_date = "2025-03-27"
+compatibility_flags = ["nodejs_compat"]
+
+# ── Cron Triggers ────────────────────────────────────────────────────────────
+# Crawler runs every 3 minutes (same as Python app default)
+[triggers]
+crons = ["*/3 * * * *"]
+
+# ── Queues ───────────────────────────────────────────────────────────────────
+[[queues.producers]]
+binding  = "ARTICLE_QUEUE"
+queue    = "news-articles"
+
+[[queues.consumers]]
+queue          = "news-articles"
+max_batch_size = 10          # process 10 articles at a time
+max_batch_timeout = 10       # wait up to 10s to fill a batch
+max_retries    = 3
+dead_letter_queue = "news-articles-dlq"
+
+# ── R2 Buckets ───────────────────────────────────────────────────────────────
+[[r2_buckets]]
+binding     = "ARTICLES_BUCKET"
+bucket_name = "news-raw-articles"   # create: wrangler r2 bucket create news-raw-articles
+
+# ── Vectorize ────────────────────────────────────────────────────────────────
+# Create: wrangler vectorize create news-embeddings --dimensions=1024 --metric=cosine
+[[vectorize]]
+binding    = "VECTORIZE"
+index_name = "news-embeddings"
+
+# ── Workers AI ───────────────────────────────────────────────────────────────
+[ai]
+binding = "AI"
+
+# ── KV Namespaces ────────────────────────────────────────────────────────────
+# Dedup store (url hashes) + sources config
+[[kv_namespaces]]
+binding    = "DEDUP_KV"
+id         = ""   # fill after: wrangler kv namespace create DEDUP_KV
+
+[[kv_namespaces]]
+binding    = "SOURCES_KV"
+id         = ""   # fill after: wrangler kv namespace create SOURCES_KV
+
+# ── Environment Variables ─────────────────────────────────────────────────────
+[vars]
+DEDUP_TTL_SECONDS = "86400"   # 24h — same as Python app
+MAX_ARTICLES_PER_SOURCE = "50"

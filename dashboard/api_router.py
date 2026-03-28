@@ -6,12 +6,13 @@ Routes are organized by domain:
   /api/settings/ai, /api/providers → routes/ai_api.py
   /api/webhooks, /api/telegram     → routes/webhooks_api.py
   /api/news, /api/stats, /api/logs → routes/logs_api.py
+  /api/intelligence/*              → routes/intelligence_api.py
 """
 
 from fastapi import APIRouter
 
 from dashboard import redis_state
-from dashboard.routes import ai_api, logs_api, sources_api, webhooks_api
+from dashboard.routes import ai_api, intelligence_api, logs_api, rag_api, sources_api, webhooks_api
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -19,6 +20,8 @@ router.include_router(sources_api.router)
 router.include_router(ai_api.router)
 router.include_router(webhooks_api.router)
 router.include_router(logs_api.router)
+router.include_router(rag_api.router)
+router.include_router(intelligence_api.router)
 
 
 def set_redis(r) -> None:

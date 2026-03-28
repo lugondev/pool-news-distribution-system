@@ -22,6 +22,7 @@ except ImportError:
 from webhook.filters import check_rate_limit, passes_filter
 from webhook.payload import build_payload
 from webhook.telegram import dispatch_to_telegram
+from webhook.twitter import dispatch_to_twitter
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +36,15 @@ async def enqueue_dispatch(
     article: dict,
     endpoints: list[dict],
     telegram_channels: list[dict] | None = None,
+    twitter_accounts: list[dict] | None = None,
 ) -> None:
     """Put a dispatch job in the queue (non-blocking; drops if full)."""
     try:
-        _dispatch_queue.put_nowait((article, endpoints, telegram_channels or []))
+        _dispatch_queue.put_nowait((
+            article, endpoints,
+            telegram_channels or [],
+            twitter_accounts or [],
+        ))
     except asyncio.QueueFull:
         logger.warning(
             f"Dispatch queue full, dropping article {article.get('id', '?')}"
@@ -54,9 +60,9 @@ async def dispatch_worker(rate_limit_seconds: float = 0.3) -> None:
     logger.info("Dispatch worker started")
     while True:
         try:
-            article, endpoints, channels = await _dispatch_queue.get()
+            article, endpoints, channels, tw_accounts = await _dispatch_queue.get()
             try:
-                await dispatch_article(article, endpoints, channels)
+                await dispatch_article(article, endpoints, channels, tw_accounts)
             except Exception as e:
                 logger.error(
                     f"Dispatch worker unhandled error for {article.get('id', '?')}: {e}"
@@ -108,8 +114,9 @@ async def dispatch_article(
     article: dict,
     endpoints: list[dict],
     telegram_channels: list[dict] | None = None,
+    twitter_accounts: list[dict] | None = None,
 ) -> None:
-    """Dispatch 1 article to all enabled webhook endpoints + Telegram channels."""
+    """Dispatch 1 article to all enabled webhook endpoints + Telegram + Twitter."""
     for ep in endpoints:
         if not ep.get("enabled", True):
             continue
@@ -151,6 +158,9 @@ async def dispatch_article(
 
     if telegram_channels:
         await dispatch_to_telegram(article, telegram_channels)
+
+    if twitter_accounts:
+        await dispatch_to_twitter(article, twitter_accounts)
 
 
 async def _dispatch_to_url(

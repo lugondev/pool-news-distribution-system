@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Intelligence — News Aggregator</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3e;
+      --text: #e2e8f0; --muted: #718096; --accent: #6366f1;
+      --green: #10b981; --red: #ef4444; --yellow: #f59e0b; --orange: #f97316;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; }
+    a { color: var(--accent); text-decoration: none; }
+
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px;
+             display: flex; align-items: center; gap: 12px; }
+    header h1 { font-size: 16px; font-weight: 600; }
+    .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    .nav-links { margin-left: auto; display: flex; gap: 16px; font-size: 13px; }
+    .nav-links a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 6px; transition: all .15s; }
+    .nav-links a:hover, .nav-links a.active { color: var(--text); background: var(--border); }
+
+    .page { padding: 24px; max-width: 1200px; margin: 0 auto; }
+    .page-title { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+    .page-sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
+    @media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
+
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+    .card-title { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase;
+                  letter-spacing: 0.06em; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+    .card-title .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+
+    /* Trend bars */
+    .trend-item { display: flex; align-items: center; gap: 10px; padding: 8px 0;
+                  border-bottom: 1px solid var(--border); }
+    .trend-item:last-child { border-bottom: none; }
+    .trend-cat { font-size: 13px; font-weight: 500; width: 100px; flex-shrink: 0; text-transform: capitalize; }
+    .trend-bar-wrap { flex: 1; height: 6px; background: var(--border); border-radius: 99px; overflow: hidden; }
+    .trend-bar { height: 100%; border-radius: 99px; background: var(--accent); transition: width 0.5s ease; }
+    .trend-bar.hot { background: var(--red); }
+    .trend-bar.warm { background: var(--orange); }
+    .trend-ratio { font-size: 12px; color: var(--muted); width: 40px; text-align: right; flex-shrink: 0; }
+    .trend-badge { font-size: 10px; padding: 1px 6px; border-radius: 3px; flex-shrink: 0; }
+    .badge-trending { background: rgba(239,68,68,0.15); color: var(--red); }
+    .badge-active { background: rgba(99,102,241,0.15); color: var(--accent); }
+
+    /* Entity pills */
+    .entity-cloud { display: flex; flex-wrap: wrap; gap: 8px; }
+    .entity-pill { font-size: 12px; padding: 4px 10px; border-radius: 999px;
+                   background: var(--border); color: var(--text); border: 1px solid transparent;
+                   transition: all .15s; cursor: default; }
+    .entity-pill.hot { background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.3); color: #fca5a5; }
+    .entity-pill.warm { background: rgba(249,115,22,0.12); border-color: rgba(249,115,22,0.3); color: #fdba74; }
+    .entity-count { font-size: 10px; color: var(--muted); margin-left: 4px; }
+
+    /* Story cards */
+    .story-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+                  padding: 14px; margin-bottom: 10px; transition: border-color .2s; cursor: pointer; }
+    .story-card:hover { border-color: var(--accent); }
+    .story-meta { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+    .story-cat { font-size: 10px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.05em; }
+    .story-count { font-size: 11px; background: var(--border); padding: 1px 6px; border-radius: 3px; color: var(--muted); }
+    .story-time { font-size: 11px; color: var(--muted); margin-left: auto; }
+    .story-headline { font-size: 14px; font-weight: 500; line-height: 1.4; margin-bottom: 6px; }
+    .story-sources { font-size: 11px; color: var(--muted); }
+    .story-entities { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+    .story-entity { font-size: 10px; padding: 2px 6px; background: rgba(99,102,241,0.1);
+                    color: var(--accent); border-radius: 3px; }
+
+    /* Story detail panel */
+    .story-detail { background: var(--surface); border: 1px solid var(--accent); border-radius: 10px;
+                    padding: 20px; margin-top: 20px; display: none; }
+    .story-detail.visible { display: block; }
+    .detail-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+    .detail-articles { margin-top: 12px; }
+    .detail-art { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .detail-art:last-child { border-bottom: none; }
+    .detail-art a { color: var(--text); }
+    .detail-art a:hover { color: var(--accent); }
+    .detail-art-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    .loading { color: var(--muted); font-size: 13px; padding: 20px 0; text-align: center; }
+    .empty { color: var(--muted); font-size: 13px; padding: 16px 0; text-align: center; }
+    .htmx-indicator { opacity: 0; transition: opacity 0.2s; }
+    .htmx-request .htmx-indicator { opacity: 1; }
+
+    .tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+    .tab { font-size: 13px; padding: 6px 14px; border-radius: 6px; cursor: pointer;
+           color: var(--muted); background: transparent; border: 1px solid var(--border);
+           transition: all .15s; }
+    .tab.active { color: var(--text); background: var(--border); border-color: var(--border); }
+    .tab:hover { color: var(--text); }
+
+    .refresh-btn { font-size: 12px; color: var(--muted); padding: 4px 10px; border-radius: 5px;
+                   background: var(--border); border: none; cursor: pointer; transition: all .15s; }
+    .refresh-btn:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+<header>
+  <div class="pulse"></div>
+  <h1>News Aggregator</h1>
+  <nav class="nav-links">
+    <a href="/">Feed</a>
+    <a href="/pipeline">Pipeline</a>
+    <a href="/intelligence" class="active">Intelligence</a>
+    <a href="/newsletter">Newsletter</a>
+    <a href="/sources">Sources</a>
+    <a href="/settings">Settings</a>
+    <a href="/logs">Logs</a>
+  </nav>
+</header>
+
+<div class="page">
+  <div class="page-title">Intelligence Dashboard</div>
+  <div class="page-sub">Trending topics, active stories, entity signals — updated every 5 minutes</div>
+
+  <div class="grid-2">
+    <!-- Trending Categories -->
+    <div class="card">
+      <div class="card-title">
+        <span class="dot" style="background:var(--red)"></span>
+        Trending Categories
+        <button class="refresh-btn" style="margin-left:auto"
+          hx-get="/api/intelligence/trends"
+          hx-target="#trends-data"
+          hx-swap="innerHTML">↻ Refresh</button>
+      </div>
+      <div id="trends-data"
+        hx-get="/api/intelligence/trends"
+        hx-trigger="load"
+        hx-swap="innerHTML">
+        <div class="loading">Loading trends…</div>
+      </div>
+    </div>
+
+    <!-- Trending Entities -->
+    <div class="card">
+      <div class="card-title">
+        <span class="dot" style="background:var(--yellow)"></span>
+        Trending Entities
+      </div>
+      <div id="entities-data"
+        hx-get="/api/intelligence/trends"
+        hx-trigger="load"
+        hx-swap="innerHTML">
+        <div class="loading">Loading entities…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Active Stories -->
+  <div class="card">
+    <div class="card-title">
+      <span class="dot"></span>
+      Active Stories
+      <div class="tabs" style="margin-left:16px;margin-bottom:0">
+        <button class="tab active" onclick="filterStories(null, this)">All</button>
+        <button class="tab" onclick="filterStories('tech', this)">Tech</button>
+        <button class="tab" onclick="filterStories('world', this)">World</button>
+        <button class="tab" onclick="filterStories('finance', this)">Finance</button>
+        <button class="tab" onclick="filterStories('ai', this)">AI</button>
+      </div>
+      <button class="refresh-btn" style="margin-left:auto"
+        onclick="loadStories(currentCategory)">↻ Refresh</button>
+    </div>
+    <div id="stories-list"
+      hx-get="/api/intelligence/stories"
+      hx-trigger="load"
+      hx-swap="innerHTML">
+      <div class="loading">Loading stories…</div>
+    </div>
+    <div id="story-detail-panel" class="story-detail"></div>
+  </div>
+</div>
+
+<script>
+  let currentCategory = null;
+
+  // Render trends from API response
+  document.body.addEventListener('htmx:afterSwap', function(e) {
+    if (e.detail.target.id === 'trends-data' || e.detail.target.id === 'entities-data') {
+      try {
+        const data = JSON.parse(e.detail.xhr.responseText);
+        if (e.detail.target.id === 'trends-data') renderTrends(data, e.detail.target);
+        if (e.detail.target.id === 'entities-data') renderEntities(data, e.detail.target);
+      } catch(err) {}
+    }
+    if (e.detail.target.id === 'stories-list') {
+      try {
+        const data = JSON.parse(e.detail.xhr.responseText);
+        renderStories(data, e.detail.target);
+      } catch(err) {}
+    }
+  });
+
+  function renderTrends(data, target) {
+    const cats = data.categories || [];
+    if (!cats.length) { target.innerHTML = '<div class="empty">No trend data yet — runs after first enrich cycle.</div>'; return; }
+    const maxRatio = Math.max(...cats.map(c => c.ratio || 0), 1);
+    target.innerHTML = cats.map(c => {
+      const pct = Math.min((c.ratio / maxRatio) * 100, 100);
+      const barClass = c.ratio > 3 ? 'hot' : c.ratio > 2 ? 'warm' : '';
+      const badge = c.trending ? '<span class="trend-badge badge-trending">🔥 trending</span>' : '';
+      return `<div class="trend-item">
+        <span class="trend-cat">${c.category}</span>
+        <div class="trend-bar-wrap"><div class="trend-bar ${barClass}" style="width:${pct}%"></div></div>
+        <span class="trend-ratio">${c.ratio}×</span>
+        ${badge}
+      </div>`;
+    }).join('');
+  }
+
+  function renderEntities(data, target) {
+    const entities = data.trending_entities || [];
+    if (!entities.length) { target.innerHTML = '<div class="empty">No entity data yet.</div>'; return; }
+    const max = Math.max(...entities.map(e => e.count), 1);
+    target.innerHTML = '<div class="entity-cloud">' + entities.map(e => {
+      const ratio = e.count / max;
+      const cls = ratio > 0.7 ? 'hot' : ratio > 0.4 ? 'warm' : '';
+      return `<span class="entity-pill ${cls}">${e.entity}<span class="entity-count">${e.count}</span></span>`;
+    }).join('') + '</div>';
+  }
+
+  function renderStories(data, target) {
+    const stories = data.stories || [];
+    if (!stories.length) { target.innerHTML = '<div class="empty">No active stories yet — stories form after articles are enriched with entities.</div>'; return; }
+    target.innerHTML = stories.map(s => {
+      const entities = (s.entities || []).slice(0, 5).map(e =>
+        `<span class="story-entity">${e}</span>`).join('');
+      const sources = (s.top_sources || []).join(', ');
+      const updated = s.last_updated ? new Date(s.last_updated).toLocaleTimeString() : '';
+      return `<div class="story-card" onclick="loadStoryDetail('${s.id}')">
+        <div class="story-meta">
+          <span class="story-cat">${s.category || ''}</span>
+          <span class="story-count">${s.article_count} articles</span>
+          <span class="story-time">${updated}</span>
+        </div>
+        <div class="story-headline">${s.headline_en || s.headline_vi || '(no headline)'}</div>
+        <div class="story-sources">${sources}</div>
+        ${entities ? `<div class="story-entities">${entities}</div>` : ''}
+      </div>`;
+    }).join('');
+  }
+
+  function loadStories(category) {
+    currentCategory = category;
+    const url = category ? `/api/intelligence/stories?category=${category}` : '/api/intelligence/stories';
+    htmx.ajax('GET', url, {target: '#stories-list', swap: 'innerHTML'});
+    document.getElementById('story-detail-panel').classList.remove('visible');
+  }
+
+  function filterStories(cat, btn) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    loadStories(cat);
+  }
+
+  async function loadStoryDetail(storyId) {
+    const panel = document.getElementById('story-detail-panel');
+    panel.classList.remove('visible');
+    panel.innerHTML = '<div class="loading">Loading story…</div>';
+    panel.classList.add('visible');
+    panel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+
+    const resp = await fetch(`/api/intelligence/stories/${storyId}`);
+    const data = await resp.json();
+    const story = data.story || {};
+    const articles = data.articles || [];
+
+    const artHtml = articles.map(a => `
+      <div class="detail-art">
+        <a href="${a.url}" target="_blank">${a.title}</a>
+        <div class="detail-art-meta">${a.source_name} · ${a.published_at ? new Date(a.published_at).toLocaleString() : ''}</div>
+      </div>`).join('');
+
+    panel.innerHTML = `
+      <div class="detail-title">${story.headline_en || story.headline_vi || 'Story'}</div>
+      <div style="display:flex;gap:12px;margin-bottom:12px;font-size:12px;color:var(--muted)">
+        <span>Category: ${story.category}</span>
+        <span>Articles: ${story.article_count}</span>
+        <span>First seen: ${story.first_seen ? new Date(story.first_seen).toLocaleString() : ''}</span>
+      </div>
+      <div class="story-entities" style="margin-bottom:12px">
+        ${(story.entities || []).map(e => `<span class="story-entity">${e}</span>`).join('')}
+      </div>
+      <div class="detail-articles">${artHtml || '<div class="empty">No articles loaded.</div>'}</div>`;
+  }
+
+  // Auto-refresh trends every 5 minutes
+  setInterval(() => {
+    htmx.ajax('GET', '/api/intelligence/trends', {target: '#trends-data', swap: 'innerHTML'});
+  }, 300000);
+</script>
+</body>
+</html>

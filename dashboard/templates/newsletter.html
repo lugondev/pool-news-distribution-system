@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Newsletter — News Aggregator</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3e;
+      --text: #e2e8f0; --muted: #718096; --accent: #6366f1;
+      --green: #10b981; --red: #ef4444; --yellow: #f59e0b;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; }
+    a { color: var(--accent); text-decoration: none; }
+
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px;
+             display: flex; align-items: center; gap: 12px; }
+    header h1 { font-size: 16px; font-weight: 600; }
+    .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    .nav-links { margin-left: auto; display: flex; gap: 16px; font-size: 13px; }
+    .nav-links a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 6px; transition: all .15s; }
+    .nav-links a:hover, .nav-links a.active { color: var(--text); background: var(--border); }
+
+    .page { padding: 24px; max-width: 900px; margin: 0 auto; }
+    .page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; gap: 16px; }
+    .page-title { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+    .page-sub { color: var(--muted); font-size: 13px; }
+
+    .controls { display: flex; gap: 10px; align-items: center; flex-shrink: 0; }
+    .btn { font-size: 13px; padding: 8px 16px; border-radius: 7px; cursor: pointer;
+           border: none; font-weight: 500; transition: all .15s; }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover { background: #4f46e5; }
+    .btn-secondary { background: var(--border); color: var(--text); }
+    .btn-secondary:hover { background: #374151; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    select { font-size: 13px; padding: 7px 10px; border-radius: 7px; background: var(--surface);
+             color: var(--text); border: 1px solid var(--border); cursor: pointer; }
+
+    .status-bar { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+                  padding: 12px 16px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+    .status-dot.available { background: var(--green); }
+    .status-text { font-size: 13px; color: var(--muted); }
+    .status-time { font-size: 12px; color: var(--muted); margin-left: auto; }
+
+    .preview-frame { width: 100%; border: 1px solid var(--border); border-radius: 10px;
+                     background: white; min-height: 400px; }
+
+    .generating { display: none; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; padding: 20px; }
+    .generating.visible { display: flex; }
+    .spinner { width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent);
+               border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+    .empty-state .icon { font-size: 40px; margin-bottom: 12px; }
+    .empty-state p { font-size: 14px; margin-bottom: 8px; }
+    .empty-state .hint { font-size: 12px; color: #475569; }
+
+    .toast { position: fixed; bottom: 24px; right: 24px; padding: 10px 16px; border-radius: 8px;
+             font-size: 13px; font-weight: 500; transition: all .3s; transform: translateY(80px); opacity: 0; }
+    .toast.show { transform: translateY(0); opacity: 1; }
+    .toast.success { background: rgba(16,185,129,0.9); color: white; }
+    .toast.error { background: rgba(239,68,68,0.9); color: white; }
+  </style>
+</head>
+<body>
+<header>
+  <div class="pulse"></div>
+  <h1>News Aggregator</h1>
+  <nav class="nav-links">
+    <a href="/">Feed</a>
+    <a href="/pipeline">Pipeline</a>
+    <a href="/intelligence">Intelligence</a>
+    <a href="/newsletter" class="active">Newsletter</a>
+    <a href="/sources">Sources</a>
+    <a href="/settings">Settings</a>
+    <a href="/logs">Logs</a>
+  </nav>
+</header>
+
+<div class="page">
+  <div class="page-header">
+    <div>
+      <div class="page-title">Newsletter</div>
+      <div class="page-sub">AI-generated digest of top stories — grouped by category</div>
+    </div>
+    <div class="controls">
+      <select id="lang-select">
+        <option value="English">English</option>
+        <option value="Vietnamese">Vietnamese</option>
+        <option value="Japanese">Japanese</option>
+      </select>
+      <button class="btn btn-secondary" onclick="openPreview()">⬡ Open full</button>
+      <button class="btn btn-primary" id="gen-btn" onclick="generateNewsletter()">⚡ Generate</button>
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar" id="status-bar">
+    <div class="status-dot" id="status-dot"></div>
+    <span class="status-text" id="status-text">Checking…</span>
+    <span class="status-time" id="status-time"></span>
+  </div>
+
+  <!-- Generating indicator -->
+  <div class="generating" id="generating-indicator">
+    <div class="spinner"></div>
+    <span>Generating newsletter… this takes 10–20 seconds</span>
+  </div>
+
+  <!-- Preview -->
+  <div id="preview-wrap">
+    <div class="empty-state" id="empty-state">
+      <div class="icon">📰</div>
+      <p>No newsletter generated yet</p>
+      <div class="hint">Click Generate to create a digest from the last 24h of AI-processed articles</div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  async function checkStatus() {
+    try {
+      const resp = await fetch('/api/intelligence/newsletter');
+      const data = await resp.json();
+      const dot = document.getElementById('status-dot');
+      const text = document.getElementById('status-text');
+      const timeEl = document.getElementById('status-time');
+
+      if (data.available) {
+        dot.classList.add('available');
+        text.textContent = 'Newsletter available';
+        if (data.generated_at) {
+          timeEl.textContent = 'Generated: ' + new Date(data.generated_at).toLocaleString();
+        }
+        loadPreview();
+      } else {
+        text.textContent = 'No newsletter yet — click Generate';
+      }
+    } catch(e) {
+      document.getElementById('status-text').textContent = 'Could not connect';
+    }
+  }
+
+  async function loadPreview() {
+    const resp = await fetch('/api/intelligence/newsletter/view');
+    const html = await resp.text();
+    const wrap = document.getElementById('preview-wrap');
+    document.getElementById('empty-state')?.remove();
+    let frame = document.getElementById('nl-frame');
+    if (!frame) {
+      frame = document.createElement('iframe');
+      frame.id = 'nl-frame';
+      frame.className = 'preview-frame';
+      frame.style.height = '700px';
+      frame.style.border = 'none';
+      wrap.appendChild(frame);
+    }
+    const doc = frame.contentDocument || frame.contentWindow.document;
+    doc.open(); doc.write(html); doc.close();
+  }
+
+  async function generateNewsletter() {
+    const btn = document.getElementById('gen-btn');
+    const lang = document.getElementById('lang-select').value;
+    btn.disabled = true;
+    document.getElementById('generating-indicator').classList.add('visible');
+
+    try {
+      const resp = await fetch(`/api/intelligence/newsletter/generate?language=${encodeURIComponent(lang)}`, {
+        method: 'POST'
+      });
+      const data = await resp.json();
+
+      if (data.skipped) {
+        showToast('No AI-processed articles found — run the AI job first', 'error');
+      } else {
+        showToast(`Newsletter generated: "${data.subject}"`, 'success');
+        checkStatus();
+        setTimeout(loadPreview, 500);
+        document.getElementById('status-dot').classList.add('available');
+        document.getElementById('status-text').textContent = 'Newsletter available';
+        if (data.generated_at) {
+          document.getElementById('status-time').textContent = 'Generated: ' + new Date(data.generated_at).toLocaleString();
+        }
+      }
+    } catch(e) {
+      showToast('Generation failed: ' + e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      document.getElementById('generating-indicator').classList.remove('visible');
+    }
+  }
+
+  function openPreview() {
+    window.open('/api/intelligence/newsletter/view', '_blank');
+  }
+
+  function showToast(msg, type) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = `toast ${type}`;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 4000);
+  }
+
+  checkStatus();
+</script>
+</body>
+</html>
