@@ -11,9 +11,11 @@ Key structure:
 """
 
 import json
+import logging
 from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
+import yaml
 
 from crawler.rss_parser import Article
 from storage.redis_keys import (
@@ -21,6 +23,15 @@ from storage.redis_keys import (
     AI_PENDING_KEY,
     CRAWL_SCHEDULE_KEY,
 )
+from ai.scorer import score_article
+
+logger = logging.getLogger(__name__)
+
+
+def _load_queue_config() -> dict:
+    with open("config/settings.yaml") as f:
+        cfg = yaml.safe_load(f)
+    return cfg.get("scoring", {})
 
 
 def _ts(dt: datetime) -> float:
@@ -31,8 +42,8 @@ def _ts(dt: datetime) -> float:
     )
 
 
-def _article_to_hash(article: Article) -> dict:
-    return {
+def _article_to_hash(article: Article, priority_score: float | None = None) -> dict:
+    data = {
         "id": article.id,
         "source_id": article.source_id,
         "source_name": article.source_name,
@@ -48,8 +59,11 @@ def _article_to_hash(article: Article) -> dict:
         "ai_summary_vi": article.ai_summary_vi,
         "ai_summary_en": article.ai_summary_en,
         "ai_status": article.ai_status,
-        "type": article.type,  # NEW: article type (original/synthetic)
+        "type": article.type,
     }
+    if priority_score is not None:
+        data["priority_score"] = str(round(priority_score, 2))
+    return data
 
 
 def _hash_to_article(data: dict) -> dict:
@@ -71,7 +85,14 @@ async def save_article(redis: aioredis.Redis, article: Article) -> None:
     date_key = now.strftime("%Y%m%d")
     hour_key = now.strftime("%Y%m%d%H")
 
-    hash_data = _article_to_hash(article)
+    # Compute priority score (timestamp + weighted bonus)
+    # Falls back to raw ts when scoring disabled/misconfigured
+    try:
+        priority_score = score_article(article)
+    except Exception:
+        priority_score = ts
+
+    hash_data = _article_to_hash(article, priority_score=priority_score if not already_processed else None)
     if already_processed:
         # Preserve AI results — don't overwrite with empty fields from re-crawl
         hash_data.pop("ai_summary_vi", None)
@@ -82,7 +103,7 @@ async def save_article(redis: aioredis.Redis, article: Article) -> None:
     pipe.hset(key, mapping=hash_data)
     pipe.expire(key, TTL_SECONDS)
 
-    # Global feed
+    # Global feed (score = publish timestamp — display order unchanged)
     pipe.zadd("news:feed", {article.id: ts})
     pipe.expire("news:feed", TTL_SECONDS)
 
@@ -102,12 +123,43 @@ async def save_article(redis: aioredis.Redis, article: Article) -> None:
     pipe.zadd(f"news:cat:{article.category}", {article.id: ts})
     pipe.expire(f"news:cat:{article.category}", TTL_SECONDS)
 
-    # AI pending queue — only enqueue if not already processed
+    # AI pending queue — priority score as sorted set score
+    # ZPOPMAX in pop_pending_ai_articles picks highest score first
     if not already_processed:
-        pipe.zadd(AI_PENDING_KEY, {article.id: ts})
+        pipe.zadd(AI_PENDING_KEY, {article.id: priority_score})
         pipe.expire(AI_PENDING_KEY, TTL_SECONDS)
 
     await pipe.execute()
+
+    # Backpressure: trim lowest-priority articles when queue exceeds cap
+    if not already_processed:
+        await _apply_backpressure(redis)
+
+
+async def _apply_backpressure(redis: aioredis.Redis) -> None:
+    """
+    Drop lowest-priority articles from the AI queue when it exceeds queue_max_size.
+
+    Uses ZPOPMIN to remove the least important articles (lowest score = oldest
+    or lowest-signal). This prevents unbounded queue growth during crawl spikes
+    and ensures high-priority articles are never starved.
+    """
+    try:
+        cfg = _load_queue_config()
+        max_size = int(cfg.get("queue_max_size", 0))
+        if max_size <= 0:
+            return
+        queue_size = await redis.zcard(AI_PENDING_KEY)
+        if queue_size > max_size:
+            overflow = queue_size - max_size
+            dropped = await redis.zpopmin(AI_PENDING_KEY, overflow)
+            if dropped:
+                logger.debug(
+                    f"Backpressure: dropped {len(dropped)} low-priority articles "
+                    f"(queue was {queue_size}, cap={max_size})"
+                )
+    except Exception as e:
+        logger.warning(f"Backpressure check failed: {e}")
 
 
 async def get_article(redis: aioredis.Redis, article_id: str) -> dict | None:
