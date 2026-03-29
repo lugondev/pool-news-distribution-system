@@ -138,6 +138,13 @@ async def save_article(redis: aioredis.Redis, article: Article) -> None:
 
     await pipe.execute()
 
+    # Enqueue for enrichment immediately after save — no need to wait for AI rewrite.
+    # Embedder uses title+content from RSS, not AI summaries.
+    existing_enrich = await redis.hget(key, "ai_enrich_status")
+    if not existing_enrich or existing_enrich.decode() != "done":
+        await redis.sadd(ENRICH_PENDING_KEY, article.id)
+        await redis.expire(ENRICH_PENDING_KEY, DEDUP_TTL_SECONDS)
+
     # Backpressure: trim lowest-priority articles when queue exceeds cap
     if not already_processed:
         await _apply_backpressure(redis)

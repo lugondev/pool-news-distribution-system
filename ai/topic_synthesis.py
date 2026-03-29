@@ -14,20 +14,15 @@ import logging
 import hashlib
 from datetime import datetime, timezone
 
-import yaml
 from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 import redis.asyncio as aioredis
-from ai.rewriter import get_openai_client, TONE_PROMPTS
+from ai.rewriter import get_openai_client, TONE_PROMPTS, _load_ai_config
+from ai.provider_utils import build_response_format, parse_ai_json, SCHEMA_TOPIC_SYNTHESIS
 from webhook.dispatcher import enqueue_dispatch
 
 logger = logging.getLogger(__name__)
-
-
-def _load_config() -> dict:
-    with open("config/settings.yaml") as f:
-        return yaml.safe_load(f)
 
 
 # AI prompt: Let AI decide output count based on content diversity
@@ -141,9 +136,8 @@ async def synthesize_topic_articles(
         return []
 
     client = get_openai_client(api_key=api_key, base_url=base_url)
-    cfg = _load_config()
-    ai_cfg = cfg.get("ai", {})
-    resolved_model = model or ai_cfg.get("model", "gpt-4o-mini")
+    ai_cfg = _load_ai_config()
+    resolved_model = model or ai_cfg.get("model", "")
 
     # Build tone instruction
     custom_system = (ai_cfg.get("prompt_system") or "").strip()
@@ -197,7 +191,7 @@ async def synthesize_topic_articles(
         model=resolved_model,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=max_tokens,
-        response_format={"type": "json_object"},
+        response_format=build_response_format(base_url, "topic_synthesis", SCHEMA_TOPIC_SYNTHESIS),
         temperature=temperature,
     )
 
@@ -205,7 +199,7 @@ async def synthesize_topic_articles(
     if not content:
         raise ValueError(f"Model returned empty content (model={resolved_model})")
 
-    result = json.loads(content)
+    result = parse_ai_json(content)
     tokens_used = response.usage.total_tokens if response.usage else 0
 
     # Validate response structure

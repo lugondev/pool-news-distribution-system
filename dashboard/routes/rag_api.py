@@ -5,12 +5,30 @@ import logging
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+import yaml
 from ai.rewriter import _load_ai_config
 from vector_db import weaviate_store
 from vector_db.rag import ask, semantic_search
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/rag", tags=["rag"])
+
+
+def _resolve_provider() -> tuple[str, str]:
+    """Resolve active provider's api_key and base_url from settings.yaml."""
+    with open("config/settings.yaml") as f:
+        cfg = yaml.safe_load(f)
+    ai = cfg.get("ai", {})
+    api_key = ai.get("api_key", "")
+    base_url = ai.get("base_url", "https://api.openai.com/v1")
+    pid = ai.get("provider_id")
+    if pid:
+        for p in ai.get("providers", []):
+            if p.get("id") == pid:
+                api_key = p.get("api_key", api_key)
+                base_url = p.get("base_url", base_url)
+                break
+    return api_key, base_url
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -63,9 +81,7 @@ async def search(
     if not weaviate_store.is_available():
         raise HTTPException(503, "Vector store unavailable — check Weaviate connection")
 
-    cfg = _load_ai_config()
-    api_key = cfg.get("api_key", "")
-    base_url = cfg.get("base_url", "https://api.openai.com/v1")
+    api_key, base_url = _resolve_provider()
 
     results = await semantic_search(
         query=q,
@@ -87,9 +103,7 @@ async def ask_question(body: AskRequest):
     if not weaviate_store.is_available():
         raise HTTPException(503, "Vector store unavailable — check Weaviate connection")
 
-    cfg = _load_ai_config()
-    api_key = cfg.get("api_key", "")
-    base_url = cfg.get("base_url", "https://api.openai.com/v1")
+    api_key, base_url = _resolve_provider()
 
     result = await ask(
         question=body.question,

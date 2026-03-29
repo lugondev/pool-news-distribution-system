@@ -35,11 +35,22 @@
     .ws-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
     .ws-dot.connected { background: var(--green); box-shadow: 0 0 5px var(--green); }
     .ws-dot.connecting { background: var(--yellow); animation: blink 1s infinite; }
-    .nav-links { margin-left: auto; display: flex; gap: 2px; }
-    .nav-links a { color: var(--muted); text-decoration: none; padding: 4px 11px;
+    .nav-links { margin-left: auto; display: flex; gap: 2px; align-items: center; }
+    .nav-links > a { color: var(--muted); text-decoration: none; padding: 4px 11px;
       border-radius: 6px; font-size: 12px; transition: all .15s; }
-    .nav-links a:hover { color: var(--text); background: var(--surface2); }
-    .nav-links a.active { color: var(--text); background: var(--surface2); }
+    .nav-links > a:hover, .nav-links > a.active { color: var(--text); background: var(--surface2); }
+    .dropdown-toggle { cursor: pointer; background: none; border: none; font-size: 12px; font-family: inherit;
+                       color: var(--muted); padding: 4px 11px; border-radius: 6px; transition: all .15s; }
+    .dropdown-toggle:hover, .dropdown-toggle.active { color: var(--text); background: var(--surface2); }
+    .dropdown { position: relative; }
+    .dropdown-menu { display: none; position: absolute; top: 100%; right: 0; padding-top: 4px;
+                     background: var(--surface); border: 1px solid var(--border2);
+                     border-radius: 8px; padding: 4px; min-width: 130px;
+                     z-index: 100; box-shadow: 0 4px 16px rgba(0,0,0,.4); }
+    .dropdown:hover .dropdown-menu { display: flex; flex-direction: column; }
+    .dropdown-menu a { padding: 7px 12px; border-radius: 5px; color: var(--muted2);
+                       font-size: 12px; display: block; text-decoration: none; transition: all .15s; }
+    .dropdown-menu a:hover, .dropdown-menu a.active { color: var(--text); background: var(--surface3); }
 
     /* ── Outer layout ── */
     .outer { display: flex; flex-direction: column; height: calc(100vh - 46px); }
@@ -291,16 +302,7 @@
     <div class="ws-dot connecting" id="ws-dot"></div>
     <span id="ws-status">Connecting…</span>
   </div>
-  <nav class="nav-links">
-    <a href="/">Feed</a>
-    <a href="/pipeline" class="active">Pipeline</a>
-    <a href="/intelligence">Intelligence</a>
-    <a href="/newsletter">Newsletter</a>
-    <a href="/debates">Debates</a>
-      <a href="/sources">Sources</a>
-    <a href="/settings">Settings</a>
-    <a href="/logs">Logs</a>
-  </nav>
+  {% include 'partials/nav.html' %}
 </header>
 
 <div class="outer">

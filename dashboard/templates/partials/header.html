@@ -1,0 +1,29 @@
+<style>
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px;
+           display: flex; align-items: center; gap: 12px; position: relative; z-index: 10; }
+  header h1 { font-size: 16px; font-weight: 600; }
+  .badge { background: var(--accent); color: white; font-size: 11px; padding: 2px 8px; border-radius: 999px; }
+  .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .nav-links { margin-left: auto; display: flex; gap: 4px; font-size: 13px; align-items: center; }
+  .nav-links > a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 6px; transition: all .15s; }
+  .nav-links > a:hover, .nav-links > a.active { color: var(--text); background: var(--border); }
+  .dropdown-toggle { cursor: pointer; background: none; border: none; font-size: 13px; font-family: inherit;
+                     color: var(--muted); padding: 4px 10px; border-radius: 6px; transition: all .15s; }
+  .dropdown-toggle:hover, .dropdown-toggle.active { color: var(--text); background: var(--border); }
+  .dropdown { position: relative; }
+  .dropdown-menu { display: none; position: absolute; top: 100%; right: 0; padding-top: 4px;
+                   background: var(--surface); border: 1px solid var(--border);
+                   border-radius: 8px; padding: 4px; min-width: 130px;
+                   z-index: 100; box-shadow: 0 4px 16px rgba(0,0,0,.35); }
+  .dropdown:hover .dropdown-menu { display: flex; flex-direction: column; }
+  .dropdown-menu a { padding: 7px 12px; border-radius: 5px; color: var(--muted);
+                     font-size: 13px; display: block; text-decoration: none; transition: all .15s; }
+  .dropdown-menu a:hover, .dropdown-menu a.active { color: var(--text); background: var(--border); }
+</style>
+<header>
+  <div class="pulse"></div>
+  <h1>News Aggregator</h1>
+  <span class="badge">LIVE</span>
+  {% include 'partials/nav.html' %}
+</header>

@@ -15,14 +15,6 @@
     body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; }
     a { color: var(--accent); text-decoration: none; }
 
-    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px;
-             display: flex; align-items: center; gap: 12px; }
-    header h1 { font-size: 16px; font-weight: 600; }
-    .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-    .nav-links { margin-left: auto; display: flex; gap: 16px; font-size: 13px; }
-    .nav-links a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 6px; transition: all .15s; }
-    .nav-links a:hover, .nav-links a.active { color: var(--text); background: var(--border); }
 
     .page { padding: 24px; max-width: 900px; margin: 0 auto; }
     .page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; gap: 16px; }
@@ -70,20 +62,7 @@
   </style>
 </head>
 <body>
-<header>
-  <div class="pulse"></div>
-  <h1>News Aggregator</h1>
-  <nav class="nav-links">
-    <a href="/">Feed</a>
-    <a href="/pipeline">Pipeline</a>
-    <a href="/intelligence">Intelligence</a>
-    <a href="/newsletter" class="active">Newsletter</a>
-    <a href="/debates">Debates</a>
-      <a href="/sources">Sources</a>
-    <a href="/settings">Settings</a>
-    <a href="/logs">Logs</a>
-  </nav>
-</header>
+{% include 'partials/header.html' %}
 
 <div class="page">
   <div class="page-header">

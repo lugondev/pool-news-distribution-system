@@ -8,6 +8,7 @@ Routes:
   GET /intelligence/newsletter      → latest newsletter HTML
   POST /intelligence/newsletter/generate → trigger generation
   GET /intelligence/debates         → recent debate results
+  POST /intelligence/debates/run    → manually trigger debate job
 """
 
 import logging
@@ -18,7 +19,7 @@ from fastapi.responses import HTMLResponse
 from ai.story_detector import get_active_stories, get_story_articles
 from ai.trend_detector import get_trend_snapshot, get_trending_entities
 from ai.newsletter import get_latest_newsletter, generate_newsletter
-from ai.debate import get_recent_debates
+from ai.debate import get_recent_debates, debate_job as _run_debate_job
 from dashboard import redis_state
 from dashboard.config_io import get_categories
 
@@ -148,7 +149,7 @@ async def api_newsletter_generate(
             language=language,
             api_key=api_key or None,
             base_url=base_url or None,
-            model=model_override or "gpt-4o-mini",
+            model=model_override,
         )
         return result
     except Exception as exc:
@@ -163,3 +164,42 @@ async def api_debates(limit: int = Query(default=10, le=20)):
     redis = redis_state.get_redis()
     debates = await get_recent_debates(redis, limit=limit)
     return {"debates": debates, "total": len(debates)}
+
+
+@router.post("/debates/run")
+async def api_debates_run():
+    """Manually trigger the debate job — runs immediately outside the scheduler."""
+    import yaml
+    redis = redis_state.get_redis()
+
+    with open("config/settings.yaml") as _f:
+        cfg = yaml.safe_load(_f)
+
+    debate_cfg = cfg.get("debate", {})
+    if not debate_cfg.get("enabled", False):
+        raise HTTPException(status_code=400, detail="Debate feature is disabled. Set debate.enabled: true in settings.yaml.")
+
+    ai_cfg = cfg.get("ai", {})
+    pid = ai_cfg.get("provider_id")
+    api_key = ai_cfg.get("api_key", "")
+    base_url = ai_cfg.get("base_url", "")
+    model_override = None
+    if pid:
+        for p in ai_cfg.get("providers", []):
+            if p.get("id") == pid:
+                api_key = p.get("api_key", api_key)
+                base_url = p.get("base_url", base_url)
+                model_override = p.get("model") or None
+                break
+
+    try:
+        count = await _run_debate_job(
+            redis=redis,
+            api_key=api_key or None,
+            base_url=base_url or None,
+            model=model_override or debate_cfg.get("model", ""),
+        )
+        return {"ok": True, "debated": count}
+    except Exception as exc:
+        logger.error(f"Manual debate run failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))

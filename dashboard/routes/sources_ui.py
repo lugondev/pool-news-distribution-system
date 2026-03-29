@@ -23,7 +23,7 @@ router = APIRouter()
 
 @router.get("/sources", response_class=HTMLResponse)
 async def sources_page(request: Request):
-    return templates.TemplateResponse("sources.html", {"request": request})
+    return templates.TemplateResponse("sources.html", {"request": request, "active_page": "sources"})
 
 
 @router.get("/partials/sources", response_class=HTMLResponse)

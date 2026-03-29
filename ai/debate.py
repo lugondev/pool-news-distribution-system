@@ -77,7 +77,7 @@ from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
 
-from ai.rewriter import get_openai_client
+from ai.rewriter import get_openai_client, _load_ai_config
 from ai.story_detector import get_story_articles
 from storage.redis_keys import ARTICLE_TTL_SECONDS
 from webhook.dispatcher import enqueue_dispatch
@@ -85,7 +85,7 @@ from webhook.dispatcher import enqueue_dispatch
 logger = logging.getLogger(__name__)
 
 # ── Tunables ─────────────────────────────────────────────────────────────────
-MIN_STORY_SIZE = 3          # min articles in story before triggering debate
+MIN_STORY_SIZE = 2          # min articles in story before triggering debate
 DEBATE_RATE_LIMIT = 5       # max debates per scheduler run
 MAX_ARTICLE_CHARS = 400     # content truncation for prompt
 DEBATE_TTL = ARTICLE_TTL_SECONDS * 2
@@ -266,7 +266,7 @@ async def run_debate(
     twitter_accounts: list[dict] | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
-    model: str = "gpt-4o-mini",
+    model: str | None = None,
     temperature: float = 0.5,
 ) -> dict | None:
     """
@@ -275,6 +275,8 @@ async def run_debate(
     hooks with ai_mode='debate'.
     Returns debate result dict or None on failure.
     """
+    if not model:
+        model = _load_ai_config().get("model", "")
     headline, articles_text = await _build_article_context(redis, story_id)
     if not articles_text:
         logger.debug(f"[debate] story={story_id} has no articles — skipping")
@@ -380,7 +382,7 @@ async def debate_job(
     twitter_accounts: list[dict] | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
-    model: str = "gpt-4o-mini",
+    model: str | None = None,
 ) -> int:
     """
     Pick stories ready for debate (large enough, not yet debated) and run them.

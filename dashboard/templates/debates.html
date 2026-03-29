@@ -15,14 +15,6 @@
     body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; }
     a { color: var(--accent); text-decoration: none; }
 
-    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px;
-             display: flex; align-items: center; gap: 12px; }
-    header h1 { font-size: 16px; font-weight: 600; }
-    .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-    .nav-links { margin-left: auto; display: flex; gap: 16px; font-size: 13px; }
-    .nav-links a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 6px; transition: all .15s; }
-    .nav-links a:hover, .nav-links a.active { color: var(--text); background: var(--border); }
 
     .page { padding: 24px; max-width: 900px; margin: 0 auto; }
     .page-title { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
@@ -111,24 +103,22 @@
 </head>
 <body>
 
-<header>
-  <div class="pulse"></div>
-  <h1>News Aggregator</h1>
-  <nav class="nav-links">
-    <a href="/">Feed</a>
-    <a href="/pipeline">Pipeline</a>
-    <a href="/intelligence">Intelligence</a>
-    <a href="/newsletter">Newsletter</a>
-    <a href="/debates" class="active">Debates</a>
-    <a href="/sources">Sources</a>
-    <a href="/settings">Settings</a>
-    <a href="/logs">Logs</a>
-  </nav>
-</header>
+{% include 'partials/header.html' %}
 
 <div class="page">
-  <div class="page-title">Multi-Agent Debates</div>
-  <div class="page-sub">Each story is analyzed by Factual, Skeptic, and Impact agents — then synthesized.</div>
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
+    <div>
+      <div class="page-title">Multi-Agent Debates</div>
+      <div class="page-sub" style="margin-bottom:0">Each story is analyzed by Factual, Skeptic, and Impact agents — then synthesized.</div>
+    </div>
+    <button id="run-btn" onclick="runDebates()" style="
+      background:#6366f1;border:none;color:#fff;font-size:13px;font-weight:600;
+      padding:8px 16px;border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:6px;
+      transition:background .15s;white-space:nowrap">
+      ▶ Run Now
+    </button>
+  </div>
+  <div id="run-status" style="display:none;margin-bottom:16px;padding:10px 14px;border-radius:8px;font-size:13px"></div>
 
   <div id="debates-container">
     <div class="state-box">
@@ -227,6 +217,32 @@ function escHtml(s) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/\n/g, '<br>');
+}
+
+async function runDebates() {
+  const btn = document.getElementById('run-btn');
+  const status = document.getElementById('run-status');
+  btn.disabled = true;
+  btn.textContent = '⏳ Running…';
+  status.style.display = 'none';
+  try {
+    const resp = await fetch('/api/intelligence/debates/run', { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok) {
+      status.style.cssText = 'display:block;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#fca5a5;padding:10px 14px;border-radius:8px;font-size:13px';
+      status.textContent = '✗ ' + (data.detail || 'Failed');
+    } else {
+      status.style.cssText = 'display:block;background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);color:#6ee7b7;padding:10px 14px;border-radius:8px;font-size:13px';
+      status.textContent = `✓ Done — ${data.debated} debate(s) generated`;
+      if (data.debated > 0) setTimeout(loadDebates, 500);
+    }
+  } catch (err) {
+    status.style.cssText = 'display:block;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#fca5a5;padding:10px 14px;border-radius:8px;font-size:13px';
+    status.textContent = '✗ ' + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '▶ Run Now';
+  }
 }
 
 loadDebates();

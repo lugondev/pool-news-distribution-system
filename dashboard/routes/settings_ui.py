@@ -20,12 +20,12 @@ LOG_PAGE_SIZE = 15
 
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
-    return templates.TemplateResponse("settings.html", {"request": request})
+    return templates.TemplateResponse("settings.html", {"request": request, "active_page": "settings"})
 
 
 @router.get("/logs", response_class=HTMLResponse)
 async def logs_page(request: Request):
-    return templates.TemplateResponse("logs.html", {"request": request})
+    return templates.TemplateResponse("logs.html", {"request": request, "active_page": "logs"})
 
 
 # ── General settings ──────────────────────────────────────────────────────────

@@ -221,6 +221,7 @@ async def fetch_all_sources(
     default_crawl_interval_sec: int = 600,
     backoff_429_sec: int = 1800,
     backoff_403_sec: int = 7200,
+    source_intervals: dict[str, int] | None = None,
 ) -> list[dict]:
     """
     Crawl sources with controlled concurrency, then update each source's
@@ -260,11 +261,12 @@ async def fetch_all_sources(
             return_exceptions=False,
         )
 
-    # Update crawl schedule for each source based on its response
+    # Update crawl schedule for each source based on its response and per-source interval
     for r in results:
+        interval_sec = (source_intervals or {}).get(r["source_id"], default_crawl_interval_sec)
         next_ts = compute_next_crawl_ts(
             r.get("http_status"),
-            default_sec=default_crawl_interval_sec,
+            default_sec=interval_sec,
             backoff_429_sec=backoff_429_sec,
             backoff_403_sec=backoff_403_sec,
         )

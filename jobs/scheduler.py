@@ -182,7 +182,12 @@ async def crawl_job(redis: aioredis.Redis) -> None:
     batch = [source_map[sid] for sid in due_ids if sid in source_map]
     logger.info(f"=== Crawl tick: {len(batch)} sources due ({due_ids}) ===")
 
-    default_interval_sec = crawler.get("default_crawl_interval_minutes", 10) * 60
+    default_interval_sec = crawler.get("default_crawl_interval_minutes", 45) * 60
+    cat_intervals = crawler.get("category_crawl_interval_minutes", {})
+    source_intervals = {
+        s["id"]: cat_intervals.get(s.get("category", ""), crawler.get("default_crawl_interval_minutes", 45)) * 60
+        for s in batch
+    }
 
     try:
         results = await fetch_all_sources(
@@ -201,6 +206,7 @@ async def crawl_job(redis: aioredis.Redis) -> None:
             default_crawl_interval_sec=default_interval_sec,
             backoff_429_sec=crawler.get("backoff_429_minutes", 30) * 60,
             backoff_403_sec=crawler.get("backoff_403_minutes", 120) * 60,
+            source_intervals=source_intervals,
         )
         meta = {
             "sources_in_batch": len(batch),
@@ -265,12 +271,7 @@ async def ai_job(redis: aioredis.Redis) -> None:
     raw_tg      = [c for c in all_tg        if _active(c) and c.get("ai_mode") == "off"]
     rewrite_tw  = [a for a in all_tw        if _active(a) and a.get("ai_mode", "rewrite") == "rewrite"]
 
-    if not (rewrite_wh or raw_wh or rewrite_tg or raw_tg or rewrite_tw):
-        await log_system_event(
-            "ai_job", started, status="skipped",
-            metadata={"reason": "no rewrite/raw hooks configured"},
-        )
-        return
+    has_hooks = bool(rewrite_wh or raw_wh or rewrite_tg or raw_tg or rewrite_tw)
 
     ai_interval_sec = ai.get("interval_minutes", 2) * 60
     spread = ai_interval_sec * 0.8
@@ -304,7 +305,7 @@ async def ai_job(redis: aioredis.Redis) -> None:
             resolved = _resolve_ai_config(ai, cfg_id or None)
             n = await process_pending_articles(
                 redis=redis,
-                model=model_override or "gpt-4o-mini",
+                model=model_override,
                 batch_size=ai.get("batch_size", 10),
                 max_tokens=ai.get("max_tokens_summary", 300),
                 temperature=ai.get("temperature", 0.3),
@@ -345,7 +346,7 @@ async def ai_job(redis: aioredis.Redis) -> None:
             status="ok" if processed is not None else "skipped",
             metadata={
                 "processed": processed or 0,
-                "model": model_override or "gpt-4o-mini",
+                "model": model_override or ai.get("model", ""),
                 "batch_size": ai.get("batch_size", 10),
                 "rewrite_hooks": len(rewrite_wh) + len(rewrite_tg),
                 "raw_hooks": len(raw_wh) + len(raw_tg),
@@ -394,7 +395,7 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
     # Resolve provider: synthesis can use its own provider or fall back to AI summary provider
     synth_provider_id = synthesis_cfg.get("provider_id") or ai.get("provider_id")
     synth_api_key, synth_base_url, synth_model_override = _resolve_provider(ai, synth_provider_id)
-    synth_model = synth_model_override or "gpt-4o-mini"
+    synth_model = synth_model_override
 
     active_cats = [
         c["id"]
@@ -661,7 +662,7 @@ async def debate_scheduler_job(redis: aioredis.Redis) -> None:
             twitter_accounts=debate_tw,
             api_key=api_key or None,
             base_url=base_url or None,
-            model=model_override or debate_cfg.get("model", "gpt-4o-mini"),
+            model=model_override or debate_cfg.get("model", ""),
         )
         dur_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
         _job_states["debate"] = "idle"
@@ -699,7 +700,7 @@ async def newsletter_job(redis: aioredis.Redis) -> None:
             language=nl_cfg.get("language", "English"),
             api_key=api_key or None,
             base_url=base_url or None,
-            model=model_override or nl_cfg.get("model", "gpt-4o-mini"),
+            model=model_override or nl_cfg.get("model", ""),
             max_tokens=nl_cfg.get("max_tokens", 1500),
             temperature=nl_cfg.get("temperature", 0.4),
             lookback_seconds=nl_cfg.get("lookback_hours", 24) * 3600,

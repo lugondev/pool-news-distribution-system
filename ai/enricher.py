@@ -10,6 +10,7 @@ from typing import Any
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ai.rewriter import get_openai_client, _load_ai_config
+from ai.provider_utils import build_response_format, parse_ai_json, SCHEMA_ENRICHMENT
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ async def enrich_article(
     """
     client = get_openai_client(api_key=api_key, base_url=base_url)
     cfg = _load_ai_config()
-    resolved_model = model or cfg.get("model", "gpt-4o-mini")
+    resolved_model = model or cfg.get("model", "")
 
     title = article.get("title", "")
     # Prefer full content; fall back to summary
@@ -51,15 +52,13 @@ async def enrich_article(
         content=content[:1200],
     )
 
-    is_cloudflare = base_url and "cloudflare.com" in (base_url or "")
     create_kwargs: dict = {
         "model": resolved_model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 200,
         "temperature": 0.1,
+        "response_format": build_response_format(base_url, "enrichment", SCHEMA_ENRICHMENT),
     }
-    if not is_cloudflare:
-        create_kwargs["response_format"] = {"type": "json_object"}
 
     response = await client.chat.completions.create(**create_kwargs)
 
@@ -68,18 +67,10 @@ async def enrich_article(
         logger.warning(f"[enricher] empty response for article {article.get('id')}")
         return {"entities": [], "sentiment": "neutral"}
 
-    # Strip markdown code fences if present (some Cloudflare models add them)
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-        raw = raw.strip()
-
     try:
-        result = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        logger.warning(f"[enricher] JSON parse error: {exc} — raw={raw[:200]}")
+        result = parse_ai_json(raw)
+    except (json.JSONDecodeError, TypeError) as exc:
+        logger.warning(f"[enricher] JSON parse error: {exc} — raw={str(raw)[:200]}")
         return {"entities": [], "sentiment": "neutral"}
 
     entities = result.get("entities", [])

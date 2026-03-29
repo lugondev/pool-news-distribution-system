@@ -22,7 +22,7 @@ sources:
   lang: en
   country: global
   category: world
-  enabled: false
+  enabled: true
 - id: hnews
   name: Hacker News
   url: https://hnrss.org/frontpage
@@ -126,7 +126,7 @@ sources:
   lang: en
   country: global
   category: finance
-  enabled: false
+  enabled: true
 - id: wsj_world
   name: WSJ World News
   url: https://feeds.a.dj.com/rss/RSSWorldNews.xml
@@ -134,7 +134,7 @@ sources:
   lang: en
   country: global
   category: world
-  enabled: false
+  enabled: true
 - id: ft_economy
   name: Financial Times Global Economy
   url: https://www.ft.com/global-economy?format=rss
@@ -1034,6 +1034,14 @@ sources:
   country: global
   category: politics
   enabled: true
+- id: the_intercept
+  name: The Intercept
+  url: https://theintercept.com/feed/?rss
+  type: rss
+  lang: en
+  country: us
+  category: politics
+  enabled: true
 - id: tnw
   name: The Next Web
   url: https://thenextweb.com/feed
@@ -1193,7 +1201,7 @@ sources:
   lang: vi
   country: vn
   category: world
-  enabled: false
+  enabled: true
 - id: tuoitre_kinh_te
   name: Tuoi Tre Kinh Te
   url: https://tuoitre.vn/rss/kinh-doanh
@@ -1201,7 +1209,7 @@ sources:
   lang: vi
   country: vn
   category: finance
-  enabled: false
+  enabled: true
 - id: techmeme
   name: Techmeme
   url: https://www.techmeme.com/feed.xml
@@ -1699,7 +1707,7 @@ sources:
   lang: en
   country: jp
   category: business
-  enabled: false
+  enabled: true
 - id: google_ai_blog
   name: Google Research Blog (AI)
   url: https://blog.google/technology/ai/rss/
@@ -1707,7 +1715,7 @@ sources:
   lang: en
   country: us
   category: ai
-  enabled: false
+  enabled: true
 - id: nvidia_ai_blog
   name: NVIDIA Blog (AI)
   url: https://blogs.nvidia.com/blog/category/deep-learning/feed/
@@ -1731,7 +1739,7 @@ sources:
   lang: en
   country: uk
   category: ai
-  enabled: false
+  enabled: true
 - id: el_pais_world
   name: El País (English)
   url: https://elpais.com/rss/elpais/inenglish.xml
@@ -1755,7 +1763,7 @@ sources:
   lang: en
   country: kr
   category: world
-  enabled: false
+  enabled: true
 - id: estnn_esports
   name: ESTNN (Esports)
   url: https://estnn.com/feed/
@@ -1835,7 +1843,7 @@ sources:
   lang: en
   country: us
   category: ai
-  enabled: false
+  enabled: true
 - id: openai_blog
   name: OpenAI Blog
   url: https://openai.com/news/rss.xml
@@ -1843,7 +1851,7 @@ sources:
   lang: en
   country: us
   category: ai
-  enabled: false
+  enabled: true
 - id: pitchfork_music
   name: Pitchfork
   url: https://pitchfork.com/feed/feed-news/rss
@@ -1859,7 +1867,7 @@ sources:
   lang: en
   country: de
   category: world
-  enabled: false
+  enabled: true
 - id: dw_business_2
   name: Deutsche Welle Business
   url: https://rss.dw.com/xml/rss-en-bus
@@ -1931,7 +1939,7 @@ sources:
   lang: en
   country: us
   category: ai
-  enabled: false
+  enabled: true
 - id: kbs_world
   name: KBS World News
   url: http://world.kbs.co.kr/rss/rss_news.htm?lang=e
@@ -1987,7 +1995,7 @@ sources:
   lang: en
   country: uk
   category: culture
-  enabled: false
+  enabled: true
 - id: bloomberg_business
   name: Bloomberg Business
   url: https://www.bloomberg.com/feeds/bview/rss
@@ -1995,7 +2003,7 @@ sources:
   lang: en
   country: us
   category: business
-  enabled: false
+  enabled: true
 - id: caixin_global_2
   name: Caixin Global Business
   url: https://www.caixinglobal.com/rss/business.xml
@@ -2059,7 +2067,7 @@ sources:
   lang: en
   country: eu
   category: gaming
-  enabled: false
+  enabled: true
 - id: euronews_world
   name: EuroNews
   url: https://www.euronews.com/rss?level=vertical&name=news
@@ -2083,7 +2091,7 @@ sources:
   lang: en
   country: fr
   category: world
-  enabled: false
+  enabled: true
 - id: france_info_fr
   name: France Info
   url: https://www.francetvinfo.fr/titres.rss
@@ -2123,7 +2131,7 @@ sources:
   lang: en
   country: us
   category: health
-  enabled: false
+  enabled: true
 - id: heise_online_de
   name: Heise Online (Germany Tech)
   url: https://www.heise.de/rss/heise-atom.xml
@@ -2139,7 +2147,7 @@ sources:
   lang: en
   country: eu
   category: esports
-  enabled: false
+  enabled: true
 - id: the_independent_uk
   name: The Independent
   url: https://www.independent.co.uk/rss
@@ -2203,7 +2211,7 @@ sources:
   lang: en
   country: us
   category: health
-  enabled: false
+  enabled: true
 - id: the_new_yorker_culture
   name: The New Yorker (Culture)
   url: https://www.newyorker.com/feed/culture
@@ -2211,7 +2219,7 @@ sources:
   lang: en
   country: us
   category: culture
-  enabled: false
+  enabled: true
 - id: nippon_culture
   name: Nippon.com Culture
   url: https://www.nippon.com/en/rss/culture/
@@ -2251,7 +2259,7 @@ sources:
   lang: en
   country: uk
   category: gaming
-  enabled: false
+  enabled: true
 - id: scmp_news
   name: South China Morning Post
   url: https://www.scmp.com/rss/2/feed
@@ -2323,7 +2331,7 @@ sources:
   lang: en
   country: us
   category: culture
-  enabled: false
+  enabled: true
 - id: the_guardian_politics
   name: The Guardian Politics
   url: https://www.theguardian.com/politics/rss
@@ -2331,7 +2339,7 @@ sources:
   lang: en
   country: uk
   category: politics
-  enabled: false
+  enabled: true
 - id: the_guardian_uk
   name: The Guardian UK
   url: https://www.theguardian.com/uk/rss
@@ -2379,7 +2387,7 @@ sources:
   lang: en
   country: jp
   category: world
-  enabled: false
+  enabled: true
 - id: corriere_it
   name: Corriere della Sera (Italy)
   url: http://xml2.corriereobjects.it/rss/homepage.xml
@@ -2394,5 +2402,345 @@ sources:
   type: rss
   lang: fi
   country: fi
+  category: world
+  enabled: false
+
+# --- Enriched from awesome-rss-feeds (curated) ---
+- id: abc_au_news
+  name: ABC News Australia
+  url: https://www.abc.net.au/news/feed/1948/rss.xml
+  type: rss
+  lang: en
+  country: au
+  category: world
+  enabled: false
+- id: smh_au
+  name: Sydney Morning Herald
+  url: https://www.smh.com.au/rss/feed.xml
+  type: rss
+  lang: en
+  country: au
+  category: world
+  enabled: false
+- id: cbc_topstories
+  name: CBC Top Stories
+  url: https://www.cbc.ca/cmlink/rss-topstories
+  type: rss
+  lang: en
+  country: ca
+  category: world
+  enabled: false
+- id: ctv_topstories
+  name: CTV News Top Stories
+  url: https://www.ctvnews.ca/rss/ctvnews-ca-top-stories-public-rss-1.822009
+  type: rss
+  lang: en
+  country: ca
+  category: world
+  enabled: false
+- id: cnn_world
+  name: CNN World
+  url: http://rss.cnn.com/rss/edition_world.rss
+  type: rss
+  lang: en
+  country: us
+  category: world
+  enabled: false
+- id: washpost_world
+  name: Washington Post World
+  url: http://feeds.washingtonpost.com/rss/world
+  type: rss
+  lang: en
+  country: us
+  category: world
+  enabled: false
+- id: cnet_news
+  name: CNET News
+  url: https://www.cnet.com/rss/news/
+  type: rss
+  lang: en
+  country: us
+  category: tech
+  enabled: false
+- id: lifehacker
+  name: Lifehacker
+  url: https://lifehacker.com/rss
+  type: rss
+  lang: en
+  country: global
+  category: tech
+  enabled: false
+- id: slashdot
+  name: Slashdot
+  url: http://rss.slashdot.org/Slashdot/slashdotMain
+  type: rss
+  lang: en
+  country: global
+  category: tech
+  enabled: false
+- id: investing_news
+  name: Investing.com News
+  url: https://www.investing.com/rss/news.rss
+  type: rss
+  lang: en
+  country: global
+  category: finance
+  enabled: false
+- id: css_tricks
+  name: CSS-Tricks
+  url: https://css-tricks.com/feed/
+  type: rss
+  lang: en
+  country: global
+  category: tech
+  enabled: false
+- id: mozilla_hacks
+  name: Mozilla Hacks
+  url: https://hacks.mozilla.org/feed/
+  type: rss
+  lang: en
+  country: global
+  category: tech
+  enabled: false
+- id: nngroup_ux
+  name: Nielsen Norman Group
+  url: https://www.nngroup.com/feed/rss/
+  type: rss
+  lang: en
+  country: global
+  category: culture
+  enabled: false
+- id: petapixel
+  name: PetaPixel
+  url: https://petapixel.com/feed/
+  type: rss
+  lang: en
+  country: global
+  category: culture
+  enabled: false
+
+- id: globalnews_ca
+  name: Global News (Canada)
+  url: https://globalnews.ca/feed/
+  type: rss
+  lang: en
+  country: ca
+  category: world
+  enabled: false
+- id: nationalpost_ca
+  name: National Post
+  url: https://nationalpost.com/feed/
+  type: rss
+  lang: en
+  country: ca
+  category: world
+  enabled: false
+- id: toronto_star
+  name: Toronto Star
+  url: https://www.thestar.com/content/thestar/feed.RSSManagerServlet.articles.topstories.rss
+  type: rss
+  lang: en
+  country: ca
+  category: world
+  enabled: false
+- id: financial_post_ca
+  name: Financial Post
+  url: https://business.financialpost.com/feed/
+  type: rss
+  lang: en
+  country: ca
+  category: finance
+  enabled: false
+- id: foxnews_latest
+  name: FOX News Latest
+  url: http://feeds.foxnews.com/foxnews/latest
+  type: rss
+  lang: en
+  country: us
+  category: world
+  enabled: false
+- id: latimes_world
+  name: Los Angeles Times World & Nation
+  url: https://www.latimes.com/world-nation/rss2.0.xml
+  type: rss
+  lang: en
+  country: us
+  category: world
+  enabled: false
+- id: politico_playbook
+  name: Politico Playbook
+  url: https://rss.politico.com/playbook.xml
+  type: rss
+  lang: en
+  country: us
+  category: politics
+  enabled: false
+- id: google_news_top
+  name: Google News Top Stories
+  url: https://news.google.com/rss
+  type: rss
+  lang: en
+  country: global
+  category: world
+  enabled: false
+- id: yahoo_news
+  name: Yahoo News
+  url: https://www.yahoo.com/news/rss
+  type: rss
+  lang: en
+  country: us
+  category: world
+  enabled: false
+- id: seeking_alpha
+  name: Seeking Alpha Market Currents
+  url: https://seekingalpha.com/market_currents.xml
+  type: rss
+  lang: en
+  country: us
+  category: finance
+  enabled: false
+- id: forbes_business
+  name: Forbes Business
+  url: https://www.forbes.com/business/feed/
+  type: rss
+  lang: en
+  country: us
+  category: business
+  enabled: false
+- id: infoq
+  name: InfoQ
+  url: https://feed.infoq.com
+  type: rss
+  lang: en
+  country: global
+  category: tech
+  enabled: false
+- id: github_blog
+  name: GitHub Blog
+  url: https://github.blog/feed/
+  type: rss
+  lang: en
+  country: global
+  category: tech
+  enabled: false
+- id: stackoverflow_blog
+  name: Stack Overflow Blog
+  url: https://stackoverflow.blog/feed/
+  type: rss
+  lang: en
+  country: global
+  category: tech
+  enabled: false
+- id: martinfowler
+  name: Martin Fowler
+  url: https://martinfowler.com/feed.atom
+  type: rss
+  lang: en
+  country: global
+  category: tech
+  enabled: false
+- id: smashing_magazine
+  name: Smashing Magazine
+  url: https://www.smashingmagazine.com/feed
+  type: rss
+  lang: en
+  country: global
+  category: tech
+  enabled: false
+
+- id: kyodo_news_en
+  name: Kyodo News English
+  url: https://english.kyodonews.net/rss/all.xml
+  type: rss
+  lang: en
+  country: jp
+  category: world
+  enabled: false
+- id: hongkongfp
+  name: Hong Kong Free Press
+  url: https://www.hongkongfp.com/feed/
+  type: rss
+  lang: en
+  country: hk
+  category: world
+  enabled: false
+- id: the_standard_hk
+  name: The Standard Hong Kong
+  url: https://www.thestandard.com.hk/newsfeed/latest/news.xml
+  type: rss
+  lang: en
+  country: hk
+  category: world
+  enabled: false
+- id: the_hindu_in
+  name: The Hindu
+  url: https://www.thehindu.com/feeder/default.rss
+  type: rss
+  lang: en
+  country: in
+  category: world
+  enabled: false
+- id: times_of_india
+  name: Times of India Top Stories
+  url: https://timesofindia.indiatimes.com/rssfeedstopstories.cms
+  type: rss
+  lang: en
+  country: in
+  category: world
+  enabled: false
+- id: indian_express_in
+  name: The Indian Express Front Page
+  url: http://indianexpress.com/print/front-page/feed/
+  type: rss
+  lang: en
+  country: in
+  category: world
+  enabled: false
+- id: business_standard_in
+  name: Business Standard India
+  url: https://www.business-standard.com/rss/home_page_top_stories.rss
+  type: rss
+  lang: en
+  country: in
+  category: business
+  enabled: false
+- id: inquirer_ph
+  name: INQUIRER.net
+  url: https://www.inquirer.net/fullfeed
+  type: rss
+  lang: en
+  country: ph
+  category: world
+  enabled: false
+- id: gma_news_ph
+  name: GMA News Philippines
+  url: https://data.gmanews.tv/gno/rss/news/feed.xml
+  type: rss
+  lang: en
+  country: ph
+  category: world
+  enabled: false
+- id: businessmirror_ph
+  name: BusinessMirror Philippines
+  url: https://businessmirror.com.ph/feed/
+  type: rss
+  lang: en
+  country: ph
+  category: business
+  enabled: false
+- id: express_tribune_pk
+  name: The Express Tribune
+  url: https://tribune.com.pk/feed/home
+  type: rss
+  lang: en
+  country: pk
+  category: world
+  enabled: false
+- id: the_nation_pk
+  name: The Nation Pakistan
+  url: https://nation.com.pk/rss/top-stories
+  type: rss
+  lang: en
+  country: pk
   category: world
   enabled: false

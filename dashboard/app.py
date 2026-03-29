@@ -108,27 +108,32 @@ PAGE_SIZE = 20
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse("index.html", {"request": request, "active_page": "feed"})
 
 
 @app.get("/pipeline", response_class=HTMLResponse)
 async def pipeline_view(request: Request):
-    return templates.TemplateResponse("pipeline.html", {"request": request})
+    return templates.TemplateResponse("pipeline.html", {"request": request, "active_page": "pipeline"})
 
 
 @app.get("/intelligence", response_class=HTMLResponse)
 async def intelligence_view(request: Request):
-    return templates.TemplateResponse("intelligence.html", {"request": request})
+    return templates.TemplateResponse("intelligence.html", {"request": request, "active_page": "intelligence"})
 
 
 @app.get("/newsletter", response_class=HTMLResponse)
 async def newsletter_view(request: Request):
-    return templates.TemplateResponse("newsletter.html", {"request": request})
+    return templates.TemplateResponse("newsletter.html", {"request": request, "active_page": "newsletter"})
 
 
 @app.get("/debates", response_class=HTMLResponse)
 async def debates_view(request: Request):
-    return templates.TemplateResponse("debates.html", {"request": request})
+    return templates.TemplateResponse("debates.html", {"request": request, "active_page": "debates"})
+
+
+@app.get("/rag", response_class=HTMLResponse)
+async def rag_view(request: Request):
+    return templates.TemplateResponse("rag.html", {"request": request, "active_page": "rag"})
 
 
 @app.websocket("/ws/pipeline")

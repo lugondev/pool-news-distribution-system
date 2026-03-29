@@ -169,7 +169,7 @@ async def test_provider(provider_id: str):
     )
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
-    model = provider.get("model") or cfg.get("ai", {}).get("model", "gpt-4o-mini")
+    model = provider.get("model") or cfg.get("ai", {}).get("model", "")
     tone = cfg.get("ai", {}).get("tone", "general")
     return await test_ai_connection(
         api_key=provider.get("api_key"),

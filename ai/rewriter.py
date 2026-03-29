@@ -13,6 +13,7 @@ from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 import redis.asyncio as aioredis
+from ai.provider_utils import build_response_format, parse_ai_json, SCHEMA_LANG_SUMMARY, SCHEMA_TEST_SUMMARY
 from crawler.dedup import check_ai_duplicate, register_ai_simhash
 from storage.redis_store import (
     pop_pending_ai_articles,
@@ -36,7 +37,16 @@ _client_fingerprint: str | None = None
 def _load_ai_config() -> dict:
     with open("config/settings.yaml") as f:
         cfg = yaml.safe_load(f)
-    return cfg.get("ai", {})
+    ai = cfg.get("ai", {})
+    # Inject the active provider's model as top-level "model" so all callers
+    # that do cfg.get("model") get the value from settings.yaml, not a hardcode.
+    if not ai.get("model"):
+        pid = ai.get("provider_id")
+        for p in ai.get("providers", []):
+            if p.get("id") == pid and p.get("model"):
+                ai = {**ai, "model": p["model"]}
+                break
+    return ai
 
 
 def get_openai_client(
@@ -60,8 +70,7 @@ def get_openai_client(
 
     # Cloudflare Workers AI uses "Bearer <token>" — the SDK sends "Bearer <api_key>"
     # by default, so api_key should be set to just the token (no "Bearer " prefix).
-    # Cloudflare also does not support response_format={"type":"json_object"} on all
-    # models — callers should handle JSON parse errors gracefully.
+    # Cloudflare requires response_format={"type":"json_schema"} — use build_response_format().
     _client = AsyncOpenAI(
         api_key=api_key,
         base_url=base_url,
@@ -185,7 +194,7 @@ async def rewrite_article(
     """
     client = get_openai_client(api_key=api_key, base_url=base_url)
     cfg = _load_ai_config()
-    resolved_model = model or cfg.get("model", "gpt-4o-mini")
+    resolved_model = model or cfg.get("model", "")
     custom_system = (prompt_system_override or cfg.get("prompt_system") or "").strip()
     custom_template = (
         prompt_template_override or cfg.get("prompt_template") or ""
@@ -231,17 +240,13 @@ async def rewrite_article(
             content=article_content[:1500],
         )
 
-    # Cloudflare Workers AI models don't support response_format on all models —
-    # fall back to plain completion and extract JSON from the response text.
-    is_cloudflare = base_url and "cloudflare.com" in (base_url or "")
     create_kwargs: dict = {
         "model": resolved_model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_tokens,
         "temperature": temperature,
+        "response_format": build_response_format(base_url, "summary", SCHEMA_LANG_SUMMARY),
     }
-    if not is_cloudflare:
-        create_kwargs["response_format"] = {"type": "json_object"}
 
     response = await client.chat.completions.create(**create_kwargs)
 
@@ -249,15 +254,7 @@ async def rewrite_article(
     if not resp_content:
         raise ValueError(f"Model returned empty content (model={resolved_model})")
 
-    # Extract JSON block — handles models that wrap JSON in markdown code fences
-    raw = resp_content.strip()
-    if raw.startswith("```"):
-        # Strip ```json ... ``` fences
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-        raw = raw.strip()
-    result = json.loads(raw)
+    result = parse_ai_json(resp_content)
     tokens = response.usage.total_tokens if response.usage else 0
 
     summaries: dict[str, str] = {}
@@ -280,7 +277,7 @@ async def test_ai_connection(
     cfg = _load_ai_config()
     resolved_key = api_key or cfg.get("api_key", "")
     resolved_url = base_url or cfg.get("base_url", "https://api.openai.com/v1")
-    resolved_model = model or cfg.get("model", "gpt-4o-mini")
+    resolved_model = model or cfg.get("model", "")
     custom_system = (cfg.get("prompt_system") or "").strip()
     tone_instruction = custom_system or TONE_PROMPTS.get(tone, TONE_PROMPTS["general"])
 
@@ -311,7 +308,7 @@ async def test_ai_connection(
                 }
             ],
             max_tokens=120,
-            response_format={"type": "json_object"},
+            response_format=build_response_format(resolved_url, "test_summary", SCHEMA_TEST_SUMMARY),
             temperature=0.3,
         )
         ms = int((time.monotonic() - t0) * 1000)
@@ -325,7 +322,7 @@ async def test_ai_connection(
                 "ms": ms,
             }
         tokens = response.usage.total_tokens if response.usage else 0
-        result = json.loads(content)
+        result = parse_ai_json(content)
         return {
             "ok": True,
             "model": resolved_model,
@@ -335,6 +332,7 @@ async def test_ai_connection(
             "tokens": tokens,
             "vi": result.get("vi", ""),
             "en": result.get("en", ""),
+            "raw": result,
         }
     except Exception as e:
         ms = int((time.monotonic() - t0) * 1000) if "t0" in dir() else 0

@@ -181,7 +181,7 @@ async def ask(
     # Step 4 — Generate answer
     cfg = _load_ai_config()
     client = get_openai_client(api_key=api_key, base_url=base_url)
-    model = cfg.get("model", "gpt-4o-mini")
+    model = cfg.get("model", "")
     system_prompt = RAG_SYSTEM_PROMPT.get(lang, RAG_SYSTEM_PROMPT["en"])
 
     user_message = f"Context (news articles):\n{context}\n\nQuestion: {question}"

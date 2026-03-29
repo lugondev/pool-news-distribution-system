@@ -1,0 +1,21 @@
+<nav class="nav-links">
+  <a href="/" {% if active_page == 'feed' %}class="active"{% endif %}>Feed</a>
+  <a href="/newsletter" {% if active_page == 'newsletter' %}class="active"{% endif %}>Newsletter</a>
+  <div class="dropdown">
+    <button class="dropdown-toggle {% if active_page in ['intelligence', 'debates', 'rag'] %}active{% endif %}">AI ▾</button>
+    <div class="dropdown-menu">
+      <a href="/intelligence" {% if active_page == 'intelligence' %}class="active"{% endif %}>Intelligence</a>
+      <a href="/debates" {% if active_page == 'debates' %}class="active"{% endif %}>Debates</a>
+      <a href="/rag" {% if active_page == 'rag' %}class="active"{% endif %}>RAG</a>
+    </div>
+  </div>
+  <div class="dropdown">
+    <button class="dropdown-toggle {% if active_page in ['pipeline', 'sources', 'settings', 'logs'] %}active{% endif %}">System ▾</button>
+    <div class="dropdown-menu">
+      <a href="/pipeline" {% if active_page == 'pipeline' %}class="active"{% endif %}>Pipeline</a>
+      <a href="/sources" {% if active_page == 'sources' %}class="active"{% endif %}>Sources</a>
+      <a href="/settings" {% if active_page == 'settings' %}class="active"{% endif %}>Settings</a>
+      <a href="/logs" {% if active_page == 'logs' %}class="active"{% endif %}>Logs</a>
+    </div>
+  </div>
+</nav>

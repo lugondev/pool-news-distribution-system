@@ -38,6 +38,7 @@ import redis.asyncio as aioredis
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ai.rewriter import get_openai_client, _load_ai_config
+from ai.provider_utils import build_response_format, parse_ai_json, SCHEMA_NEWSLETTER
 from storage.redis_keys import (
     NEWSLETTER_LATEST_KEY,
     NEWSLETTER_LATEST_AT_KEY,
@@ -98,11 +99,13 @@ async def _call_newsletter_ai(
     language: str,
     api_key: str | None,
     base_url: str | None,
-    model: str,
+    model: str | None,
     max_tokens: int,
     temperature: float,
 ) -> dict:
     client = get_openai_client(api_key=api_key, base_url=base_url)
+    if not model:
+        model = _load_ai_config().get("model", "")
     today = datetime.now(timezone.utc).strftime("%B %d, %Y")
 
     # Build compact article list for prompt
@@ -125,26 +128,18 @@ async def _call_newsletter_ai(
         max_per_cat=MAX_ARTICLES_PER_CATEGORY,
     )
 
-    # Cloudflare Workers AI doesn't support response_format on all models
-    is_cloudflare = base_url and "cloudflare.com" in base_url
     create_kwargs: dict = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_tokens,
         "temperature": temperature,
+        "response_format": build_response_format(base_url, "newsletter", SCHEMA_NEWSLETTER),
     }
-    if not is_cloudflare:
-        create_kwargs["response_format"] = {"type": "json_object"}
 
     resp = await client.chat.completions.create(**create_kwargs)
 
-    raw = resp.choices[0].message.content or "{}"
-    # Strip markdown fences if present (Cloudflare models may wrap JSON in ```json ... ```)
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    return json.loads(raw.strip())
+    raw = resp.choices[0].message.content
+    return parse_ai_json(raw, fallback={})
 
 
 # ── HTML renderer ─────────────────────────────────────────────────────────────
@@ -258,7 +253,7 @@ async def generate_newsletter(
     language: str = "English",
     api_key: str | None = None,
     base_url: str | None = None,
-    model: str = "gpt-4o-mini",
+    model: str | None = None,
     max_tokens: int = 1500,
     temperature: float = 0.4,
     lookback_seconds: int = 86400,
