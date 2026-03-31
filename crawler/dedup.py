@@ -57,6 +57,28 @@ class DedupResult:
 
 
 
+async def _sscan_hamming(
+    redis: aioredis.Redis, key: str, current_hash: int, threshold: int
+) -> int | None:
+    """
+    SSCAN the set in chunks of 200, return first matched stored_hash or None.
+    Early exit on first match — avoids loading full set into memory.
+    """
+    cursor = 0
+    while True:
+        cursor, chunk = await redis.sscan(key, cursor=cursor, count=200)
+        for raw in chunk:
+            try:
+                stored_hash = int(raw)
+            except (ValueError, TypeError):
+                continue
+            if _hamming_distance(current_hash, stored_hash) <= threshold:
+                return stored_hash
+        if cursor == 0:
+            break
+    return None
+
+
 async def check_ai_duplicate(
     redis: aioredis.Redis, title: str, threshold: int = 6
 ) -> DedupResult:
@@ -66,11 +88,9 @@ async def check_ai_duplicate(
     Does NOT write to the set — call register_ai_simhash() after successful AI.
     """
     current_hash = _simhash(title)
-    stored = await redis.smembers(AI_DEDUP_KEY)
-    for raw in stored:
-        stored_hash = int(raw)
-        if _hamming_distance(current_hash, stored_hash) <= threshold:
-            return DedupResult(is_duplicate=True, simhash=current_hash, matched_hash=stored_hash)
+    matched = await _sscan_hamming(redis, AI_DEDUP_KEY, current_hash, threshold)
+    if matched is not None:
+        return DedupResult(is_duplicate=True, simhash=current_hash, matched_hash=matched)
     return DedupResult(is_duplicate=False, simhash=current_hash)
 
 
@@ -84,11 +104,9 @@ async def register_ai_simhash(redis: aioredis.Redis, title: str) -> None:
 async def check_duplicate(redis: aioredis.Redis, title: str, threshold: int = 3) -> DedupResult:
     current_hash = _simhash(title)
 
-    stored = await redis.smembers(DEDUP_KEY)
-    for raw in stored:
-        stored_hash = int(raw)
-        if _hamming_distance(current_hash, stored_hash) <= threshold:
-            return DedupResult(is_duplicate=True, simhash=current_hash, matched_hash=stored_hash)
+    matched = await _sscan_hamming(redis, DEDUP_KEY, current_hash, threshold)
+    if matched is not None:
+        return DedupResult(is_duplicate=True, simhash=current_hash, matched_hash=matched)
 
     await redis.sadd(DEDUP_KEY, current_hash)
     await redis.expire(DEDUP_KEY, DEDUP_TTL_SECONDS)

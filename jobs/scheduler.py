@@ -37,6 +37,7 @@ from storage.redis_store import (
     save_article_enrichment,
     save_embedding,
     get_article,
+    get_articles_batch,
 )
 from storage.sqlite_stats import log_system_event
 
@@ -520,12 +521,8 @@ async def enrich_job(redis: aioredis.Redis) -> None:
         _job_states["enrich"] = "idle"
         return
 
-    # Fetch full article data from Redis
-    articles = []
-    for aid in article_ids:
-        art = await get_article(redis, aid)
-        if art:
-            articles.append(art)
+    # Fetch full article data in a single chunked pipeline (replaces N sequential get_article calls)
+    articles = await get_articles_batch(redis, article_ids)
 
     if not articles:
         _job_states["enrich"] = "idle"

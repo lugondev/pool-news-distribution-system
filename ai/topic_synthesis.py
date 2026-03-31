@@ -19,6 +19,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 import redis.asyncio as aioredis
 from ai.rewriter import get_openai_client, TONE_PROMPTS, _load_ai_config
+from storage.config_cache import cached_yaml  # noqa: F401 — available for future use
 from ai.provider_utils import build_response_format, parse_ai_json, SCHEMA_TOPIC_SYNTHESIS
 from webhook.dispatcher import enqueue_dispatch
 
@@ -339,42 +340,52 @@ async def _get_unseen_articles(
 ) -> list[dict]:
     """Return articles for the category that this hook has not yet synthesized.
 
-    Fetches 3× max_articles from the feed (newest first) to have a large enough
-    pool after filtering, then removes:
-      - already-used article IDs (tracked per-hook per-category)
-      - articles older than SYNTH_MAX_AGE_SECONDS (too stale)
-    Result is returned newest-first, capped at max_articles.
+    Optimised: pushes age-filter to Redis via ZRANGEBYSCORE (timestamp cutoff)
+    and fetches used_ids in the same pipeline — avoids Python-side filtering
+    and eliminates the 3× over-fetch pattern.
     """
-    candidates = await get_recent_articles_by_category(
-        redis, category, limit=max_articles * 3, exclude_synthetic=True
-    )
-    if not candidates:
-        return []
-
-    # Age filter: drop articles older than SYNTH_MAX_AGE_SECONDS
     now_ts = datetime.now(timezone.utc).timestamp()
-    fresh = []
-    for art in candidates:
-        ts_str = art.get("fetched_at") or art.get("published_at", "")
-        try:
-            dt = datetime.fromisoformat(ts_str)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            if (now_ts - dt.timestamp()) <= SYNTH_MAX_AGE_SECONDS:
-                fresh.append(art)
-        except (ValueError, TypeError):
-            fresh.append(art)  # if no parseable timestamp, keep it
+    cutoff = now_ts - SYNTH_MAX_AGE_SECONDS
+    used_key = f"{SYNTH_USED_KEY}:{hook_id}:{category}"
+    feed_key = f"news:cat:{category}"
 
-    if not fresh:
+    # Single pipeline: get fresh candidate IDs + used IDs simultaneously
+    pipe = redis.pipeline()
+    # ZRANGEBYSCORE returns IDs with score (pub timestamp) >= cutoff, newest-first
+    # Fetch 2× to have pool after filtering out used ones and synthetics
+    pipe.zrangebyscore(feed_key, cutoff, "+inf", start=0, num=max_articles * 2)
+    pipe.zrange(used_key, 0, -1)
+    candidate_raw, used_raw = await pipe.execute()
+
+    if not candidate_raw:
         return []
 
-    # Used-article filter: per-hook per-category seen set
-    used_key = f"{SYNTH_USED_KEY}:{hook_id}:{category}"
-    used_raw = await redis.zrange(used_key, 0, -1)
     used_ids = {m.decode() if isinstance(m, bytes) else m for m in used_raw}
+    unseen_ids = [
+        (r.decode() if isinstance(r, bytes) else r)
+        for r in candidate_raw
+        if (r.decode() if isinstance(r, bytes) else r) not in used_ids
+    ][:max_articles]
 
-    unseen = [a for a in fresh if a["id"] not in used_ids]
-    return unseen[:max_articles]
+    if not unseen_ids:
+        return []
+
+    # Fetch article hashes in a second pipeline
+    pipe2 = redis.pipeline()
+    for aid in unseen_ids:
+        pipe2.hgetall(f"news:{aid}")
+    results = await pipe2.execute()
+
+    articles = []
+    for raw in results:
+        if not raw:
+            continue
+        article = {k.decode(): v.decode() for k, v in raw.items()}
+        if article.get("type") == "synthetic":
+            continue
+        articles.append(article)
+
+    return articles
 
 
 async def _mark_articles_used(

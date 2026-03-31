@@ -2,11 +2,12 @@
   <a href="/" {% if active_page == 'feed' %}class="active"{% endif %}>Feed</a>
   <a href="/newsletter" {% if active_page == 'newsletter' %}class="active"{% endif %}>Newsletter</a>
   <div class="dropdown">
-    <button class="dropdown-toggle {% if active_page in ['intelligence', 'debates', 'rag'] %}active{% endif %}">AI ▾</button>
+    <button class="dropdown-toggle {% if active_page in ['intelligence', 'debates', 'rag', 'social_agents'] %}active{% endif %}">AI ▾</button>
     <div class="dropdown-menu">
       <a href="/intelligence" {% if active_page == 'intelligence' %}class="active"{% endif %}>Intelligence</a>
       <a href="/debates" {% if active_page == 'debates' %}class="active"{% endif %}>Debates</a>
       <a href="/rag" {% if active_page == 'rag' %}class="active"{% endif %}>RAG</a>
+      <a href="/social-agents" {% if active_page == 'social_agents' %}class="active"{% endif %}>Social Agents</a>
     </div>
   </div>
   <div class="dropdown">

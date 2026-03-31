@@ -12,10 +12,10 @@ Key structure:
 
 import json
 import logging
+import time
 from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
-import yaml
 
 from crawler.rss_parser import Article
 from storage.redis_keys import (
@@ -27,14 +27,19 @@ from storage.redis_keys import (
     DEDUP_TTL_SECONDS,
 )
 from ai.scorer import score_article
+from storage.config_cache import cached_yaml
 
 logger = logging.getLogger(__name__)
 
+_SETTINGS_PATH = "config/settings.yaml"
+
+# Backpressure cache: avoid config reload + ZCARD on every save_article call.
+# Refreshes every 30s and only runs the ZCARD check every 10 saves.
+_bp_cache: dict = {"cfg": None, "ts": 0.0, "counter": 0}
+
 
 def _load_queue_config() -> dict:
-    with open("config/settings.yaml") as f:
-        cfg = yaml.safe_load(f)
-    return cfg.get("scoring", {})
+    return cached_yaml(_SETTINGS_PATH).get("scoring", {})
 
 
 def _ts(dt: datetime) -> float:
@@ -81,9 +86,10 @@ async def save_article(redis: aioredis.Redis, article: Article) -> None:
     """Save article to Redis với TTL và index vào các Sorted Sets."""
     key = f"news:{article.id}"
 
-    # Check existing AI status BEFORE pipeline to avoid overwriting completed summaries
-    # and to avoid re-enqueueing articles that have already been processed.
-    existing_status_raw = await redis.hget(key, "ai_status")
+    # Fetch only the fields we need to decide overwrite logic — batch with HMGET
+    # to avoid a separate HGET round-trip before the main pipeline.
+    existing_vals = await redis.hmget(key, "ai_status", "ai_enrich_status")
+    existing_status_raw, existing_enrich_raw = existing_vals
     existing_status = existing_status_raw.decode() if existing_status_raw else None
     already_processed = existing_status and existing_status != "pending"
 
@@ -140,8 +146,8 @@ async def save_article(redis: aioredis.Redis, article: Article) -> None:
 
     # Enqueue for enrichment immediately after save — no need to wait for AI rewrite.
     # Embedder uses title+content from RSS, not AI summaries.
-    existing_enrich = await redis.hget(key, "ai_enrich_status")
-    if not existing_enrich or existing_enrich.decode() != "done":
+    # existing_enrich_raw was already fetched via HMGET above — no extra RTT.
+    if not existing_enrich_raw or existing_enrich_raw.decode() != "done":
         await redis.sadd(ENRICH_PENDING_KEY, article.id)
         await redis.expire(ENRICH_PENDING_KEY, DEDUP_TTL_SECONDS)
 
@@ -157,9 +163,22 @@ async def _apply_backpressure(redis: aioredis.Redis) -> None:
     Uses ZPOPMIN to remove the least important articles (lowest score = oldest
     or lowest-signal). This prevents unbounded queue growth during crawl spikes
     and ensures high-priority articles are never starved.
+
+    Optimised: config reloads at most every 30s; ZCARD runs every 10 saves
+    to avoid a Redis round-trip on every single article save.
     """
     try:
-        cfg = _load_queue_config()
+        _bp_cache["counter"] += 1
+        # Skip ZCARD check on every save — only check every 10 saves
+        if _bp_cache["counter"] % 10 != 0:
+            return
+
+        now = time.monotonic()
+        if now - _bp_cache["ts"] > 30:
+            _bp_cache["cfg"] = _load_queue_config()
+            _bp_cache["ts"] = now
+
+        cfg = _bp_cache["cfg"] or {}
         max_size = int(cfg.get("queue_max_size", 0))
         if max_size <= 0:
             return
@@ -181,6 +200,27 @@ async def get_article(redis: aioredis.Redis, article_id: str) -> dict | None:
     if not data:
         return None
     return {k.decode(): v.decode() for k, v in data.items()}
+
+
+async def get_articles_batch(
+    redis: aioredis.Redis, ids: list[str], chunk_size: int = 100
+) -> list[dict]:
+    """
+    Fetch multiple articles in chunked pipelines.
+
+    Chunking keeps each pipeline under chunk_size commands to avoid large
+    memory allocations on both client and server side.
+    """
+    results: list[dict] = []
+    for i in range(0, len(ids), chunk_size):
+        pipe = redis.pipeline()
+        for aid in ids[i : i + chunk_size]:
+            pipe.hgetall(f"news:{aid}")
+        batch = await pipe.execute()
+        for raw in batch:
+            if raw:
+                results.append({k.decode(): v.decode() for k, v in raw.items()})
+    return results
 
 
 async def update_article_content(
@@ -378,16 +418,15 @@ async def get_feed_stats(redis: aioredis.Redis) -> dict:
 async def pop_pending_enrichments(
     redis: aioredis.Redis, count: int = 20
 ) -> list[str]:
-    """Atomically pop up to `count` article_ids from the enrichment queue."""
-    pipe = redis.pipeline()
-    for _ in range(count):
-        pipe.spop(ENRICH_PENDING_KEY)
-    results = await pipe.execute()
-    article_ids = []
-    for r in results:
-        if r is not None:
-            article_ids.append(r.decode() if isinstance(r, bytes) else r)
-    return article_ids
+    """Atomically pop up to `count` article_ids from the enrichment queue.
+
+    Uses SPOP count (single command) instead of N individual SPOP calls
+    in a pipeline — reduces both round-trips and server-side overhead.
+    """
+    raw = await redis.spop(ENRICH_PENDING_KEY, count)
+    if not raw:
+        return []
+    return [r.decode() if isinstance(r, bytes) else r for r in raw]
 
 
 async def save_article_enrichment(

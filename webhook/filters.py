@@ -21,6 +21,23 @@ logger = logging.getLogger(__name__)
 # Sliding-window counters: endpoint_id → deque of monotonic timestamps
 _rate_counters: dict[str, deque] = defaultdict(deque)
 
+# Cleanup: remove empty deques periodically to prevent unbounded dict growth.
+_last_cleanup_ts: float = 0.0
+_CLEANUP_INTERVAL = 300.0  # 5 minutes
+
+
+def _maybe_cleanup_counters() -> None:
+    global _last_cleanup_ts
+    now = time.monotonic()
+    if now - _last_cleanup_ts < _CLEANUP_INTERVAL:
+        return
+    _last_cleanup_ts = now
+    stale = [k for k, v in _rate_counters.items() if len(v) == 0]
+    for k in stale:
+        del _rate_counters[k]
+    if stale:
+        logger.debug(f"Rate counter cleanup: removed {len(stale)} stale entries")
+
 
 def passes_filter(article: dict, config: dict) -> bool:
     """Return True if the article passes the category, source, and article type filters in config."""
@@ -76,6 +93,7 @@ def check_rate_limit(endpoint_id: str, config: dict) -> bool:
     window_seconds = window_minutes * 60
     now = time.monotonic()
 
+    _maybe_cleanup_counters()
     dq = _rate_counters[endpoint_id]
     # Evict timestamps outside the sliding window
     while dq and now - dq[0] > window_seconds:

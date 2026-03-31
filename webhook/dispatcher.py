@@ -9,6 +9,7 @@ Call enqueue_dispatch() to add a job; start dispatch_worker() in app lifespan.
 import asyncio
 import json
 import logging
+import random
 import time
 
 import httpx
@@ -31,6 +32,19 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 _dispatch_queue: asyncio.Queue = asyncio.Queue(maxsize=2000)
 
+# Redis DLQ key for articles dropped when queue is full
+DISPATCH_DLQ_KEY = "webhooks:dlq"
+DISPATCH_DLQ_MAX = 1000  # max DLQ entries (LTRIM)
+
+# Module-level Redis ref — set by init_dispatcher() called from main.py lifespan
+_redis = None
+
+
+def init_dispatcher(redis) -> None:
+    """Set the Redis client for DLQ fallback. Call once in app lifespan."""
+    global _redis
+    _redis = redis
+
 
 async def enqueue_dispatch(
     article: dict,
@@ -38,7 +52,7 @@ async def enqueue_dispatch(
     telegram_channels: list[dict] | None = None,
     twitter_accounts: list[dict] | None = None,
 ) -> None:
-    """Put a dispatch job in the queue (non-blocking; drops if full)."""
+    """Put a dispatch job in the queue. Falls back to Redis DLQ when full."""
     try:
         _dispatch_queue.put_nowait((
             article, endpoints,
@@ -47,8 +61,20 @@ async def enqueue_dispatch(
         ))
     except asyncio.QueueFull:
         logger.warning(
-            f"Dispatch queue full, dropping article {article.get('id', '?')}"
+            f"Dispatch queue full, article {article.get('id', '?')} → DLQ"
         )
+        if _redis is not None:
+            try:
+                dlq_item = json.dumps({
+                    "article_id": article.get("id"),
+                    "title": article.get("title", "")[:100],
+                    "ts": time.time(),
+                    "endpoint_ids": [e.get("id", e.get("url", "")) for e in endpoints],
+                })
+                await _redis.lpush(DISPATCH_DLQ_KEY, dlq_item)
+                await _redis.ltrim(DISPATCH_DLQ_KEY, 0, DISPATCH_DLQ_MAX - 1)
+            except Exception as dlq_err:
+                logger.error(f"DLQ write failed for {article.get('id', '?')}: {dlq_err}")
 
 
 async def dispatch_worker(rate_limit_seconds: float = 0.3) -> None:
@@ -183,7 +209,10 @@ async def _dispatch_to_url(
     t0 = time.monotonic()
     for attempt in range(retry_attempts):
         if attempt > 0:
-            await asyncio.sleep(retry_delay_seconds)
+            # Exponential backoff with jitter: base * 2^attempt + rand(0,1)
+            # Caps at 60s to avoid very long waits on transient failures.
+            delay = min(retry_delay_seconds * (2 ** (attempt - 1)) + random.uniform(0, 1), 60)
+            await asyncio.sleep(delay)
         try:
             status_code, success = await _send_webhook(
                 url, payload, method, timeout, content_type

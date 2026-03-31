@@ -8,7 +8,6 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import yaml
 from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -21,9 +20,12 @@ from storage.redis_store import (
     update_article_ai_config,
 )
 from storage.sqlite_stats import log_ai_usage
+from storage.config_cache import cached_yaml
 from webhook.dispatcher import enqueue_dispatch
 
 logger = logging.getLogger(__name__)
+
+_SETTINGS_PATH = "config/settings.yaml"
 
 try:
     from realtime.manager import ws_manager
@@ -35,8 +37,7 @@ _client_fingerprint: str | None = None
 
 
 def _load_ai_config() -> dict:
-    with open("config/settings.yaml") as f:
-        cfg = yaml.safe_load(f)
+    cfg = cached_yaml(_SETTINGS_PATH)
     ai = cfg.get("ai", {})
     # Inject the active provider's model as top-level "model" so all callers
     # that do cfg.get("model") get the value from settings.yaml, not a hardcode.
@@ -554,52 +555,50 @@ async def process_pending_articles(
 
     ai_cfg = _load_ai_config()
     category_counts = await _get_category_counts(redis)
-    # Spread delay is computed against the full batch so throughput holds even when articles are skipped.
+
+    # Parallel concurrency: process up to parallel_batch articles concurrently.
+    # Controlled by a Semaphore to respect provider rate limits.
+    # spread_seconds still applies (delay before each AI call within the semaphore).
+    parallel_batch = int(ai_cfg.get("parallel_batch", 3))
+    sem = asyncio.Semaphore(parallel_batch)
     inter_delay = spread_seconds / len(articles) if spread_seconds > 0 and len(articles) > 1 else 0
 
-    processed = 0
-    ai_call_count = 0
-
-    for article in articles:
+    async def _process_one(article: dict) -> int:
+        """Process a single article. Returns 1 if processed, 0 if skipped."""
         title = article.get("title", "")
         dedup_key = f"ai_done_{config_id or 'builtin'}_{target_language or 'origin'}"
 
         # Per-config+lang dedup: skip if already processed with this exact combo
         if config_id or target_language:
             if await redis.hget(f"news:{article['id']}", dedup_key):
-                processed += 1
-                continue
+                return 1
 
         # Raw dispatch for ai_mode="off" hooks — no AI processing needed
         if raw_webhook_endpoints or raw_telegram_channels:
             await enqueue_dispatch(article, raw_webhook_endpoints or [], telegram_channels=raw_telegram_channels)
 
         if await _is_age_stale(redis, article, category_counts, ai_cfg):
-            processed += 1
-            continue
+            return 1
 
         if not webhook_endpoints and not telegram_channels:
-            processed += 1
-            continue
+            return 1
 
         if await _is_ai_duplicate(redis, article, title, perform_ai_dedup, ai_dedup_threshold):
-            processed += 1
-            continue
-
-        if ai_call_count > 0 and inter_delay > 0:
-            await asyncio.sleep(inter_delay)
+            return 1
 
         raw_lang = article.get("lang") or article.get("declared_lang") or "en"
         origin_lang = raw_lang[:2].lower() if raw_lang and raw_lang != "und" else "en"
         tgt_lang = target_language if target_language and target_language != origin_lang else None
 
-        enriched = await _run_ai_rewrite(
-            redis, article, title, origin_lang, tgt_lang,
-            config_id, dedup_key, perform_ai_dedup,
-            model, max_tokens, temperature, tone, api_key, base_url,
-            prompt_system_override, prompt_template_override,
-        )
-        ai_call_count += 1
+        async with sem:
+            if inter_delay > 0:
+                await asyncio.sleep(inter_delay)
+            enriched = await _run_ai_rewrite(
+                redis, article, title, origin_lang, tgt_lang,
+                config_id, dedup_key, perform_ai_dedup,
+                model, max_tokens, temperature, tone, api_key, base_url,
+                prompt_system_override, prompt_template_override,
+            )
 
         if enriched and (webhook_endpoints or telegram_channels or twitter_accounts):
             await enqueue_dispatch(
@@ -609,8 +608,10 @@ async def process_pending_articles(
                 twitter_accounts=twitter_accounts,
             )
 
-        processed += 1
         if enriched:
             logger.info(f"Processed article {article['id']}: {article['title'][:60]}...")
+        return 1
 
+    results = await asyncio.gather(*[_process_one(a) for a in articles], return_exceptions=True)
+    processed = sum(r for r in results if isinstance(r, int))
     return processed

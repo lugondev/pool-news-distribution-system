@@ -28,6 +28,7 @@ from dashboard.config_io import get_categories, read_sources
 from dashboard.routes.dispatch_ui import router as dispatch_ui_router
 from dashboard.routes.settings_ui import router as settings_ui_router
 from dashboard.routes.sources_ui import router as sources_ui_router
+from dashboard.routes.social_agents_ui import router as social_agents_ui_router
 from dashboard.templates_state import templates
 from storage.redis_store import get_article, get_feed_stats, get_latest_articles
 from storage.sqlite_stats import (
@@ -99,6 +100,7 @@ app.include_router(api_router)
 app.include_router(sources_ui_router)
 app.include_router(settings_ui_router)
 app.include_router(dispatch_ui_router)
+app.include_router(social_agents_ui_router)
 
 PAGE_SIZE = 20
 

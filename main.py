@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 
 import redis.asyncio as aioredis
 import uvicorn
-import yaml
+import yaml  # still used in __main__ block
 from dotenv import load_dotenv
 from fastapi import FastAPI
 
@@ -26,7 +26,7 @@ from jobs.scheduler import get_scheduler
 from storage.sqlite_stats import init_db
 from vector_db.weaviate_store import init_weaviate, close_weaviate
 from storage.lake_store import init_lake
-from webhook.dispatcher import dispatch_worker
+from webhook.dispatcher import dispatch_worker, init_dispatcher
 
 
 DEV_MODE = os.environ.get("DEV_MODE", "0") == "1"
@@ -35,25 +35,26 @@ DEV_MODE = os.environ.get("DEV_MODE", "0") == "1"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting News Aggregator%s...", " [DEV MODE]" if DEV_MODE else "")
-    await init_db()
-    logger.info("SQLite initialized")
 
-    await init_weaviate()
+    # Parallel init: SQLite and Weaviate are independent — run concurrently
+    await asyncio.gather(init_db(), init_weaviate())
+    logger.info("SQLite + Weaviate initialized")
 
-    with open("config/settings.yaml") as f:
-        _startup_cfg = yaml.safe_load(f)
+    # Single config read — reused for lake and scheduler config below
+    from storage.config_cache import cached_yaml
+    _startup_cfg = cached_yaml("config/settings.yaml")
     lake_cfg = _startup_cfg.get("lake", {})
     if lake_cfg.get("enabled", False):
         init_lake(lake_cfg)
 
     redis = get_redis()
+    init_dispatcher(redis)
 
     _dispatch_task = None
     scheduler = None
 
     if not DEV_MODE:
-        with open("config/settings.yaml") as f:
-            _cfg = yaml.safe_load(f)
+        _cfg = _startup_cfg  # reuse already-loaded config
         _cr = _cfg.get("crawler", {})
         _ai = _cfg.get("ai", {})
         scheduler = get_scheduler(redis)

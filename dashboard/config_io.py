@@ -2,11 +2,16 @@
 
 Single source of truth for reading and writing config/sources.yaml and
 config/settings.yaml — imported by both JSON API routes and HTML UI routes.
+
+Reads use mtime-based caching (storage.config_cache) to avoid disk I/O
+on every HTMX poll. Writes call invalidate() so the next read reloads.
 """
 
 import os
 
 import yaml
+
+from storage.config_cache import cached_yaml, invalidate
 
 _BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 SOURCES_PATH = os.path.join(_BASE_DIR, "config", "sources.yaml")
@@ -17,8 +22,7 @@ SETTINGS_PATH = os.path.join(_BASE_DIR, "config", "settings.yaml")
 
 
 def read_sources() -> list[dict]:
-    with open(SOURCES_PATH) as f:
-        return yaml.safe_load(f).get("sources", [])
+    return cached_yaml(SOURCES_PATH).get("sources", [])
 
 
 def write_sources(sources: list[dict]) -> None:
@@ -30,19 +34,20 @@ def write_sources(sources: list[dict]) -> None:
             allow_unicode=True,
             sort_keys=False,
         )
+    invalidate(SOURCES_PATH)
 
 
 # ── Settings ─────────────────────────────────────────────────────────────────
 
 
 def read_settings() -> dict:
-    with open(SETTINGS_PATH) as f:
-        return yaml.safe_load(f)
+    return cached_yaml(SETTINGS_PATH)
 
 
 def write_settings(cfg: dict) -> None:
     with open(SETTINGS_PATH, "w") as f:
         yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    invalidate(SETTINGS_PATH)
 
 
 # ── Convenience helpers ───────────────────────────────────────────────────────

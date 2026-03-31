@@ -75,29 +75,42 @@ async def list_news(
     article_type: str | None = None,
 ):
     limit = max(1, min(limit, 100))
-    offset = (page - 1) * limit
+    redis = get_redis()
 
-    fetch_limit = limit * 5 if (lang or ai_status) else limit
-    fetch_offset = (page - 1) * fetch_limit if (lang or ai_status) else offset
+    if not (lang or ai_status):
+        # No in-memory filters: use Redis-native offset/limit directly.
+        # total count is accurate from ZCARD.
+        offset = (page - 1) * limit
+        articles, total = await get_latest_articles(
+            redis,
+            limit=limit,
+            offset=offset,
+            source_id=source or None,
+            category=category or None,
+            article_type=article_type or None,
+        )
+    else:
+        # lang/ai_status are not indexed in Redis — must fetch a larger window
+        # and filter in Python.  Fetch up to 500 recent articles to get an
+        # accurate filtered total, then slice the requested page.
+        # 500 covers ~10h of articles at current crawl rate (~50/h).
+        FILTER_SCAN_LIMIT = 500
+        articles_all, _ = await get_latest_articles(
+            redis,
+            limit=FILTER_SCAN_LIMIT,
+            offset=0,
+            source_id=source or None,
+            category=category or None,
+            article_type=article_type or None,
+        )
+        if lang:
+            articles_all = [a for a in articles_all if a.get("lang") == lang]
+        if ai_status:
+            articles_all = [a for a in articles_all if a.get("ai_status") == ai_status]
 
-    articles, total = await get_latest_articles(
-        get_redis(),
-        limit=fetch_limit,
-        offset=fetch_offset if not (lang or ai_status) else 0,
-        source_id=source or None,
-        category=category or None,
-        article_type=article_type or None,
-    )
-
-    if lang:
-        articles = [a for a in articles if a.get("lang") == lang]
-    if ai_status:
-        articles = [a for a in articles if a.get("ai_status") == ai_status]
-
-    if lang or ai_status:
-        slice_offset = (page - 1) * limit
-        total = len(articles)
-        articles = articles[slice_offset : slice_offset + limit]
+        total = len(articles_all)
+        slice_start = (page - 1) * limit
+        articles = articles_all[slice_start : slice_start + limit]
 
     total_pages = max(1, math.ceil(total / limit))
     return {
