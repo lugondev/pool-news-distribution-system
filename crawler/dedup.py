@@ -4,7 +4,6 @@ Deduplication using SimHash on article titles.
 SimHash cho phép so sánh 2 string bằng hamming distance trên bit-vector.
 Distance <= threshold => coi là trùng nhau.
 """
-import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -34,7 +33,8 @@ def _simhash(text: str, bits: int = 64) -> int:
 
     v = [0] * bits
     for token in tokens:
-        h = int(hashlib.md5(token.encode()).hexdigest(), 16)
+        # hash() builtin is ~10× faster than md5 for non-cryptographic use
+        h = hash(token) & ((1 << bits) - 1)
         for i in range(bits):
             v[i] += 1 if (h >> i) & 1 else -1
 
@@ -66,7 +66,7 @@ async def _sscan_hamming(
     """
     cursor = 0
     while True:
-        cursor, chunk = await redis.sscan(key, cursor=cursor, count=200)
+        cursor, chunk = await redis.sscan(key, cursor=cursor, count=1000)
         for raw in chunk:
             try:
                 stored_hash = int(raw)

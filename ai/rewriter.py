@@ -351,23 +351,35 @@ async def _get_category_counts(
 ) -> dict[str, int]:
     """
     Count articles per category fetched within the last `window_hours`.
-    Samples up to 500 recent entries from the main feed sorted set.
-    Used to distinguish high-volume ("busy") from low-volume ("quiet") categories.
+    Uses SCAN on news:cat:* keys + ZCOUNT per key — ~2 RTTs total
+    instead of the old ZRANGEBYSCORE + N HGET approach (up to 501 RTTs).
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=window_hours)).timestamp()
-    ids = await redis.zrangebyscore("news:feed", cutoff, "+inf", start=0, num=500)
-    if not ids:
+
+    # Discover all category keys (non-blocking cursor scan)
+    cat_keys: list = []
+    cursor = 0
+    while True:
+        cursor, keys = await redis.scan(cursor, match="news:cat:*", count=200)
+        cat_keys.extend(keys)
+        if cursor == 0:
+            break
+
+    if not cat_keys:
         return {}
+
+    # Single pipeline: one ZCOUNT per category key
     pipe = redis.pipeline()
-    for aid in ids:
-        aid_str = aid.decode() if isinstance(aid, bytes) else aid
-        pipe.hget(f"news:{aid_str}", "category")
-    cats = await pipe.execute()
+    for key in cat_keys:
+        pipe.zcount(key, cutoff, "+inf")
+    results = await pipe.execute()
+
     counts: dict[str, int] = {}
-    for c in cats:
-        if c:
-            key = c.decode() if isinstance(c, bytes) else c
-            counts[key] = counts.get(key, 0) + 1
+    for key, count in zip(cat_keys, results):
+        if count:
+            raw = key.decode() if isinstance(key, bytes) else key
+            cat = raw.removeprefix("news:cat:")
+            counts[cat] = count
     return counts
 
 

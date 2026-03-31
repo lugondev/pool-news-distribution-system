@@ -64,26 +64,13 @@ class R2LakeStore:
           articles/dt=YYYY-MM-DD/cat={category}/src={source_id}/{article_id}.jsonl
           synthetic/dt=YYYY-MM-DD/cat={category}/{article_id}.jsonl
 
-        Design questions to consider:
-          • Should `dt` use published_at (article time) or fetched_at (ingest time)?
-          • Should synthetic articles go under a separate top-level prefix?
-          • Is `src` partition worth it? (39 sources × N days = many small files)
+        Design:
+          • dt uses published_at (article time) — consistent with event date, not ingest time.
+          • synthetic articles under separate top-level prefix for easy filtering.
+          • src partition included — acceptable cost for 39 sources, helps isolate per-source.
 
         Return empty string ("") to skip archiving this article.
         """
-        # TODO: implement your partition key strategy (5–10 lines)
-        # Example skeleton:
-        #
-        #   dt = article.get("published_at", "")[:10]   # "2026-03-28"
-        #   category = article.get("category", "unknown")
-        #   source_id = article.get("source_id", "unknown")
-        #   article_id = article.get("id", "unknown")
-        #   article_type = article.get("type", "original")
-        #
-        #   if article_type == "synthetic":
-        #       return f"synthetic/dt={dt}/cat={category}/{article_id}.jsonl"
-        #   return f"articles/dt={dt}/cat={category}/src={source_id}/{article_id}.jsonl"
-
         dt = (article.get("published_at") or article.get("fetched_at") or "")[:10]
         if not dt:
             dt = datetime.now(timezone.utc).strftime("%Y-%m-%d")

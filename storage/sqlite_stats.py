@@ -5,6 +5,7 @@ Dùng aiosqlite để không block event loop.
 
 import json
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,8 +19,25 @@ def _db_path() -> str:
     return DB_PATH
 
 
+@asynccontextmanager
+async def _db():
+    """Open SQLite connection với WAL-friendly settings.
+
+    journal_mode=WAL là persistent (set 1 lần trong init_db).
+    synchronous=NORMAL cần set mỗi connection — loại bỏ per-write fsync
+    trong khi vẫn đảm bảo durability cho logging use case.
+    """
+    async with aiosqlite.connect(_db_path()) as conn:
+        await conn.execute("PRAGMA synchronous=NORMAL")
+        await conn.execute("PRAGMA temp_store=memory")
+        yield conn
+
+
 async def init_db() -> None:
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
+        # WAL mode là persistent — chỉ cần set 1 lần, tăng tốc concurrent writes
+        await db.execute("PRAGMA journal_mode=WAL")
+        await db.execute("PRAGMA synchronous=NORMAL")
         await db.executescript("""
             CREATE TABLE IF NOT EXISTS sources (
                 id          TEXT PRIMARY KEY,
@@ -138,7 +156,7 @@ async def init_db() -> None:
 async def log_crawl_result(source_id: str, stats: dict, started_at: datetime) -> None:
     finished_at = datetime.now(timezone.utc)
     duration_ms = int((finished_at - started_at).total_seconds() * 1000)
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         await db.execute(
             """INSERT INTO crawl_logs
                (source_id, started_at, finished_at, duration_ms, http_status, domain,
@@ -169,7 +187,7 @@ async def log_webhook(
     error_msg: str = None,
     webhook_id: str = None,
 ) -> None:
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         await db.execute(
             """INSERT INTO webhook_logs (article_id, webhook_id, webhook_url, sent_at, status_code, success, error_msg)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
@@ -194,7 +212,7 @@ async def log_telegram(
     success: bool,
     error_msg: str | None = None,
 ) -> None:
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         await db.execute(
             """INSERT INTO telegram_logs
                (article_id, channel_id, chat_id, sent_at, status_code, success, error_msg)
@@ -213,7 +231,7 @@ async def log_telegram(
 
 
 async def log_ai_usage(article_id: str, model: str, tokens_used: int) -> None:
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         await db.execute(
             "INSERT INTO ai_logs (article_id, model, tokens_used) VALUES (?, ?, ?)",
             (article_id, model, tokens_used),
@@ -222,40 +240,46 @@ async def log_ai_usage(article_id: str, model: str, tokens_used: int) -> None:
 
 
 async def get_dashboard_stats() -> dict:
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
-        # Tổng crawl hôm nay
-        row = await db.execute_fetchall(
-            "SELECT COUNT(*) as cnt, SUM(found) as found, SUM(saved) as saved, SUM(duplicates) as dupes "
-            "FROM crawl_logs WHERE started_at >= date('now')"
-        )
-        crawl = dict(row[0]) if row else {}
+        # Gộp 4 summary queries thành 1 CTE — 1 parse + 1 transaction thay vì 4.
+        summary_rows = await db.execute_fetchall("""
+            WITH
+            crawl_today AS (
+                SELECT COUNT(*) as cnt, SUM(found) as found, SUM(saved) as saved,
+                       SUM(duplicates) as dupes
+                FROM crawl_logs WHERE started_at >= date('now')
+            ),
+            webhook_today AS (
+                SELECT COUNT(*) as total, SUM(success) as ok
+                FROM webhook_logs WHERE sent_at >= date('now')
+            ),
+            ai_today AS (
+                SELECT COUNT(*) as total, SUM(tokens_used) as tokens
+                FROM ai_logs WHERE created_at >= date('now')
+            ),
+            telegram_today AS (
+                SELECT COUNT(*) as total, SUM(success) as ok
+                FROM telegram_logs WHERE sent_at >= date('now')
+            )
+            SELECT
+                (SELECT cnt FROM crawl_today)   as crawl_cnt,
+                (SELECT found FROM crawl_today) as crawl_found,
+                (SELECT saved FROM crawl_today) as crawl_saved,
+                (SELECT dupes FROM crawl_today) as crawl_dupes,
+                (SELECT total FROM webhook_today) as hook_total,
+                (SELECT ok FROM webhook_today)    as hook_ok,
+                (SELECT total FROM ai_today)      as ai_total,
+                (SELECT tokens FROM ai_today)     as ai_tokens,
+                (SELECT total FROM telegram_today) as tg_total,
+                (SELECT ok FROM telegram_today)    as tg_ok
+        """)
+        s = dict(summary_rows[0]) if summary_rows else {}
 
-        # Webhook hôm nay
-        row = await db.execute_fetchall(
-            "SELECT COUNT(*) as total, SUM(success) as ok FROM webhook_logs WHERE sent_at >= date('now')"
-        )
-        hook = dict(row[0]) if row else {}
-
-        # AI hôm nay
-        row = await db.execute_fetchall(
-            "SELECT COUNT(*) as total, SUM(tokens_used) as tokens FROM ai_logs WHERE created_at >= date('now')"
-        )
-        ai = dict(row[0]) if row else {}
-
-        # Telegram hôm nay
-        row = await db.execute_fetchall(
-            "SELECT COUNT(*) as total, SUM(success) as ok FROM telegram_logs WHERE sent_at >= date('now')"
-        )
-        tg = dict(row[0]) if row else {}
-
-        # Top sources hôm nay
         top_sources = await db.execute_fetchall(
             "SELECT source_id, SUM(saved) as saved FROM crawl_logs "
             "WHERE started_at >= date('now') GROUP BY source_id ORDER BY saved DESC LIMIT 10"
         )
-
-        # Crawl theo giờ (24h gần nhất)
         hourly = await db.execute_fetchall(
             "SELECT strftime('%H', started_at) as hour, SUM(saved) as saved "
             "FROM crawl_logs WHERE started_at >= datetime('now', '-24 hours') "
@@ -263,10 +287,11 @@ async def get_dashboard_stats() -> dict:
         )
 
         return {
-            "crawl": crawl,
-            "webhook": hook,
-            "telegram": tg,
-            "ai": ai,
+            "crawl": {"cnt": s.get("crawl_cnt"), "found": s.get("crawl_found"),
+                      "saved": s.get("crawl_saved"), "dupes": s.get("crawl_dupes")},
+            "webhook": {"total": s.get("hook_total"), "ok": s.get("hook_ok")},
+            "telegram": {"total": s.get("tg_total"), "ok": s.get("tg_ok")},
+            "ai": {"total": s.get("ai_total"), "tokens": s.get("ai_tokens")},
             "top_sources": [dict(r) for r in top_sources],
             "hourly": [dict(r) for r in hourly],
         }
@@ -275,7 +300,7 @@ async def get_dashboard_stats() -> dict:
 async def get_recent_webhook_logs(
     limit: int = 20, offset: int = 0
 ) -> tuple[list[dict], int]:
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         total_row = await db.execute_fetchall(
             "SELECT COUNT(*) as cnt FROM webhook_logs"
@@ -292,7 +317,7 @@ async def get_recent_webhook_logs(
 async def get_recent_ai_logs(
     limit: int = 20, offset: int = 0
 ) -> tuple[list[dict], int]:
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         total_row = await db.execute_fetchall("SELECT COUNT(*) as cnt FROM ai_logs")
         total = total_row[0]["cnt"] if total_row else 0
@@ -309,7 +334,7 @@ async def get_recent_telegram_logs(
     offset: int = 0,
     channel_id: str | None = None,
 ) -> tuple[list[dict], int]:
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         where, params = [], []
         if channel_id:
@@ -331,7 +356,7 @@ async def get_recent_telegram_logs(
 
 async def get_telegram_stats() -> dict:
     """Telegram delivery stats for dashboard."""
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         row = await db.execute_fetchall(
             "SELECT COUNT(*) as total, SUM(success) as ok "
@@ -352,7 +377,7 @@ async def get_crawl_logs(
     http_status: int | None = None,
     since: str | None = None,
 ) -> tuple[list[dict], int]:
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         where, params = [], []
 
@@ -389,7 +414,7 @@ async def get_crawl_logs(
 
 async def get_crawl_source_summary(since: str | None = None) -> list[dict]:
     """Per-source aggregated stats: total runs, success rate, avg duration, etc."""
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         time_filter = "WHERE started_at >= ?" if since else ""
         params = [since] if since else []
@@ -417,7 +442,7 @@ async def get_crawl_source_summary(since: str | None = None) -> list[dict]:
 
 async def get_crawl_domain_summary(since: str | None = None) -> list[dict]:
     """Per-domain aggregated stats to detect rate limiting patterns."""
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         time_filter = "WHERE started_at >= ?" if since else ""
         params = [since] if since else []
@@ -443,7 +468,7 @@ async def get_crawl_domain_summary(since: str | None = None) -> list[dict]:
 
 async def get_crawl_error_breakdown(since: str | None = None) -> list[dict]:
     """Group errors by type for quick diagnosis."""
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         time_filter = "AND started_at >= ?" if since else ""
         params = [since] if since else []
@@ -479,7 +504,7 @@ async def log_system_event(
 ) -> None:
     finished_at = datetime.now(timezone.utc)
     duration_ms = int((finished_at - started_at).total_seconds() * 1000)
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         await db.execute(
             """INSERT INTO system_logs
                (event_type, started_at, finished_at, duration_ms, status, metadata, error_msg)
@@ -505,7 +530,7 @@ async def log_api_request(
     requested_at: datetime,
     error_msg: str | None = None,
 ) -> None:
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         await db.execute(
             """INSERT INTO api_logs (method, path, status_code, duration_ms, requested_at, error_msg)
                VALUES (?, ?, ?, ?, ?, ?)""",
@@ -528,7 +553,7 @@ async def get_system_logs(
     status: str | None = None,
     since: str | None = None,
 ) -> tuple[list[dict], int]:
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         where, params = [], []
         if event_type:
@@ -564,7 +589,7 @@ async def get_system_logs(
 
 async def get_system_summary(since: str | None = None) -> list[dict]:
     """Per event_type aggregated stats."""
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         time_filter = "WHERE started_at >= ?" if since else ""
         params = [since] if since else []
@@ -594,7 +619,7 @@ async def get_api_logs(
     errors_only: bool = False,
     since: str | None = None,
 ) -> tuple[list[dict], int]:
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         where, params = [], []
         if method:
@@ -626,7 +651,7 @@ async def get_api_logs(
 
 async def get_api_summary(since: str | None = None) -> list[dict]:
     """Per-path aggregated stats: count, avg latency, error rate."""
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         time_filter = "WHERE requested_at >= ?" if since else ""
         params = [since] if since else []
@@ -651,7 +676,7 @@ async def get_api_summary(since: str | None = None) -> list[dict]:
 
 async def get_crawl_timeline(hours: int = 24) -> list[dict]:
     """Hourly crawl performance for the last N hours."""
-    async with aiosqlite.connect(_db_path()) as db:
+    async with _db() as db:
         db.row_factory = aiosqlite.Row
         rows = await db.execute_fetchall(
             """SELECT

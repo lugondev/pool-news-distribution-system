@@ -142,14 +142,13 @@ async def save_article(redis: aioredis.Redis, article: Article) -> None:
         pipe.zadd(AI_PENDING_KEY, {article.id: priority_score})
         pipe.expire(AI_PENDING_KEY, TTL_SECONDS)
 
-    await pipe.execute()
-
-    # Enqueue for enrichment immediately after save — no need to wait for AI rewrite.
-    # Embedder uses title+content from RSS, not AI summaries.
-    # existing_enrich_raw was already fetched via HMGET above — no extra RTT.
+    # Enqueue for enrichment if not already done — check fetched via HMGET above.
+    # Gộp vào cùng pipeline để giảm 2 RTTs riêng biệt.
     if not existing_enrich_raw or existing_enrich_raw.decode() != "done":
-        await redis.sadd(ENRICH_PENDING_KEY, article.id)
-        await redis.expire(ENRICH_PENDING_KEY, DEDUP_TTL_SECONDS)
+        pipe.sadd(ENRICH_PENDING_KEY, article.id)
+        pipe.expire(ENRICH_PENDING_KEY, DEDUP_TTL_SECONDS)
+
+    await pipe.execute()
 
     # Backpressure: trim lowest-priority articles when queue exceeds cap
     if not already_processed:
@@ -379,28 +378,19 @@ async def set_source_next_crawl(
 
 
 async def get_feed_stats(redis: aioredis.Redis) -> dict:
-    """Stats tổng quan từ Redis."""
-    total = await redis.zcard("news:feed")
+    """Stats tổng quan từ Redis — dùng pipeline để giảm RTTs."""
     now = datetime.now(timezone.utc)
     date_key = now.strftime("%Y%m%d")
     hour_key = now.strftime("%Y%m%d%H")
-    today = await redis.zcard(f"news:feed:{date_key}")
-    this_hour = await redis.zcard(f"news:feed:{hour_key}")
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
 
-    # Synthetic articles stats
-    synthetic_total = await redis.zcard("news:synth:feed")
-    synthetic_today = 0
-    if synthetic_total > 0:
-        # Count synthetic articles created today by checking timestamp
-        today_start = (
-            datetime.now(timezone.utc)
-            .replace(hour=0, minute=0, second=0, microsecond=0)
-            .timestamp()
-        )
-        synthetic_ids = await redis.zrangebyscore(
-            "news:synth:feed", today_start, "+inf"
-        )
-        synthetic_today = len(synthetic_ids)
+    pipe = redis.pipeline()
+    pipe.zcard("news:feed")
+    pipe.zcard(f"news:feed:{date_key}")
+    pipe.zcard(f"news:feed:{hour_key}")
+    pipe.zcard("news:synth:feed")
+    pipe.zcount("news:synth:feed", today_start, "+inf")
+    total, today, this_hour, synthetic_total, synthetic_today = await pipe.execute()
 
     return {
         "total_in_redis": total,

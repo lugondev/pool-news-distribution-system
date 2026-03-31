@@ -83,37 +83,15 @@ def update_centroid(
     return [x / mag for x in updated] if mag else updated
 
 
-# ---------------------------------------------------------------------------
-# TODO: implement this function (5-10 lines)
-# ---------------------------------------------------------------------------
-
 def _find_matching_topic(
     embedding: list[float],
     candidates: list[tuple[str, list[float]]],  # [(topic_id, centroid), ...]
     threshold: float,
 ) -> str | None:
     """
-    Given a new article embedding and a list of candidate (topic_id, centroid) pairs,
-    return the topic_id of the best match — or None to create a new cluster.
-
-    Parameters
-    ----------
-    embedding   : normalized embedding vector for the new article
-    candidates  : list of (topic_id, centroid_vector) for all active topics
-                  in this category (may be empty on first article)
-    threshold   : minimum cosine similarity to consider a match (e.g. 0.75)
-
-    Trade-offs to consider
-    ----------------------
-    - "Nearest-match" (always pick highest similarity even if below threshold):
-        Creates fewer, broader clusters. Good for sparse data.
-    - "Threshold-only" (only match if similarity ≥ threshold, otherwise new cluster):
-        Creates tighter, more specific clusters. May fragment fast-moving stories.
-    - Tiebreaking when two topics are equally similar:
-        Pick the older one (stable) vs. the newer one (recency bias)?
-
-    Returns: topic_id string if matched, None if a new cluster should be created.
-
+    Return the topic_id with highest cosine similarity ≥ threshold, or None.
+    Uses threshold-only matching: creates a new cluster when no candidate qualifies,
+    keeping clusters tight and specific rather than merging unrelated stories.
     """
     if not candidates:
         return None

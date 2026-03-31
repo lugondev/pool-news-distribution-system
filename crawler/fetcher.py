@@ -125,50 +125,60 @@ async def fetch_source(
             stats["http_status"] = 200
             stats["found"] = len(articles)
 
-            for article in articles:
+            # Semaphore caps HTTP concurrency per source — prevents hammering
+            # the same domain while still processing articles in parallel.
+            enrich_sem = asyncio.Semaphore(5)
+
+            async def _process_article(article: Article) -> bool:
+                """Returns True if saved, False if duplicate."""
                 result = await check_duplicate(
                     redis, article.title, threshold=dedup_threshold
                 )
                 if result.is_duplicate:
-                    stats["duplicates"] += 1
-                    # Enrich existing Redis article if its content is still thin
-                    if enrich_content and needs_enrichment(
-                        article.content, article.summary
-                    ):
+                    if enrich_content and needs_enrichment(article.content, article.summary):
                         article_id = _make_article_id(source["id"], article.url)
                         existing = await get_article(redis, article_id)
                         if existing and needs_enrichment(
                             existing.get("content", ""), existing.get("summary", "")
                         ):
-                            enriched = await enrich_article_content(
-                                article.url,
-                                existing.get("content", ""),
-                                existing.get("summary", ""),
-                                client,
-                            )
-                            if enriched != existing.get("content", ""):
-                                await update_article_content(
-                                    redis, article_id, enriched
+                            async with enrich_sem:
+                                enriched = await enrich_article_content(
+                                    article.url,
+                                    existing.get("content", ""),
+                                    existing.get("summary", ""),
+                                    client,
                                 )
-                    continue
+                            if enriched != existing.get("content", ""):
+                                await update_article_content(redis, article_id, enriched)
+                    return False
 
                 if enrich_content:
-                    article.content = await enrich_article_content(
-                        article.url, article.content, article.summary, client
-                    )
+                    async with enrich_sem:
+                        article.content = await enrich_article_content(
+                            article.url, article.content, article.summary, client
+                        )
 
                 await save_article(redis, article)
-                stats["saved"] += 1
                 if ws_manager:
                     asyncio.create_task(
                         ws_manager.emit_article_saved(
-                            article.id,
-                            article.title,
-                            source["id"],
-                            source.get("category", ""),
-                            False,
+                            article.id, article.title,
+                            source["id"], source.get("category", ""), False,
                         )
                     )
+                return True
+
+            article_results = await asyncio.gather(
+                *[_process_article(a) for a in articles], return_exceptions=True
+            )
+            for r in article_results:
+                if r is True:
+                    stats["saved"] += 1
+                elif r is False:
+                    stats["duplicates"] += 1
+                elif isinstance(r, Exception):
+                    stats["errors"] += 1
+                    logger.warning(f"[{source['id']}] article error: {r}")
 
         except httpx.HTTPStatusError as e:
             status = e.response.status_code
