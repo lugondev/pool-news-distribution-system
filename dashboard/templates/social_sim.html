@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Social Simulation — News Aggregator</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --surface2: #13151f;
+      --border: #2a2d3e; --border2: #353849;
+      --text: #e2e8f0; --muted: #718096; --accent: #6366f1;
+      --green: #10b981; --red: #ef4444; --yellow: #f59e0b;
+      --orange: #f97316; --purple: #a855f7; --teal: #14b8a6;
+      --pink: #ec4899;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; min-height: 100vh; }
+
+    .page { padding: 24px; max-width: 860px; margin: 0 auto; }
+    .page-title { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+    .page-sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+
+    /* ── Run panel ── */
+    .run-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    .run-panel-title { font-size: 14px; font-weight: 600; margin-bottom: 16px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-size: 11px; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    .form-group label { font-size: 12px; color: var(--muted); font-weight: 500; }
+    .form-group select, .form-group input {
+      background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+      font-size: 13px; padding: 8px 10px; border-radius: 7px; outline: none;
+      transition: border-color .15s;
+    }
+    .form-group select:focus, .form-group input:focus { border-color: var(--accent); }
+    .form-full { grid-column: 1 / -1; }
+
+    /* Depth selector */
+    .depth-row { display: flex; gap: 8px; margin-bottom: 16px; }
+    .depth-btn {
+      flex: 1; background: var(--surface2); border: 1px solid var(--border);
+      color: var(--muted); font-size: 12px; font-weight: 500;
+      padding: 10px 8px; border-radius: 8px; cursor: pointer; transition: all .15s;
+      text-align: center; line-height: 1.4;
+    }
+    .depth-btn:hover { color: var(--text); border-color: var(--border2); }
+    .depth-btn.selected { border-color: var(--accent); color: var(--text); background: rgba(99,102,241,.1); }
+    .depth-label { font-weight: 600; font-size: 13px; display: block; margin-bottom: 2px; }
+    .depth-desc { color: var(--muted); font-size: 11px; }
+
+    .run-btn {
+      width: 100%; background: var(--accent); border: none; color: #fff;
+      font-size: 14px; font-weight: 600; padding: 11px; border-radius: 8px;
+      cursor: pointer; transition: background .15s; display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .run-btn:hover { background: #4f52d6; }
+    .run-btn:disabled { background: var(--border); color: var(--muted); cursor: default; }
+
+    /* status */
+    .status-box { margin-top: 12px; padding: 10px 14px; border-radius: 8px; font-size: 13px; display: none; }
+    .status-ok { background: rgba(16,185,129,.1); border: 1px solid rgba(16,185,129,.3); color: #6ee7b7; }
+    .status-err { background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.3); color: #fca5a5; }
+
+    /* ── Simulation thread ── */
+    .sim-thread { margin-bottom: 32px; }
+    .sim-meta-row { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+    .badge {
+      font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px;
+      text-transform: uppercase; letter-spacing: .05em;
+    }
+    .badge-sim { background: rgba(168,85,247,.15); color: #c084fc; }
+    .badge-depth { background: rgba(99,102,241,.15); color: var(--accent); }
+    .badge-model { background: rgba(20,184,166,.1); color: var(--teal); font-weight: 400; text-transform: none; letter-spacing: 0; }
+    .sim-time { font-size: 12px; color: var(--muted); margin-left: auto; }
+
+    /* Post card */
+    .post-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 18px;
+      margin-bottom: 4px;
+    }
+    .author-row { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+    .avatar {
+      width: 40px; height: 40px; border-radius: 50%;
+      background: var(--accent); color: #fff;
+      font-size: 13px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .author-info { flex: 1; }
+    .author-name { font-weight: 600; font-size: 14px; }
+    .author-handle { color: var(--muted); font-size: 12px; margin-top: 1px; }
+    .author-type-badge {
+      font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px;
+      background: rgba(99,102,241,.2); color: var(--accent);
+      text-transform: uppercase; letter-spacing: .05em;
+    }
+    .post-content { font-size: 14px; line-height: 1.7; color: #cbd5e1; padding-left: 52px; }
+
+    /* engagement bar */
+    .engagement-bar {
+      display: flex; gap: 16px; padding: 10px 18px 4px 70px;
+      font-size: 12px; color: var(--muted);
+    }
+    .eng-item { display: flex; align-items: center; gap: 4px; cursor: default; }
+
+    /* Comments section */
+    .comments-section { margin-top: 2px; }
+    .comments-header {
+      font-size: 12px; font-weight: 600; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .05em;
+      padding: 10px 18px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      border-radius: 12px 12px 0 0;
+      border: 1px solid var(--border);
+      border-bottom: none;
+    }
+    .comment-list {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-top: none;
+      border-radius: 0 0 12px 12px;
+    }
+    .comment {
+      display: flex; gap: 10px; padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+      transition: background .1s;
+    }
+    .comment:last-child { border-bottom: none; }
+    .comment:hover { background: var(--surface2); }
+    .comment.is-reply {
+      padding-left: 50px;
+      background: rgba(0,0,0,.2);
+    }
+    .comment.is-reply .comment-avatar { width: 28px; height: 28px; font-size: 10px; }
+    .comment-avatar {
+      width: 34px; height: 34px; border-radius: 50%;
+      font-size: 11px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; color: #fff;
+    }
+    .comment-body { flex: 1; }
+    .comment-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; flex-wrap: wrap; }
+    .commenter-name { font-weight: 600; font-size: 13px; }
+    .commenter-handle { color: var(--muted); font-size: 12px; }
+    .archetype-badge {
+      font-size: 10px; padding: 1px 6px; border-radius: 3px;
+      font-weight: 500;
+    }
+    .comment-text { font-size: 13px; line-height: 1.6; color: #cbd5e1; }
+    .reply-indicator {
+      font-size: 11px; color: var(--muted); margin-bottom: 3px;
+      display: flex; align-items: center; gap: 4px;
+    }
+
+    /* Recent sims list */
+    .sims-list { margin-top: 32px; }
+    .sims-list-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 12px; }
+    .sim-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 16px; margin-bottom: 8px; cursor: pointer;
+      transition: border-color .15s, background .15s;
+      display: flex; align-items: flex-start; gap: 12px;
+    }
+    .sim-card:hover { border-color: var(--accent); background: rgba(99,102,241,.04); }
+    .sim-card-body { flex: 1; min-width: 0; }
+    .sim-card-title { font-size: 14px; font-weight: 600; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px; }
+    .sim-card-meta { font-size: 12px; color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap; }
+    .sim-card-arrow { color: var(--muted); font-size: 18px; flex-shrink: 0; margin-top: 2px; }
+
+    /* Empty/loading */
+    .state-box { text-align: center; padding: 48px 24px; color: var(--muted); font-size: 14px; }
+    .state-box .icon { font-size: 28px; margin-bottom: 10px; opacity: .5; }
+    .spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; margin: 0 auto 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Loading overlay on run */
+    .progress-steps { list-style: none; margin-top: 10px; }
+    .progress-steps li { font-size: 12px; color: var(--muted); padding: 2px 0; }
+    .progress-steps li.done { color: var(--green); }
+    .progress-steps li.active { color: var(--text); }
+  </style>
+</head>
+<body>
+
+{% include 'partials/header.html' %}
+
+<div class="page">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
+    <div>
+      <div class="page-title">Social Conversation Simulator</div>
+      <div class="page-sub" style="margin-bottom:0">Simulate realistic social media post + comment threads from any news article.</div>
+    </div>
+  </div>
+
+  <!-- Run Panel -->
+  <div class="run-panel">
+    <div class="run-panel-title">New Simulation</div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label>Category Filter</label>
+        <select id="category-select" onchange="onCategoryChange()">
+          <option value="">All categories</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Language</label>
+        <select id="language-select">
+          <option value="Vietnamese">🇻🇳 Vietnamese</option>
+          <option value="English" selected>🇺🇸 English</option>
+          <option value="Japanese">🇯🇵 Japanese</option>
+          <option value="Korean">🇰🇷 Korean</option>
+          <option value="Chinese">🇨🇳 Chinese</option>
+          <option value="French">🇫🇷 French</option>
+          <option value="Spanish">🇪🇸 Spanish</option>
+          <option value="German">🇩🇪 German</option>
+          <option value="Arabic">🇸🇦 Arabic</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group form-full">
+        <label>Article</label>
+        <select id="article-select">
+          <option value="">Loading articles…</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label>Author Type</label>
+        <select id="author-type-select">
+          <option value="">Loading…</option>
+        </select>
+      </div>
+      <div class="form-group" style="display:flex;flex-direction:column;gap:6px">
+        <!-- placeholder for spacing -->
+      </div>
+    </div>
+
+    <div class="form-group" style="margin-bottom:14px">
+      <label>Thread Depth</label>
+      <div class="depth-row" id="depth-row">
+        <button class="depth-btn" data-depth="flat" onclick="selectDepth('flat')">
+          <span class="depth-label">Flat</span>
+          <span class="depth-desc">5-6 comments<br>No replies</span>
+        </button>
+        <button class="depth-btn selected" data-depth="nested" onclick="selectDepth('nested')">
+          <span class="depth-label">Nested</span>
+          <span class="depth-desc">7-9 comments<br>2-3 reply pairs</span>
+        </button>
+        <button class="depth-btn" data-depth="full" onclick="selectDepth('full')">
+          <span class="depth-label">Full</span>
+          <span class="depth-desc">10-12 comments<br>Drama threads</span>
+        </button>
+      </div>
+    </div>
+
+    <button class="run-btn" id="run-btn" onclick="runSim()">
+      ▶ Generate Simulation
+    </button>
+    <div class="status-box" id="run-status"></div>
+  </div>
+
+  <!-- Thread result area -->
+  <div id="sim-result"></div>
+
+  <!-- Recent simulations list -->
+  <div class="sims-list">
+    <div class="sims-list-title">Recent Simulations</div>
+    <div id="recent-sims">
+      <div class="state-box"><div class="spinner"></div>Loading…</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+let selectedDepth = 'nested';
+let personaTypes = { author_types: [], netizen_types: [] };
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+async function init() {
+  await Promise.all([loadPersonaTypes(), loadCategories(), loadRecentSims()]);
+  await loadArticles();
+}
+
+async function loadPersonaTypes() {
+  const resp = await fetch('/api/social-sim/persona-types');
+  personaTypes = await resp.json();
+  const sel = document.getElementById('author-type-select');
+  sel.innerHTML = personaTypes.author_types.map(t =>
+    `<option value="${t.id}">${t.label}</option>`
+  ).join('');
+}
+
+async function loadCategories() {
+  try {
+    const resp = await fetch('/api/social-sim/categories');
+    const data = await resp.json();
+    const sel = document.getElementById('category-select');
+    const opts = data.categories.map(c =>
+      `<option value="${c.id}">${escTxt(c.label || c.id)}</option>`
+    ).join('');
+    sel.innerHTML = '<option value="">All categories</option>' + opts;
+  } catch (e) { /* silent */ }
+}
+
+async function onCategoryChange() {
+  await loadArticles();
+}
+
+async function loadArticles(category) {
+  const cat = category || document.getElementById('category-select').value || '';
+  const url = `/api/social-sim/articles/recent?limit=30${cat ? '&category=' + encodeURIComponent(cat) : ''}`;
+  const resp = await fetch(url);
+  const data = await resp.json();
+  const sel = document.getElementById('article-select');
+  if (!data.articles || data.articles.length === 0) {
+    sel.innerHTML = '<option value="">No articles in this category</option>';
+    return;
+  }
+  sel.innerHTML = data.articles.map(a => {
+    const cat = a.category ? `[${a.category}] ` : '';
+    const src = a.source_name ? ` — ${a.source_name}` : '';
+    return `<option value="${a.id}">${cat}${escTxt(a.title)}${src}</option>`;
+  }).join('');
+}
+
+// ── Depth selector ────────────────────────────────────────────────────────────
+function selectDepth(d) {
+  selectedDepth = d;
+  document.querySelectorAll('.depth-btn').forEach(b => {
+    b.classList.toggle('selected', b.dataset.depth === d);
+  });
+}
+
+// ── Run simulation ────────────────────────────────────────────────────────────
+async function runSim() {
+  const articleId = document.getElementById('article-select').value;
+  const authorType = document.getElementById('author-type-select').value;
+  if (!articleId) { showStatus('err', 'Please select an article.'); return; }
+  if (!authorType) { showStatus('err', 'Please select an author type.'); return; }
+
+  const btn = document.getElementById('run-btn');
+  const statusEl = document.getElementById('run-status');
+  btn.disabled = true;
+  btn.innerHTML = '<div style="width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite"></div> Generating…';
+
+  statusEl.className = 'status-box status-ok';
+  statusEl.style.display = 'block';
+  statusEl.innerHTML = buildProgressHTML(selectedDepth);
+
+  try {
+    const language = document.getElementById('language-select').value || 'English';
+    const resp = await fetch('/api/social-sim/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ article_id: articleId, author_type: authorType, depth: selectedDepth, language }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      showStatus('err', '✗ ' + (data.detail || 'Generation failed'));
+    } else {
+      statusEl.style.display = 'none';
+      renderThread(data);
+      loadRecentSims();
+    }
+  } catch (err) {
+    showStatus('err', '✗ ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '▶ Generate Simulation';
+  }
+}
+
+function buildProgressHTML(depth) {
+  const steps = [
+    'Generating author persona…',
+    'Generating netizen profiles…',
+    'Writing post content…',
+    'Generating sequential comments…',
+  ];
+  if (depth === 'nested' || depth === 'full') steps.push('Building reply threads…');
+  if (depth === 'full') steps.push('Adding drama threads…');
+  return steps.map((s, i) => `<div style="font-size:12px;color:var(--muted);padding:2px 0">⏳ ${s}</div>`).join('');
+}
+
+function showStatus(type, msg) {
+  const el = document.getElementById('run-status');
+  el.className = `status-box status-${type}`;
+  el.style.display = 'block';
+  el.textContent = msg;
+}
+
+// ── Render thread ─────────────────────────────────────────────────────────────
+function renderThread(sim) {
+  const container = document.getElementById('sim-result');
+  const authorTypLabel = (personaTypes.author_types.find(t => t.id === sim.author_type) || {}).label || sim.author_type;
+  const model = sim.model || '';
+  const time = fmtTime(sim.generated_at);
+  const persona = sim.author_persona || {};
+  const comments = sim.comments || [];
+
+  // Fake engagement numbers for realism
+  const likes = Math.floor(Math.random() * 800) + 50;
+  const shares = Math.floor(likes * 0.15);
+  const commentCount = comments.filter(c => c.depth === 0).length;
+
+  // Build comment ID map for reply lookups
+  const commentMap = {};
+  comments.forEach(c => { commentMap[c.id] = c; });
+
+  // Separate top-level from replies
+  const topLevel = comments.filter(c => !c.parent_id || c.depth === 0);
+  const replies = comments.filter(c => c.parent_id && c.depth > 0);
+
+  // Inject replies after their parent in render order
+  const ordered = [];
+  topLevel.forEach(c => {
+    ordered.push(c);
+    replies.filter(r => r.parent_id === c.id).forEach(r => ordered.push(r));
+  });
+
+  container.innerHTML = `
+    <div class="sim-thread">
+      <div class="sim-meta-row">
+        <span class="badge badge-sim">◈ Simulation</span>
+        <span class="badge badge-depth">${sim.depth}</span>
+        <span style="font-size:12px;color:var(--muted)">${authorTypLabel}</span>
+        ${sim.language ? `<span class="badge" style="background:rgba(245,158,11,.1);color:#fbbf24">${sim.language}</span>` : ''}
+        ${model ? `<span class="badge badge-model">${model}</span>` : ''}
+        <span class="sim-time">${time}</span>
+      </div>
+
+      <!-- Main post -->
+      <div class="post-card">
+        <div class="author-row">
+          <div class="avatar" style="background:${authorAvatarColor(sim.author_type)}">${escTxt(persona.avatar_initial || 'AU')}</div>
+          <div class="author-info">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="author-name">${escTxt(persona.name || 'Author')}</span>
+              <span class="author-type-badge">${escTxt(authorTypLabel)}</span>
+            </div>
+            <div class="author-handle">${escTxt(persona.username || '')}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px">${escTxt(persona.background || '')}</div>
+          </div>
+        </div>
+        <div class="post-content">${escTxt(sim.post_content || '')}</div>
+      </div>
+
+      <!-- Engagement bar -->
+      <div class="engagement-bar">
+        <span class="eng-item">❤ ${likes.toLocaleString()}</span>
+        <span class="eng-item">↩ ${shares.toLocaleString()}</span>
+        <span class="eng-item">💬 ${commentCount} comments</span>
+      </div>
+
+      <!-- Comments -->
+      <div class="comments-section">
+        <div class="comments-header">Comments (${comments.length})</div>
+        <div class="comment-list">
+          ${ordered.length === 0
+            ? '<div class="state-box" style="padding:24px"><div class="icon">💬</div>No comments generated</div>'
+            : ordered.map(c => buildComment(c, commentMap)).join('')
+          }
+        </div>
+      </div>
+    </div>`;
+
+  // Scroll to result
+  container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function buildComment(c, commentMap) {
+  const p = c.persona || {};
+  const color = p.color || '#94a3b8';
+  const badge = p.badge || '💬';
+  const isReply = c.parent_id && c.depth > 0;
+  const initial = (p.avatar_initial || p.display_name || '?').substring(0, 2).toUpperCase();
+
+  let replyIndicator = '';
+  if (isReply && commentMap[c.parent_id]) {
+    const parent = commentMap[c.parent_id];
+    replyIndicator = `<div class="reply-indicator">↩ replying to <strong>${escTxt(parent.display_name || parent.username || '')}</strong></div>`;
+  }
+
+  return `
+    <div class="comment${isReply ? ' is-reply' : ''}">
+      <div class="comment-avatar" style="background:${color}20;color:${color};border:1px solid ${color}40">${badge}</div>
+      <div class="comment-body">
+        <div class="comment-header">
+          <span class="commenter-name">${escTxt(c.display_name || c.username || '')}</span>
+          <span class="commenter-handle">${escTxt(c.username || '')}</span>
+          <span class="archetype-badge" style="background:${color}20;color:${color}">${escTxt(p.type_label || p.type || '')}</span>
+        </div>
+        ${replyIndicator}
+        <div class="comment-text">${escTxt(c.content || '')}</div>
+      </div>
+    </div>`;
+}
+
+function authorAvatarColor(type) {
+  const colors = {
+    expert: '#6366f1', journalist: '#14b8a6', influencer: '#ec4899',
+    activist: '#ef4444', citizen: '#f59e0b', trader: '#10b981',
+  };
+  return colors[type] || '#6366f1';
+}
+
+// ── Recent simulations list ───────────────────────────────────────────────────
+async function loadRecentSims() {
+  const container = document.getElementById('recent-sims');
+  try {
+    const resp = await fetch('/api/social-sim?limit=10');
+    const data = await resp.json();
+    if (!data.simulations || data.simulations.length === 0) {
+      container.innerHTML = `<div class="state-box"><div class="icon">🎭</div>No simulations yet — run one above.</div>`;
+      return;
+    }
+    container.innerHTML = data.simulations.map(s => buildSimCard(s)).join('');
+  } catch (err) {
+    container.innerHTML = `<div class="state-box"><div class="icon">⚠</div>Failed to load: ${err.message}</div>`;
+  }
+}
+
+function buildSimCard(s) {
+  const authorType = s.author_type || '';
+  const depth = s.depth || '';
+  const time = fmtTime(s.generated_at);
+  const commentCount = s.comment_count || '?';
+  const authorTypLabel = (personaTypes.author_types.find(t => t.id === authorType) || {}).label || authorType;
+
+  return `
+    <div class="sim-card" onclick="loadSim('${s.sim_id}')">
+      <div style="width:36px;height:36px;border-radius:50%;background:${authorAvatarColor(authorType)}20;color:${authorAvatarColor(authorType)};display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">◈</div>
+      <div class="sim-card-body">
+        <div class="sim-card-title">${escTxt(s.article_title || s.sim_id)}</div>
+        <div class="sim-card-meta">
+          <span>${escTxt(authorTypLabel)}</span>
+          <span>•</span>
+          <span>${depth}</span>
+          ${s.language ? `<span>•</span><span>${escTxt(s.language)}</span>` : ''}
+          <span>•</span>
+          <span>${commentCount} comments</span>
+          <span>•</span>
+          <span>${time}</span>
+        </div>
+      </div>
+      <div class="sim-card-arrow">›</div>
+    </div>`;
+}
+
+async function loadSim(simId) {
+  const container = document.getElementById('sim-result');
+  container.innerHTML = '<div class="state-box"><div class="spinner"></div>Loading simulation…</div>';
+  container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  try {
+    const resp = await fetch(`/api/social-sim/${simId}`);
+    if (!resp.ok) throw new Error('Not found');
+    const data = await resp.json();
+    renderThread(data);
+  } catch (err) {
+    container.innerHTML = `<div class="state-box"><div class="icon">⚠</div>Failed to load: ${err.message}</div>`;
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function fmtTime(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function escTxt(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
+}
+
+init();
+</script>
+</body>
+</html>

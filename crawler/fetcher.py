@@ -129,6 +129,16 @@ async def fetch_source(
             # the same domain while still processing articles in parallel.
             enrich_sem = asyncio.Semaphore(5)
 
+            # Batch EXISTS pre-filter: skip articles already in Redis without SSCAN.
+            # Critical for restarts — avoids ~1950 unnecessary SSCAN calls per tick.
+            pipe = redis.pipeline()
+            for a in articles:
+                pipe.exists(f"news:{a.id}")
+            exist_flags = await pipe.execute()
+            existing_ids = {a.id for a, flag in zip(articles, exist_flags) if flag}
+            stats["duplicates"] += len(existing_ids)
+            new_articles = [a for a in articles if a.id not in existing_ids]
+
             async def _process_article(article: Article) -> bool:
                 """Returns True if saved, False if duplicate."""
                 result = await check_duplicate(
@@ -136,8 +146,7 @@ async def fetch_source(
                 )
                 if result.is_duplicate:
                     if enrich_content and needs_enrichment(article.content, article.summary):
-                        article_id = _make_article_id(source["id"], article.url)
-                        existing = await get_article(redis, article_id)
+                        existing = await get_article(redis, article.id)
                         if existing and needs_enrichment(
                             existing.get("content", ""), existing.get("summary", "")
                         ):
@@ -149,7 +158,7 @@ async def fetch_source(
                                     client,
                                 )
                             if enriched != existing.get("content", ""):
-                                await update_article_content(redis, article_id, enriched)
+                                await update_article_content(redis, article.id, enriched)
                     return False
 
                 if enrich_content:
@@ -169,7 +178,7 @@ async def fetch_source(
                 return True
 
             article_results = await asyncio.gather(
-                *[_process_article(a) for a in articles], return_exceptions=True
+                *[_process_article(a) for a in new_articles], return_exceptions=True
             )
             for r in article_results:
                 if r is True:

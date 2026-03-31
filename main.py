@@ -32,6 +32,49 @@ from webhook.dispatcher import dispatch_worker, init_dispatcher
 DEV_MODE = os.environ.get("DEV_MODE", "0") == "1"
 
 
+async def _rebuild_dedup_set(redis: aioredis.Redis) -> None:
+    """
+    Rebuild the SimHash dedup set from existing article titles in Redis on startup.
+
+    Rationale: dedup.py now uses stable md5-based hashing, but any set persisted
+    before this fix (or from a prior session) has unstable hash() fingerprints.
+    Rather than flushing and letting the first crawl tick re-save everything,
+    we rebuild the set from current articles — so the first tick correctly dedupes.
+
+    Uses a pipeline: fetch all IDs from news:feed → batch HMGET titles → sadd all hashes.
+    Capped at 2000 recent articles to keep startup fast.
+    """
+    from crawler.dedup import _simhash
+    from storage.redis_keys import DEDUP_SIMHASHES_KEY, AI_DEDUP_SIMHASHES_KEY, DEDUP_TTL_SECONDS
+
+    await redis.delete(DEDUP_SIMHASHES_KEY, AI_DEDUP_SIMHASHES_KEY)
+
+    # Get up to 2000 most recent article IDs
+    ids = await redis.zrevrange("news:feed", 0, 1999)
+    if not ids:
+        logger.info("Dedup set rebuilt: no articles in Redis")
+        return
+
+    # Batch fetch titles in a single pipeline
+    pipe = redis.pipeline()
+    for aid in ids:
+        pipe.hget(f"news:{aid.decode() if isinstance(aid, bytes) else aid}", "title")
+    titles = await pipe.execute()
+
+    # Compute all hashes and add in one SADD call
+    hashes = []
+    for title_raw in titles:
+        if title_raw:
+            title = title_raw.decode() if isinstance(title_raw, bytes) else title_raw
+            hashes.append(_simhash(title))
+
+    if hashes:
+        await redis.sadd(DEDUP_SIMHASHES_KEY, *hashes)
+        await redis.expire(DEDUP_SIMHASHES_KEY, DEDUP_TTL_SECONDS)
+
+    logger.info(f"Dedup set rebuilt: {len(hashes)} fingerprints from {len(ids)} articles")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting News Aggregator%s...", " [DEV MODE]" if DEV_MODE else "")
@@ -49,6 +92,8 @@ async def lifespan(app: FastAPI):
 
     redis = get_redis()
     init_dispatcher(redis)
+
+    await _rebuild_dedup_set(redis)
 
     _dispatch_task = None
     scheduler = None

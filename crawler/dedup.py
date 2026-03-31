@@ -4,6 +4,7 @@ Deduplication using SimHash on article titles.
 SimHash cho phép so sánh 2 string bằng hamming distance trên bit-vector.
 Distance <= threshold => coi là trùng nhau.
 """
+import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -33,8 +34,8 @@ def _simhash(text: str, bits: int = 64) -> int:
 
     v = [0] * bits
     for token in tokens:
-        # hash() builtin is ~10× faster than md5 for non-cryptographic use
-        h = hash(token) & ((1 << bits) - 1)
+        # Use md5 for stable cross-process hashing; hash() is PYTHONHASHSEED-dependent
+        h = int(hashlib.md5(token.encode()).hexdigest(), 16) & ((1 << bits) - 1)
         for i in range(bits):
             v[i] += 1 if (h >> i) & 1 else -1
 
@@ -56,12 +57,11 @@ class DedupResult:
     matched_hash: int | None = None
 
 
-
 async def _sscan_hamming(
     redis: aioredis.Redis, key: str, current_hash: int, threshold: int
 ) -> int | None:
     """
-    SSCAN the set in chunks of 200, return first matched stored_hash or None.
+    SSCAN the set in chunks, return first matched stored_hash or None.
     Early exit on first match — avoids loading full set into memory.
     """
     cursor = 0
@@ -88,6 +88,9 @@ async def check_ai_duplicate(
     Does NOT write to the set — call register_ai_simhash() after successful AI.
     """
     current_hash = _simhash(title)
+    # Fast path: exact hash match (O(1))
+    if await redis.sismember(AI_DEDUP_KEY, current_hash):
+        return DedupResult(is_duplicate=True, simhash=current_hash, matched_hash=current_hash)
     matched = await _sscan_hamming(redis, AI_DEDUP_KEY, current_hash, threshold)
     if matched is not None:
         return DedupResult(is_duplicate=True, simhash=current_hash, matched_hash=matched)
@@ -104,6 +107,11 @@ async def register_ai_simhash(redis: aioredis.Redis, title: str) -> None:
 async def check_duplicate(redis: aioredis.Redis, title: str, threshold: int = 3) -> DedupResult:
     current_hash = _simhash(title)
 
+    # Fast path: exact hash match (O(1)) — handles exact-same title without full SSCAN
+    if await redis.sismember(DEDUP_KEY, current_hash):
+        return DedupResult(is_duplicate=True, simhash=current_hash, matched_hash=current_hash)
+
+    # Fuzzy path: near-duplicate via Hamming distance
     matched = await _sscan_hamming(redis, DEDUP_KEY, current_hash, threshold)
     if matched is not None:
         return DedupResult(is_duplicate=True, simhash=current_hash, matched_hash=matched)

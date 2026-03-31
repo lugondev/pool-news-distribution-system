@@ -19,7 +19,7 @@ AI_DEDUP_SIMHASHES_KEY = "news:ai:dedup:simhashes"
 
 # TTLs
 ARTICLE_TTL_SECONDS = 43200   # 12h — article hashes + feed sets
-DEDUP_TTL_SECONDS = 86400     # 24h — dedup sets live longer than articles
+DEDUP_TTL_SECONDS = 43200     # 12h — align with article TTL to prevent false-dupe after expiry
 
 # Phase 2 — Enrichment + Embeddings + Clustering
 ENRICH_PENDING_KEY = "news:enrich:pending"        # Set: article_ids queued for enrichment
