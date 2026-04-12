@@ -2,8 +2,9 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
     volumes:
-      - redis_data:/data
+      - ~/.news-aggregator/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -23,7 +24,7 @@ services:
       DEFAULT_VECTORIZER_MODULE: none
       CLUSTER_HOSTNAME: node1
     volumes:
-      - weaviate_data:/var/lib/weaviate
+      - ~/.news-aggregator/weaviate:/var/lib/weaviate
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/v1/.well-known/ready"]
       interval: 10s
@@ -49,12 +50,10 @@ services:
       WEAVIATE_GRPC_PORT: "50051"
     volumes:
       # Persist SQLite DB
-      - ./data:/app/data
+      - ~/.news-aggregator/app-data:/app/data
       # Mount config (read-write) so Settings UI can update settings.yaml
       - ./config:/app/config
       # Optional: mount .env if you use one
       # - ./.env:/app/.env:ro
 
-volumes:
-  redis_data:
-  weaviate_data:
+# All data persisted under ~/.news-aggregator/ on the host (bind mounts — no Docker named volumes needed)
