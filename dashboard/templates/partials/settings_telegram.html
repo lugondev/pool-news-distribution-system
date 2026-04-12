@@ -147,7 +147,7 @@ function loadFilterOptions() {
       {% if type_mode != 'all' and ch.filter_article_types %} · Type {{ type_mode }}: <b>{{ ch.filter_article_types|join(', ') }}</b>{% endif %}
       {% set ai_mode = ch.ai_mode or 'rewrite' %}
       · AI: <b style="color:{% if ai_mode=='rewrite' %}var(--accent){% elif ai_mode=='synthetic' %}var(--green,#22c55e){% else %}var(--muted){% endif %}">{{ ai_mode }}</b>
-      {% if ch.rate_limit_max %} · Rate: <b>{{ ch.rate_limit_max }}/{{ ch.rate_limit_window_minutes or 60 }}min</b>{% endif %}
+      {% if ch.rate_limit_max %} · Rate: <b>{{ ch.rate_limit_max }}/{{ ch.rate_limit_window_minutes or 60 }}min</b>{% endif %}{% if ch.rate_limit_min_gap_seconds %} · Gap: <b>{{ ch.rate_limit_min_gap_seconds }}s</b>{% endif %}
     </div>
     <div class="tg-test-result" style="margin-top:4px;font-size:11px"></div>
 
@@ -269,6 +269,13 @@ function loadFilterOptions() {
             <label>Per (minutes)</label>
             <input type="number" name="rate_limit_window_minutes" value="{{ ch.rate_limit_window_minutes or 60 }}" min="1" max="1440">
           </div>
+        </div>
+        <div class="form-row-2" style="margin-top:6px">
+          <div class="form-group">
+            <label>Min gap between sends <span class="hint">seconds, 0 = disabled</span></label>
+            <input type="number" name="rate_limit_min_gap_seconds" value="{{ ch.rate_limit_min_gap_seconds or 0 }}" min="0" max="86400">
+          </div>
+          <div class="form-group"></div>
         </div>
       </div>
       <div style="display:flex;gap:6px;margin-top:8px">
@@ -410,6 +417,13 @@ function loadFilterOptions() {
             <label>Per (minutes)</label>
             <input type="number" name="rate_limit_window_minutes" value="60" min="1" max="1440">
           </div>
+        </div>
+        <div class="form-row-2" style="margin-top:6px">
+          <div class="form-group">
+            <label>Min gap between sends <span class="hint">seconds, 0 = disabled</span></label>
+            <input type="number" name="rate_limit_min_gap_seconds" value="0" min="0" max="86400">
+          </div>
+          <div class="form-group"></div>
         </div>
       </div>
       <div class="form-actions" style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">

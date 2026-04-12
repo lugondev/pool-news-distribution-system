@@ -10,6 +10,7 @@ Each endpoint/channel config supports:
   filter_article_types: [list of article types: 'original', 'synthetic']
   rate_limit_max: int (0 = unlimited)
   rate_limit_window_minutes: int (default 60)
+  rate_limit_min_gap_seconds: int (0 = disabled) — minimum seconds between any two dispatches
 """
 
 import logging
@@ -20,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 # Sliding-window counters: endpoint_id → deque of monotonic timestamps
 _rate_counters: dict[str, deque] = defaultdict(deque)
+
+# Last-sent timestamps for min-gap enforcement: endpoint_id → monotonic timestamp
+_last_sent_ts: dict[str, float] = {}
 
 # Cleanup: remove empty deques periodically to prevent unbounded dict growth.
 _last_cleanup_ts: float = 0.0
@@ -84,26 +88,45 @@ def check_rate_limit(endpoint_id: str, config: dict) -> bool:
     """
     Return True if the endpoint is within its rate limit, False if throttled.
     If within limit, records this send so future calls count it.
+
+    Checks two independent constraints:
+    1. Sliding-window max: at most rate_limit_max messages per rate_limit_window_minutes.
+    2. Min gap: at least rate_limit_min_gap_seconds between any two consecutive dispatches.
     """
-    max_msgs = config.get("rate_limit_max", 0)
-    if not max_msgs:
-        return True  # unlimited
-
-    window_minutes = config.get("rate_limit_window_minutes", 60)
-    window_seconds = window_minutes * 60
     now = time.monotonic()
-
     _maybe_cleanup_counters()
-    dq = _rate_counters[endpoint_id]
-    # Evict timestamps outside the sliding window
-    while dq and now - dq[0] > window_seconds:
-        dq.popleft()
 
-    if len(dq) >= max_msgs:
-        logger.info(
-            f"Rate limit: {endpoint_id} hit {max_msgs}/{window_minutes}min — skipping"
-        )
-        return False
+    # --- Min gap check (independent of max) ---
+    min_gap = config.get("rate_limit_min_gap_seconds", 0)
+    if min_gap:
+        last = _last_sent_ts.get(endpoint_id)
+        if last is not None and now - last < min_gap:
+            wait = round(min_gap - (now - last), 1)
+            logger.info(
+                f"Rate limit: {endpoint_id} min gap {min_gap}s not met (wait {wait}s) — skipping"
+            )
+            return False
 
-    dq.append(now)
+    # --- Sliding-window max check ---
+    max_msgs = config.get("rate_limit_max", 0)
+    if max_msgs:
+        window_minutes = config.get("rate_limit_window_minutes", 60)
+        window_seconds = window_minutes * 60
+        dq = _rate_counters[endpoint_id]
+        # Evict timestamps outside the sliding window
+        while dq and now - dq[0] > window_seconds:
+            dq.popleft()
+
+        if len(dq) >= max_msgs:
+            logger.info(
+                f"Rate limit: {endpoint_id} hit {max_msgs}/{window_minutes}min — skipping"
+            )
+            return False
+
+        dq.append(now)
+
+    # Record send time for min-gap tracking
+    if min_gap:
+        _last_sent_ts[endpoint_id] = now
+
     return True
