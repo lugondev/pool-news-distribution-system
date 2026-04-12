@@ -5,8 +5,15 @@ var _acDrop = null;
 function addFilterToken(inputId, val) {
   var el = document.getElementById(inputId);
   if (!el) return;
-  var tokens = el.value.split(',').map(function(t){ return t.trim(); }).filter(Boolean);
-  if (tokens.indexOf(val) < 0) tokens.push(val);
+  var parts = el.value.split(',');
+  // Replace the last partial token (what the user was typing) with the selected value
+  parts[parts.length - 1] = ' ' + val;
+  // Trim, remove empty, deduplicate
+  var seen = {}, tokens = [];
+  parts.forEach(function(t) {
+    t = t.trim();
+    if (t && !seen[t]) { seen[t] = true; tokens.push(t); }
+  });
   el.value = tokens.join(', ');
   _hideAcDrop();
 }
@@ -117,6 +124,7 @@ function loadFilterOptions() {
       </div>
       <div class="wh-actions">
         <button class="btn btn-sm btn-test" onclick="testWebhook('{{ ep.id }}')">Test</button>
+        <button class="btn btn-sm" style="background:#2a3a5e;color:#93c5fd;border-color:#3b5280" onclick="cloneWebhook('{{ ep.id }}')">Clone</button>
         <button class="btn btn-sm btn-toggle"
                 hx-post="/webhooks/{{ ep.id }}/toggle"
                 hx-target="#tab-panel-webhook" hx-swap="innerHTML">
@@ -622,6 +630,63 @@ function loadFilterOptions() {
     if (form) {
       form.style.display = form.style.display === 'none' ? '' : 'none';
     }
+  }
+
+  function cloneWebhook(epId) {
+    var srcForm = document.getElementById('edit-' + epId);
+    var addDiv = document.getElementById('wh-add-form');
+    var dstForm = addDiv && addDiv.querySelector('form');
+    if (!srcForm || !dstForm) return;
+
+    // Show the add form
+    addDiv.style.display = '';
+
+    // Copy simple fields by name
+    var simpleFields = [
+      'name', 'url', 'http_method', 'content_type',
+      'retry_attempts', 'retry_delay', 'timeout',
+      'filter_categories', 'filter_sources', 'filter_article_types',
+      'ai_mode', 'ai_config_id', 'target_language',
+      'rate_limit_max', 'rate_limit_window_minutes', 'rate_limit_min_gap_seconds',
+      'payload_fields', 'payload_template'
+    ];
+    simpleFields.forEach(function(name) {
+      var src = srcForm.querySelector('[name="' + name + '"]');
+      var dst = dstForm.querySelector('[name="' + name + '"]');
+      if (src && dst) dst.value = src.value;
+    });
+
+    // Append " (copy)" to name, clear ID
+    var nameField = dstForm.querySelector('[name="name"]');
+    if (nameField) nameField.value = nameField.value + ' (copy)';
+    var idField = dstForm.querySelector('[name="id"]');
+    if (idField) idField.value = '';
+
+    // Copy filter selects and sync their conditional inputs
+    var filterSelects = [
+      {name: 'filter_categories_mode', wrapId: 'wh-add-fc-wrap'},
+      {name: 'filter_sources_mode',    wrapId: 'wh-add-fs-wrap'},
+      {name: 'filter_article_types_mode', wrapId: 'wh-add-ft-wrap'}
+    ];
+    filterSelects.forEach(function(cfg) {
+      var src = srcForm.querySelector('[name="' + cfg.name + '"]');
+      var dst = dstForm.querySelector('[name="' + cfg.name + '"]');
+      if (src && dst) {
+        dst.value = src.value;
+        var wrap = document.getElementById(cfg.wrapId);
+        if (wrap) wrap.style.display = dst.value === 'all' ? 'none' : '';
+      }
+    });
+
+    // Copy payload mode (prefix-based ID) and refresh display
+    var srcMode = document.getElementById('wh-edit-' + epId + '-mode');
+    var dstMode = document.getElementById('wh-add-mode');
+    if (srcMode && dstMode) {
+      dstMode.value = srcMode.value;
+      togglePayloadMode('wh-add');
+    }
+
+    addDiv.scrollIntoView({behavior: 'smooth', block: 'start'});
   }
   
   loadFilterOptions();

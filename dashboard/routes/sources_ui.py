@@ -23,7 +23,7 @@ router = APIRouter()
 
 @router.get("/sources", response_class=HTMLResponse)
 async def sources_page(request: Request):
-    return templates.TemplateResponse("sources.html", {"request": request, "active_page": "sources"})
+    return templates.TemplateResponse("sources.html", {"request": request, "active_page": "sources", "categories": get_categories()})
 
 
 @router.get("/partials/sources", response_class=HTMLResponse)
@@ -85,7 +85,7 @@ async def source_edit_form(request: Request, source_id: str):
     source = next((s for s in sources if s["id"] == source_id), None)
     if not source:
         return HTMLResponse("<tr><td colspan='6'>Source not found</td></tr>")
-    return templates.TemplateResponse("partials/source_edit_row.html", {"request": request, "s": source})
+    return templates.TemplateResponse("partials/source_edit_row.html", {"request": request, "s": source, "categories": get_categories()})
 
 
 @router.put("/sources/{source_id}", response_class=HTMLResponse)

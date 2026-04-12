@@ -125,12 +125,10 @@
               </div>
               <div class="form-group">
                 <label>Category</label>
-                <select name="category"
-                        hx-get="/partials/category-options"
-                        hx-trigger="load"
-                        hx-swap="innerHTML">
-                  <option value="world">World</option>
-                  <option value="tech">Tech</option>
+                <select name="category">
+                  {% for cat in categories %}
+                  <option value="{{ cat.id }}">{{ cat.id }}</option>
+                  {% endfor %}
                 </select>
               </div>
             </div>

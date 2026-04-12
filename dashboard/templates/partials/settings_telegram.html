@@ -5,8 +5,15 @@ var _acDrop = null;
 function addFilterToken(inputId, val) {
   var el = document.getElementById(inputId);
   if (!el) return;
-  var tokens = el.value.split(',').map(function(t){ return t.trim(); }).filter(Boolean);
-  if (tokens.indexOf(val) < 0) tokens.push(val);
+  var parts = el.value.split(',');
+  // Replace the last partial token (what the user was typing) with the selected value
+  parts[parts.length - 1] = ' ' + val;
+  // Trim, remove empty, deduplicate
+  var seen = {}, tokens = [];
+  parts.forEach(function(t) {
+    t = t.trim();
+    if (t && !seen[t]) { seen[t] = true; tokens.push(t); }
+  });
   el.value = tokens.join(', ');
   _hideAcDrop();
 }
