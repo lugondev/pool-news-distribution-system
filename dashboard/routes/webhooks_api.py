@@ -43,6 +43,7 @@ class WebhookIn(BaseModel):
     filter_article_types: list[str] = []
     rate_limit_max: int = 0
     rate_limit_window_minutes: int = 60
+    rate_limit_min_gap_seconds: int = 0
 
 
 class WebhookUpdate(BaseModel):
@@ -64,6 +65,7 @@ class WebhookUpdate(BaseModel):
     filter_article_types: list[str] | None = None
     rate_limit_max: int | None = None
     rate_limit_window_minutes: int | None = None
+    rate_limit_min_gap_seconds: int | None = None
 
 
 @router.get("/webhooks")
@@ -97,6 +99,7 @@ async def add_webhook(body: WebhookIn):
         "filter_article_types": body.filter_article_types,
         "rate_limit_max": max(0, body.rate_limit_max),
         "rate_limit_window_minutes": max(1, body.rate_limit_window_minutes),
+        "rate_limit_min_gap_seconds": max(0, body.rate_limit_min_gap_seconds),
     }
     endpoints.append(ep)
     save_webhook_endpoints(endpoints)
@@ -116,6 +119,7 @@ async def update_webhook(wh_id: str, body: WebhookUpdate):
         "payload_template", "filter_categories_mode", "filter_categories",
         "filter_sources_mode", "filter_sources", "filter_article_types_mode",
         "filter_article_types", "rate_limit_max", "rate_limit_window_minutes",
+        "rate_limit_min_gap_seconds",
     ):
         val = getattr(body, field, None)
         if val is not None:
@@ -261,6 +265,7 @@ class TelegramChannelIn(BaseModel):
     filter_article_types: list[str] = []
     rate_limit_max: int = 0
     rate_limit_window_minutes: int = 60
+    rate_limit_min_gap_seconds: int = 0
 
 
 class TelegramChannelUpdate(BaseModel):
@@ -281,6 +286,7 @@ class TelegramChannelUpdate(BaseModel):
     filter_article_types: list[str] | None = None
     rate_limit_max: int | None = None
     rate_limit_window_minutes: int | None = None
+    rate_limit_min_gap_seconds: int | None = None
 
 
 @router.get("/telegram")
@@ -313,6 +319,7 @@ async def add_telegram_channel(body: TelegramChannelIn):
         "filter_article_types": body.filter_article_types,
         "rate_limit_max": max(0, body.rate_limit_max),
         "rate_limit_window_minutes": max(1, body.rate_limit_window_minutes),
+        "rate_limit_min_gap_seconds": max(0, body.rate_limit_min_gap_seconds),
     }
     channels.append(ch)
     save_telegram_channels(channels)
@@ -331,7 +338,7 @@ async def update_telegram_channel(ch_id: str, body: TelegramChannelUpdate):
         "payload_mode", "payload_fields", "payload_template", "filter_categories_mode",
         "filter_categories", "filter_sources_mode", "filter_sources",
         "filter_article_types_mode", "filter_article_types",
-        "rate_limit_max", "rate_limit_window_minutes",
+        "rate_limit_max", "rate_limit_window_minutes", "rate_limit_min_gap_seconds",
     ):
         val = getattr(body, field, None)
         if val is not None:

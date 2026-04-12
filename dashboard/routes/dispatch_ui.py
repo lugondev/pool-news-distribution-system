@@ -55,6 +55,7 @@ def _build_endpoint_dict(
     filter_article_types_mode: str, filter_article_types: str,
     ai_mode: str, ai_config_id: str, target_language: str,
     rate_limit_max: int, rate_limit_window_minutes: int,
+    rate_limit_min_gap_seconds: int = 0,
 ) -> dict:
     VALID_TYPES = {"original", "synthetic"}
     return {
@@ -81,6 +82,7 @@ def _build_endpoint_dict(
         "target_language": target_language.strip() or "",
         "rate_limit_max": max(0, rate_limit_max),
         "rate_limit_window_minutes": max(1, rate_limit_window_minutes),
+        "rate_limit_min_gap_seconds": max(0, rate_limit_min_gap_seconds),
     }
 
 
@@ -153,6 +155,7 @@ async def webhook_add(
     target_language: str = Form(""),
     rate_limit_max: int = Form(0),
     rate_limit_window_minutes: int = Form(60),
+    rate_limit_min_gap_seconds: int = Form(0),
 ):
     endpoints = get_webhook_endpoints()
     if any(ep["id"] == id for ep in endpoints):
@@ -163,7 +166,7 @@ async def webhook_add(
         payload_mode, payload_fields, payload_template,
         filter_categories_mode, filter_categories, filter_sources_mode, filter_sources,
         filter_article_types_mode, filter_article_types, ai_mode, ai_config_id, target_language,
-        rate_limit_max, rate_limit_window_minutes,
+        rate_limit_max, rate_limit_window_minutes, rate_limit_min_gap_seconds,
     ))
     save_webhook_endpoints(endpoints)
     logger.info(f"Webhook added: {id}")
@@ -206,6 +209,7 @@ async def webhook_update(
     target_language: str = Form(""),
     rate_limit_max: int = Form(0),
     rate_limit_window_minutes: int = Form(60),
+    rate_limit_min_gap_seconds: int = Form(0),
 ):
     endpoints = get_webhook_endpoints()
     updated = _build_endpoint_dict(
@@ -213,7 +217,7 @@ async def webhook_update(
         payload_mode, payload_fields, payload_template,
         filter_categories_mode, filter_categories, filter_sources_mode, filter_sources,
         filter_article_types_mode, filter_article_types, ai_mode, ai_config_id, target_language,
-        rate_limit_max, rate_limit_window_minutes,
+        rate_limit_max, rate_limit_window_minutes, rate_limit_min_gap_seconds,
     )
     for i, ep in enumerate(endpoints):
         if ep["id"] == wh_id:
@@ -256,6 +260,7 @@ def _build_channel_dict(
     filter_article_types_mode: str, filter_article_types: str,
     ai_mode: str, ai_config_id: str, target_language: str,
     rate_limit_max: int, rate_limit_window_minutes: int,
+    rate_limit_min_gap_seconds: int = 0,
 ) -> dict:
     VALID_TYPES = {"original", "synthetic"}
     return {
@@ -280,6 +285,7 @@ def _build_channel_dict(
         "target_language": target_language.strip() or "",
         "rate_limit_max": max(0, rate_limit_max),
         "rate_limit_window_minutes": max(1, rate_limit_window_minutes),
+        "rate_limit_min_gap_seconds": max(0, rate_limit_min_gap_seconds),
     }
 
 
@@ -355,6 +361,7 @@ async def telegram_add(
     target_language: str = Form(""),
     rate_limit_max: int = Form(0),
     rate_limit_window_minutes: int = Form(60),
+    rate_limit_min_gap_seconds: int = Form(0),
 ):
     channels = get_telegram_channels()
     if any(ch["id"] == id for ch in channels):
@@ -364,7 +371,7 @@ async def telegram_add(
         payload_mode, payload_fields, payload_template,
         filter_categories_mode, filter_categories, filter_sources_mode, filter_sources,
         filter_article_types_mode, filter_article_types, ai_mode, ai_config_id, target_language,
-        rate_limit_max, rate_limit_window_minutes,
+        rate_limit_max, rate_limit_window_minutes, rate_limit_min_gap_seconds,
     ))
     save_telegram_channels(channels)
     logger.info(f"Telegram channel added: {id}")
@@ -405,6 +412,7 @@ async def telegram_update(
     target_language: str = Form(""),
     rate_limit_max: int = Form(0),
     rate_limit_window_minutes: int = Form(60),
+    rate_limit_min_gap_seconds: int = Form(0),
 ):
     channels = get_telegram_channels()
     updated = _build_channel_dict(
@@ -412,7 +420,7 @@ async def telegram_update(
         payload_mode, payload_fields, payload_template,
         filter_categories_mode, filter_categories, filter_sources_mode, filter_sources,
         filter_article_types_mode, filter_article_types, ai_mode, ai_config_id, target_language,
-        rate_limit_max, rate_limit_window_minutes,
+        rate_limit_max, rate_limit_window_minutes, rate_limit_min_gap_seconds,
     )
     for i, ch in enumerate(channels):
         if ch["id"] == ch_id:

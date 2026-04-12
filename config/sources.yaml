@@ -62,7 +62,7 @@ sources:
   lang: ko
   country: kr
   category: world
-  enabled: false
+  enabled: true
 - id: vnexpress
   name: VnExpress
   url: https://vnexpress.net/rss/tin-moi-nhat.rss
@@ -310,7 +310,7 @@ sources:
   lang: en
   country: global
   category: finance
-  enabled: false
+  enabled: true
 - id: worldbank
   name: World Bank News
   url: https://feeds.worldbank.org/worldbank/blogs/all
@@ -318,7 +318,7 @@ sources:
   lang: en
   country: global
   category: finance
-  enabled: false
+  enabled: true
 - id: economist_world
   name: The Economist World
   url: https://www.economist.com/the-world-this-week/rss.xml
@@ -431,7 +431,6 @@ sources:
   country: uk
   category: science
   enabled: true
-# --- AI (Chuyên sâu) ---
 - id: huggingface_blog
   name: Hugging Face Blog
   url: https://huggingface.co/blog/feed.xml
@@ -464,7 +463,6 @@ sources:
   country: global
   category: ai
   enabled: true
-# --- Gaming Business ---
 - id: vgc
   name: Video Games Chronicle (VGC)
   url: https://www.videogameschronicle.com/feed/
@@ -489,7 +487,6 @@ sources:
   country: global
   category: gaming
   enabled: false
-# --- Tech & Startups (Chuyên sâu) ---
 - id: rest_of_world
   name: Rest of World
   url: https://restofworld.org/feed/
@@ -617,7 +614,7 @@ sources:
   lang: en
   country: jp
   category: finance
-  enabled: false
+  enabled: true
 - id: kbs_economy
   name: KBS World Economy
   url: https://world.kbs.co.kr/rss/rss_economy.htm
@@ -1193,7 +1190,7 @@ sources:
   lang: vi
   country: global
   category: world
-  enabled: false
+  enabled: true
 - id: tuoitre
   name: Tuoi Tre
   url: https://tuoitre.vn/rss
@@ -1570,7 +1567,6 @@ sources:
   country: global
   category: music
   enabled: true
-# --- Health ---
 - id: who_news
   name: World Health Organization News
   url: https://www.who.int/rss-feeds/news-english.xml
@@ -1635,7 +1631,6 @@ sources:
   country: eu
   category: health
   enabled: true
-# --- Culture ---
 - id: smithsonian_culture
   name: Smithsonian Magazine Arts & Culture
   url: https://www.smithsonianmag.com/rss/arts-culture/
@@ -1723,7 +1718,7 @@ sources:
   lang: en
   country: us
   category: ai
-  enabled: false
+  enabled: true
 - id: snt_science
   name: Science & Technology (EU)
   url: https://cordis.europa.eu/news/rss/en
@@ -1731,7 +1726,7 @@ sources:
   lang: en
   country: eu
   category: science
-  enabled: false
+  enabled: true
 - id: deepmind_blog
   name: Google DeepMind
   url: https://deepmind.google/blog/rss.xml
@@ -1747,7 +1742,7 @@ sources:
   lang: en
   country: es
   category: world
-  enabled: false
+  enabled: true
 - id: el_pais_es
   name: El País (Spain)
   url: https://elpais.com/rss/elpais/portada.xml
@@ -1779,7 +1774,7 @@ sources:
   lang: en
   country: us
   category: business
-  enabled: false
+  enabled: true
 - id: bbc_news_uk
   name: BBC News UK
   url: http://feeds.bbci.co.uk/news/rss.xml
@@ -1787,7 +1782,7 @@ sources:
   lang: en
   country: uk
   category: world
-  enabled: false
+  enabled: true
 - id: ign_gaming
   name: IGN
   url: https://feeds.feedburner.com/ign/all
@@ -1803,7 +1798,7 @@ sources:
   lang: en
   country: us
   category: finance
-  enabled: false
+  enabled: true
 - id: sina_finance_cn
   name: Sina Finance
   url: http://finance.sina.com.cn/iframe/71/2008/0324/1.xml
@@ -1819,7 +1814,7 @@ sources:
   lang: en
   country: jp
   category: world
-  enabled: false
+  enabled: true
 - id: korea_joongang_daily
   name: Korea JoongAng Daily
   url: https://koreajoongangdaily.joins.com/rss/news
@@ -1827,7 +1822,7 @@ sources:
   lang: en
   country: kr
   category: world
-  enabled: false
+  enabled: true
 - id: tencent_tech_cn
   name: Tencent Tech (QQ)
   url: https://new.qq.com/ch/tech/rss.xml
@@ -1875,7 +1870,7 @@ sources:
   lang: en
   country: de
   category: business
-  enabled: false
+  enabled: true
 - id: golem_de
   name: Golem.de (Germany Tech)
   url: https://rss.golem.de/rss.php?feed=ATOM1.0
@@ -1891,7 +1886,7 @@ sources:
   lang: en
   country: us
   category: science
-  enabled: false
+  enabled: true
 - id: webmd_health
   name: WebMD
   url: https://rssfeeds.webmd.com/rss/rss.aspx?RSSSource=RSS_PUBLIC
@@ -1899,7 +1894,7 @@ sources:
   lang: en
   country: us
   category: health
-  enabled: false
+  enabled: true
 - id: sora_news_24
   name: SoraNews24
   url: https://soranews24.com/feed/
@@ -1907,7 +1902,7 @@ sources:
   lang: en
   country: jp
   category: culture
-  enabled: false
+  enabled: true
 - id: tech_eu
   name: Tech.eu
   url: https://tech.eu/feed/
@@ -1915,7 +1910,7 @@ sources:
   lang: en
   country: eu
   category: tech
-  enabled: false
+  enabled: true
 - id: the_bridge_jp
   name: THE BRIDGE (Japan Tech)
   url: https://thebridge.jp/en/feed
@@ -1923,7 +1918,7 @@ sources:
   lang: en
   country: jp
   category: tech
-  enabled: false
+  enabled: true
 - id: tuoitre_news
   name: Tuoi Tre News
   url: https://tuoitre.vn/rss/tin-moi-nhat.rss
@@ -1947,7 +1942,7 @@ sources:
   lang: en
   country: kr
   category: world
-  enabled: false
+  enabled: true
 - id: aftenposten_no
   name: Aftenposten (Norway)
   url: https://www.aftenposten.no/rss
@@ -1955,7 +1950,7 @@ sources:
   lang: en
   country: global
   category: world
-  enabled: false
+  enabled: true
 - id: allkpop_music
   name: allkpop
   url: https://www.allkpop.com/rss
@@ -1971,7 +1966,7 @@ sources:
   lang: it
   country: it
   category: world
-  enabled: false
+  enabled: true
 - id: asahi_news
   name: Asahi Shimbun
   url: http://www.asahi.com/rss/asahi/newsheadlines.rdf
@@ -1979,7 +1974,7 @@ sources:
   lang: ja
   country: jp
   category: world
-  enabled: false
+  enabled: true
 - id: bangkok_post
   name: Bangkok Post
   url: https://www.bangkokpost.com/rss/data/topstories.xml
@@ -1987,7 +1982,7 @@ sources:
   lang: en
   country: th
   category: world
-  enabled: false
+  enabled: true
 - id: bbc_culture
   name: BBC Culture
   url: https://www.bbc.com/culture/feed.rss
@@ -2011,7 +2006,7 @@ sources:
   lang: en
   country: cn
   category: business
-  enabled: false
+  enabled: true
 - id: cgtn_world
   name: CGTN News
   url: https://www.cgtn.com/rss/news.xml
@@ -2019,7 +2014,7 @@ sources:
   lang: en
   country: cn
   category: world
-  enabled: false
+  enabled: true
 - id: china_daily
   name: China Daily Global
   url: http://www.chinadaily.com.cn/rss/world.xml
@@ -2027,7 +2022,7 @@ sources:
   lang: en
   country: cn
   category: world
-  enabled: false
+  enabled: true
 - id: daily_nk
   name: Daily NK
   url: https://www.dailynk.com/english/feed/
@@ -2035,7 +2030,7 @@ sources:
   lang: en
   country: kr
   category: politics
-  enabled: false
+  enabled: true
 - id: dexerto_esports
   name: Dexerto (Esports/Gaming)
   url: https://www.dexerto.com/esports/feed/
@@ -2075,7 +2070,7 @@ sources:
   lang: en
   country: eu
   category: world
-  enabled: false
+  enabled: true
 - id: faz_net_de
   name: Frankfurter Allgemeine Zeitung (Germany)
   url: https://www.faz.net/rss/aktuell/
@@ -2107,7 +2102,7 @@ sources:
   lang: en
   country: uk
   category: business
-  enabled: false
+  enabled: true
 - id: gamespot_gaming
   name: GameSpot
   url: https://www.gamespot.com/feeds/game-news/
@@ -2123,7 +2118,7 @@ sources:
   lang: ko
   country: kr
   category: world
-  enabled: false
+  enabled: true
 - id: healthline_news
   name: Healthline
   url: https://www.healthline.com/feed/news
@@ -2155,7 +2150,7 @@ sources:
   lang: en
   country: uk
   category: world
-  enabled: false
+  enabled: true
 - id: investopedia_finance
   name: Investopedia
   url: https://www.investopedia.com/feed-4769736
@@ -2163,7 +2158,7 @@ sources:
   lang: en
   country: us
   category: finance
-  enabled: false
+  enabled: true
 - id: korea_herald
   name: The Korea Herald
   url: http://www.koreaherald.com/common/rss_xml.php?ct=101
@@ -2171,7 +2166,7 @@ sources:
   lang: en
   country: kr
   category: world
-  enabled: false
+  enabled: true
 - id: le_figaro_fr
   name: Le Figaro (France)
   url: https://www.lefigaro.fr/rss/figaro_actualites.xml
@@ -2187,7 +2182,7 @@ sources:
   lang: en
   country: fr
   category: world
-  enabled: false
+  enabled: true
 - id: le_monde_fr
   name: Le Monde (France)
   url: https://www.lemonde.fr/rss/une.xml
@@ -2203,7 +2198,7 @@ sources:
   lang: en
   country: us
   category: health
-  enabled: false
+  enabled: true
 - id: medical_news_today
   name: Medical News Today
   url: https://www.medicalnewstoday.com/feed
@@ -2227,7 +2222,7 @@ sources:
   lang: en
   country: jp
   category: culture
-  enabled: false
+  enabled: true
 - id: nme_music
   name: NME (Music/Culture)
   url: https://www.nme.com/feed
@@ -2243,7 +2238,7 @@ sources:
   lang: en
   country: ph
   category: world
-  enabled: false
+  enabled: true
 - id: reuters_world
   name: Reuters World News
   url: https://www.reutersagency.com/feed/?best-topics=world-news&post_type=best
@@ -2251,7 +2246,7 @@ sources:
   lang: en
   country: us
   category: world
-  enabled: false
+  enabled: true
 - id: rock_paper_shotgun
   name: Rock Paper Shotgun
   url: https://www.rockpapershotgun.com/feed
@@ -2267,7 +2262,7 @@ sources:
   lang: en
   country: cn
   category: world
-  enabled: false
+  enabled: true
 - id: sixth_tone_culture
   name: Sixth Tone
   url: https://www.sixthtone.com/rss
@@ -2275,7 +2270,7 @@ sources:
   lang: en
   country: cn
   category: culture
-  enabled: false
+  enabled: true
 - id: sky_sports_2
   name: Sky Sports
   url: https://www.skysports.com/rss/12040
@@ -2291,7 +2286,7 @@ sources:
   lang: en
   country: us
   category: science
-  enabled: false
+  enabled: true
 - id: der_spiegel_news
   name: Der Spiegel
   url: https://www.spiegel.de/index.rss
@@ -2307,7 +2302,7 @@ sources:
   lang: en
   country: sg
   category: world
-  enabled: false
+  enabled: true
 - id: tagesschau_de
   name: Tagesschau (Germany)
   url: https://www.tagesschau.de/xml/rss2/
@@ -2323,7 +2318,7 @@ sources:
   lang: en
   country: uk
   category: world
-  enabled: false
+  enabled: true
 - id: the_atlantic_culture
   name: The Atlantic (Culture)
   url: https://www.theatlantic.com/feed/category/culture/
@@ -2347,7 +2342,7 @@ sources:
   lang: en
   country: uk
   category: world
-  enabled: false
+  enabled: true
 - id: jakarta_post
   name: The Jakarta Post
   url: https://www.thejakartapost.com/rss/news
@@ -2355,7 +2350,7 @@ sources:
   lang: en
   country: id
   category: world
-  enabled: false
+  enabled: true
 - id: the_local_se
   name: The Local Sweden
   url: https://www.thelocal.se/feed/
@@ -2363,7 +2358,7 @@ sources:
   lang: en
   country: se
   category: world
-  enabled: false
+  enabled: true
 - id: vox_world
   name: Vox World
   url: https://www.vox.com/rss/world/index.xml
@@ -2371,7 +2366,7 @@ sources:
   lang: en
   country: us
   category: world
-  enabled: false
+  enabled: true
 - id: xinhua_news
   name: Xinhua News
   url: http://www.xinhuanet.com/english/rss/worldrss.xml
@@ -2395,7 +2390,7 @@ sources:
   lang: it
   country: it
   category: world
-  enabled: false
+  enabled: true
 - id: yle_news_fi
   name: Yle News (Finland)
   url: https://yle.fi/uutiset/rss/main
@@ -2404,8 +2399,6 @@ sources:
   country: fi
   category: world
   enabled: false
-
-# --- Enriched from awesome-rss-feeds (curated) ---
 - id: abc_au_news
   name: ABC News Australia
   url: https://www.abc.net.au/news/feed/1948/rss.xml
@@ -2413,7 +2406,7 @@ sources:
   lang: en
   country: au
   category: world
-  enabled: false
+  enabled: true
 - id: smh_au
   name: Sydney Morning Herald
   url: https://www.smh.com.au/rss/feed.xml
@@ -2421,7 +2414,7 @@ sources:
   lang: en
   country: au
   category: world
-  enabled: false
+  enabled: true
 - id: cbc_topstories
   name: CBC Top Stories
   url: https://www.cbc.ca/cmlink/rss-topstories
@@ -2429,7 +2422,7 @@ sources:
   lang: en
   country: ca
   category: world
-  enabled: false
+  enabled: true
 - id: ctv_topstories
   name: CTV News Top Stories
   url: https://www.ctvnews.ca/rss/ctvnews-ca-top-stories-public-rss-1.822009
@@ -2437,7 +2430,7 @@ sources:
   lang: en
   country: ca
   category: world
-  enabled: false
+  enabled: true
 - id: cnn_world
   name: CNN World
   url: http://rss.cnn.com/rss/edition_world.rss
@@ -2445,7 +2438,7 @@ sources:
   lang: en
   country: us
   category: world
-  enabled: false
+  enabled: true
 - id: washpost_world
   name: Washington Post World
   url: http://feeds.washingtonpost.com/rss/world
@@ -2453,7 +2446,7 @@ sources:
   lang: en
   country: us
   category: world
-  enabled: false
+  enabled: true
 - id: cnet_news
   name: CNET News
   url: https://www.cnet.com/rss/news/
@@ -2461,7 +2454,7 @@ sources:
   lang: en
   country: us
   category: tech
-  enabled: false
+  enabled: true
 - id: lifehacker
   name: Lifehacker
   url: https://lifehacker.com/rss
@@ -2485,7 +2478,7 @@ sources:
   lang: en
   country: global
   category: finance
-  enabled: false
+  enabled: true
 - id: css_tricks
   name: CSS-Tricks
   url: https://css-tricks.com/feed/
@@ -2518,7 +2511,6 @@ sources:
   country: global
   category: culture
   enabled: false
-
 - id: globalnews_ca
   name: Global News (Canada)
   url: https://globalnews.ca/feed/
@@ -2526,7 +2518,7 @@ sources:
   lang: en
   country: ca
   category: world
-  enabled: false
+  enabled: true
 - id: nationalpost_ca
   name: National Post
   url: https://nationalpost.com/feed/
@@ -2534,7 +2526,7 @@ sources:
   lang: en
   country: ca
   category: world
-  enabled: false
+  enabled: true
 - id: toronto_star
   name: Toronto Star
   url: https://www.thestar.com/content/thestar/feed.RSSManagerServlet.articles.topstories.rss
@@ -2542,7 +2534,7 @@ sources:
   lang: en
   country: ca
   category: world
-  enabled: false
+  enabled: true
 - id: financial_post_ca
   name: Financial Post
   url: https://business.financialpost.com/feed/
@@ -2550,7 +2542,7 @@ sources:
   lang: en
   country: ca
   category: finance
-  enabled: false
+  enabled: true
 - id: foxnews_latest
   name: FOX News Latest
   url: http://feeds.foxnews.com/foxnews/latest
@@ -2558,7 +2550,7 @@ sources:
   lang: en
   country: us
   category: world
-  enabled: false
+  enabled: true
 - id: latimes_world
   name: Los Angeles Times World & Nation
   url: https://www.latimes.com/world-nation/rss2.0.xml
@@ -2566,7 +2558,7 @@ sources:
   lang: en
   country: us
   category: world
-  enabled: false
+  enabled: true
 - id: politico_playbook
   name: Politico Playbook
   url: https://rss.politico.com/playbook.xml
@@ -2574,7 +2566,7 @@ sources:
   lang: en
   country: us
   category: politics
-  enabled: false
+  enabled: true
 - id: google_news_top
   name: Google News Top Stories
   url: https://news.google.com/rss
@@ -2606,7 +2598,7 @@ sources:
   lang: en
   country: us
   category: business
-  enabled: false
+  enabled: true
 - id: infoq
   name: InfoQ
   url: https://feed.infoq.com
@@ -2614,7 +2606,7 @@ sources:
   lang: en
   country: global
   category: tech
-  enabled: false
+  enabled: true
 - id: github_blog
   name: GitHub Blog
   url: https://github.blog/feed/
@@ -2622,7 +2614,7 @@ sources:
   lang: en
   country: global
   category: tech
-  enabled: false
+  enabled: true
 - id: stackoverflow_blog
   name: Stack Overflow Blog
   url: https://stackoverflow.blog/feed/
@@ -2630,7 +2622,7 @@ sources:
   lang: en
   country: global
   category: tech
-  enabled: false
+  enabled: true
 - id: martinfowler
   name: Martin Fowler
   url: https://martinfowler.com/feed.atom
@@ -2646,8 +2638,7 @@ sources:
   lang: en
   country: global
   category: tech
-  enabled: false
-
+  enabled: true
 - id: kyodo_news_en
   name: Kyodo News English
   url: https://english.kyodonews.net/rss/all.xml
@@ -2655,7 +2646,7 @@ sources:
   lang: en
   country: jp
   category: world
-  enabled: false
+  enabled: true
 - id: hongkongfp
   name: Hong Kong Free Press
   url: https://www.hongkongfp.com/feed/
@@ -2663,7 +2654,7 @@ sources:
   lang: en
   country: hk
   category: world
-  enabled: false
+  enabled: true
 - id: the_standard_hk
   name: The Standard Hong Kong
   url: https://www.thestandard.com.hk/newsfeed/latest/news.xml
@@ -2671,7 +2662,7 @@ sources:
   lang: en
   country: hk
   category: world
-  enabled: false
+  enabled: true
 - id: the_hindu_in
   name: The Hindu
   url: https://www.thehindu.com/feeder/default.rss
@@ -2679,7 +2670,7 @@ sources:
   lang: en
   country: in
   category: world
-  enabled: false
+  enabled: true
 - id: times_of_india
   name: Times of India Top Stories
   url: https://timesofindia.indiatimes.com/rssfeedstopstories.cms
@@ -2687,7 +2678,7 @@ sources:
   lang: en
   country: in
   category: world
-  enabled: false
+  enabled: true
 - id: indian_express_in
   name: The Indian Express Front Page
   url: http://indianexpress.com/print/front-page/feed/
@@ -2695,7 +2686,7 @@ sources:
   lang: en
   country: in
   category: world
-  enabled: false
+  enabled: true
 - id: business_standard_in
   name: Business Standard India
   url: https://www.business-standard.com/rss/home_page_top_stories.rss
@@ -2703,7 +2694,7 @@ sources:
   lang: en
   country: in
   category: business
-  enabled: false
+  enabled: true
 - id: inquirer_ph
   name: INQUIRER.net
   url: https://www.inquirer.net/fullfeed
@@ -2711,7 +2702,7 @@ sources:
   lang: en
   country: ph
   category: world
-  enabled: false
+  enabled: true
 - id: gma_news_ph
   name: GMA News Philippines
   url: https://data.gmanews.tv/gno/rss/news/feed.xml
@@ -2719,7 +2710,7 @@ sources:
   lang: en
   country: ph
   category: world
-  enabled: false
+  enabled: true
 - id: businessmirror_ph
   name: BusinessMirror Philippines
   url: https://businessmirror.com.ph/feed/
@@ -2727,7 +2718,7 @@ sources:
   lang: en
   country: ph
   category: business
-  enabled: false
+  enabled: true
 - id: express_tribune_pk
   name: The Express Tribune
   url: https://tribune.com.pk/feed/home
@@ -2735,7 +2726,7 @@ sources:
   lang: en
   country: pk
   category: world
-  enabled: false
+  enabled: true
 - id: the_nation_pk
   name: The Nation Pakistan
   url: https://nation.com.pk/rss/top-stories
@@ -2743,4 +2734,230 @@ sources:
   lang: en
   country: pk
   category: world
-  enabled: false
+  enabled: true
+
+# ── Blockchain / Crypto ──────────────────────────────────────────────────────
+- id: coindesk
+  name: CoinDesk
+  url: https://www.coindesk.com/arc/outboundfeeds/rss/
+  type: rss
+  lang: en
+  country: us
+  category: crypto
+  enabled: true
+- id: cointelegraph
+  name: CoinTelegraph
+  url: https://cointelegraph.com/rss
+  type: rss
+  lang: en
+  country: global
+  category: crypto
+  enabled: true
+- id: decrypt_crypto
+  name: Decrypt
+  url: https://decrypt.co/feed
+  type: rss
+  lang: en
+  country: us
+  category: crypto
+  enabled: true
+- id: theblock_crypto
+  name: The Block
+  url: https://www.theblock.co/rss.xml
+  type: rss
+  lang: en
+  country: us
+  category: crypto
+  enabled: true
+- id: bitcoin_magazine
+  name: Bitcoin Magazine
+  url: https://bitcoinmagazine.com/.rss/full/
+  type: rss
+  lang: en
+  country: us
+  category: crypto
+  enabled: true
+- id: blockworks
+  name: Blockworks
+  url: https://blockworks.co/feed
+  type: rss
+  lang: en
+  country: us
+  category: crypto
+  enabled: true
+- id: dlnews_crypto
+  name: DL News
+  url: https://dlnews.com/arc/outboundfeeds/rss/
+  type: rss
+  lang: en
+  country: global
+  category: crypto
+  enabled: true
+- id: thedefiant
+  name: The Defiant (DeFi)
+  url: https://thedefiant.io/api/feed
+  type: rss
+  lang: en
+  country: global
+  category: crypto
+  enabled: true
+- id: protos_crypto
+  name: Protos
+  url: https://protos.com/feed/
+  type: rss
+  lang: en
+  country: global
+  category: crypto
+  enabled: true
+- id: ledger_insights
+  name: Ledger Insights
+  url: https://www.ledgerinsights.com/feed/
+  type: rss
+  lang: en
+  country: global
+  category: crypto
+  enabled: true
+- id: forkast_news
+  name: Forkast News
+  url: https://forkast.news/feed/
+  type: rss
+  lang: en
+  country: sg
+  category: crypto
+  enabled: true
+- id: bitcoin_com_news
+  name: Bitcoin.com News
+  url: https://news.bitcoin.com/feed/
+  type: rss
+  lang: en
+  country: global
+  category: crypto
+  enabled: true
+- id: cryptonews
+  name: Crypto News
+  url: https://cryptonews.com/news/feed/
+  type: rss
+  lang: en
+  country: global
+  category: crypto
+  enabled: true
+- id: u_today_crypto
+  name: U.Today
+  url: https://u.today/rss
+  type: rss
+  lang: en
+  country: global
+  category: crypto
+  enabled: true
+- id: crypto_briefing
+  name: Crypto Briefing
+  url: https://cryptobriefing.com/feed/
+  type: rss
+  lang: en
+  country: us
+  category: crypto
+  enabled: true
+- id: beincrypto
+  name: BeInCrypto
+  url: https://beincrypto.com/feed/
+  type: rss
+  lang: en
+  country: global
+  category: crypto
+  enabled: true
+- id: cryptoslate
+  name: CryptoSlate
+  url: https://cryptoslate.com/feed/
+  type: rss
+  lang: en
+  country: us
+  category: crypto
+  enabled: true
+- id: newsbtc
+  name: NewsBTC
+  url: https://www.newsbtc.com/feed/
+  type: rss
+  lang: en
+  country: global
+  category: crypto
+  enabled: true
+- id: ambcrypto
+  name: AMBCrypto
+  url: https://ambcrypto.com/feed/
+  type: rss
+  lang: en
+  country: global
+  category: crypto
+  enabled: true
+- id: cryptopolitan
+  name: Cryptopolitan
+  url: https://www.cryptopolitan.com/feed/
+  type: rss
+  lang: en
+  country: global
+  category: crypto
+  enabled: true
+- id: finbold_crypto
+  name: Finbold
+  url: https://finbold.com/feed/
+  type: rss
+  lang: en
+  country: global
+  category: crypto
+  enabled: true
+- id: watcher_guru
+  name: Watcher Guru
+  url: https://watcher.guru/news/feed
+  type: rss
+  lang: en
+  country: global
+  category: crypto
+  enabled: true
+- id: thecryptobasic
+  name: The Crypto Basic
+  url: https://thecryptobasic.com/feed/
+  type: rss
+  lang: en
+  country: global
+  category: crypto
+  enabled: true
+- id: coinjournal
+  name: CoinJournal
+  url: https://coinjournal.net/feed/
+  type: rss
+  lang: en
+  country: uk
+  category: crypto
+  enabled: true
+- id: cryptodaily
+  name: Crypto Daily
+  url: https://cryptodaily.co.uk/feed
+  type: rss
+  lang: en
+  country: uk
+  category: crypto
+  enabled: true
+- id: crypto_news_global
+  name: Crypto.news
+  url: https://crypto.news/feed/
+  type: rss
+  lang: en
+  country: global
+  category: crypto
+  enabled: true
+- id: cryptopotato
+  name: CryptoPotato
+  url: https://cryptopotato.com/feed/
+  type: rss
+  lang: en
+  country: global
+  category: crypto
+  enabled: true
+- id: dailyhodl
+  name: The Daily Hodl
+  url: https://dailyhodl.com/feed/
+  type: rss
+  lang: en
+  country: us
+  category: crypto
+  enabled: true
