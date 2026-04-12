@@ -12,11 +12,12 @@
     </div>
   </div>
   <div class="dropdown">
-    <button class="dropdown-toggle {% if active_page in ['pipeline', 'sources', 'settings', 'logs'] %}active{% endif %}">System ▾</button>
+    <button class="dropdown-toggle {% if active_page in ['pipeline', 'sources', 'settings', 'schedules', 'logs'] %}active{% endif %}">System ▾</button>
     <div class="dropdown-menu">
       <a href="/pipeline" {% if active_page == 'pipeline' %}class="active"{% endif %}>Pipeline</a>
       <a href="/sources" {% if active_page == 'sources' %}class="active"{% endif %}>Sources</a>
       <a href="/settings" {% if active_page == 'settings' %}class="active"{% endif %}>Settings</a>
+      <a href="/schedules" {% if active_page == 'schedules' %}class="active"{% endif %}>Schedules</a>
       <a href="/logs" {% if active_page == 'logs' %}class="active"{% endif %}>Logs</a>
     </div>
   </div>

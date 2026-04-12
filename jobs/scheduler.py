@@ -40,6 +40,7 @@ from storage.redis_store import (
     get_articles_batch,
 )
 from storage.sqlite_stats import log_system_event
+from jobs.scheduled_webhook import scheduled_webhook_job
 
 logger = logging.getLogger(__name__)
 
@@ -59,12 +60,14 @@ def get_scheduler_status() -> list[dict]:
     result = []
     for job in _scheduler.get_jobs():
         nrt = job.next_run_time
-        result.append({
-            "id": job.id,
-            "next_run": nrt.isoformat() if nrt else None,
-            "state": _job_states.get(job.id, "idle"),
-            "last_duration_ms": _job_last_duration_ms.get(job.id),
-        })
+        result.append(
+            {
+                "id": job.id,
+                "next_run": nrt.isoformat() if nrt else None,
+                "state": _job_states.get(job.id, "idle"),
+                "last_duration_ms": _job_last_duration_ms.get(job.id),
+            }
+        )
     return result
 
 
@@ -93,7 +96,9 @@ def _resolve_ai_config(ai_cfg: dict, config_id: str | None) -> dict:
     If config_id is None or not found, returns global AI settings (built-in).
     """
     if config_id:
-        target = next((c for c in ai_cfg.get("configs", []) if c["id"] == config_id), None)
+        target = next(
+            (c for c in ai_cfg.get("configs", []) if c["id"] == config_id), None
+        )
         if target:
             return {
                 "tone": target.get("tone") or ai_cfg.get("tone", "general"),
@@ -107,7 +112,9 @@ def _resolve_ai_config(ai_cfg: dict, config_id: str | None) -> dict:
     }
 
 
-def _resolve_provider(ai_cfg: dict, provider_id: str | None = None) -> tuple[str, str, str | None]:
+def _resolve_provider(
+    ai_cfg: dict, provider_id: str | None = None
+) -> tuple[str, str, str | None]:
     """Return (api_key, base_url, model_override) for the given provider_id.
     model_override is None if the provider has no model set (use job-level model).
     Falls back to direct api_key/base_url in ai section for backward compatibility."""
@@ -115,7 +122,11 @@ def _resolve_provider(ai_cfg: dict, provider_id: str | None = None) -> tuple[str
     if pid:
         for p in ai_cfg.get("providers", []):
             if p.get("id") == pid:
-                return p.get("api_key", ""), p.get("base_url", ""), p.get("model") or None
+                return (
+                    p.get("api_key", ""),
+                    p.get("base_url", ""),
+                    p.get("model") or None,
+                )
     return ai_cfg.get("api_key", ""), ai_cfg.get("base_url", ""), None
 
 
@@ -137,14 +148,21 @@ def _load_sources() -> list[dict]:
 # Job functions — top-level so they are importable and testable independently
 # ---------------------------------------------------------------------------
 
+
 async def crawl_job(redis: aioredis.Redis) -> None:
     started = datetime.now(timezone.utc)
     _job_states["crawl_all"] = "running"
     if ws_manager:
-        asyncio.create_task(ws_manager.broadcast("scheduler.job_start", {
-            "job_id": "crawl_all", "job_name": "Crawl",
-            "started_at": started.isoformat(),
-        }))
+        asyncio.create_task(
+            ws_manager.broadcast(
+                "scheduler.job_start",
+                {
+                    "job_id": "crawl_all",
+                    "job_name": "Crawl",
+                    "started_at": started.isoformat(),
+                },
+            )
+        )
     current_cfg = _load_config()
     crawler = current_cfg.get("crawler", {})
     active_cats = {
@@ -186,7 +204,10 @@ async def crawl_job(redis: aioredis.Redis) -> None:
     default_interval_sec = crawler.get("default_crawl_interval_minutes", 45) * 60
     cat_intervals = crawler.get("category_crawl_interval_minutes", {})
     source_intervals = {
-        s["id"]: cat_intervals.get(s.get("category", ""), crawler.get("default_crawl_interval_minutes", 45)) * 60
+        s["id"]: cat_intervals.get(
+            s.get("category", ""), crawler.get("default_crawl_interval_minutes", 45)
+        )
+        * 60
         for s in batch
     }
 
@@ -214,30 +235,41 @@ async def crawl_job(redis: aioredis.Redis) -> None:
             "source_ids": due_ids,
             "total_found": sum(r.get("found", 0) for r in (results or [])),
             "total_saved": sum(r.get("saved", 0) for r in (results or [])),
-            "total_duplicates": sum(
-                r.get("duplicates", 0) for r in (results or [])
-            ),
+            "total_duplicates": sum(r.get("duplicates", 0) for r in (results or [])),
             "errors": sum(1 for r in (results or []) if r.get("errors", 0)),
         }
         dur_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
         _job_states["crawl_all"] = "idle"
         _job_last_duration_ms["crawl_all"] = dur_ms
         if ws_manager:
-            asyncio.create_task(ws_manager.broadcast("scheduler.job_done", {
-                "job_id": "crawl_all", "job_name": "Crawl",
-                "status": "ok", "duration_ms": dur_ms, "meta": meta,
-            }))
+            asyncio.create_task(
+                ws_manager.broadcast(
+                    "scheduler.job_done",
+                    {
+                        "job_id": "crawl_all",
+                        "job_name": "Crawl",
+                        "status": "ok",
+                        "duration_ms": dur_ms,
+                        "meta": meta,
+                    },
+                )
+            )
         await log_system_event("crawl_job", started, status="ok", metadata=meta)
     except Exception as exc:
         _job_states["crawl_all"] = "error"
         if ws_manager:
-            asyncio.create_task(ws_manager.broadcast("scheduler.job_done", {
-                "job_id": "crawl_all", "job_name": "Crawl",
-                "status": "error", "error": str(exc)[:200],
-            }))
-        await log_system_event(
-            "crawl_job", started, status="error", error_msg=str(exc)
-        )
+            asyncio.create_task(
+                ws_manager.broadcast(
+                    "scheduler.job_done",
+                    {
+                        "job_id": "crawl_all",
+                        "job_name": "Crawl",
+                        "status": "error",
+                        "error": str(exc)[:200],
+                    },
+                )
+            )
+        await log_system_event("crawl_job", started, status="error", error_msg=str(exc))
         raise
 
 
@@ -245,10 +277,16 @@ async def ai_job(redis: aioredis.Redis) -> None:
     started = datetime.now(timezone.utc)
     _job_states["ai_rewrite"] = "running"
     if ws_manager:
-        asyncio.create_task(ws_manager.broadcast("scheduler.job_start", {
-            "job_id": "ai_rewrite", "job_name": "AI Rewrite",
-            "started_at": started.isoformat(),
-        }))
+        asyncio.create_task(
+            ws_manager.broadcast(
+                "scheduler.job_start",
+                {
+                    "job_id": "ai_rewrite",
+                    "job_name": "AI Rewrite",
+                    "started_at": started.isoformat(),
+                },
+            )
+        )
     current_cfg = _load_config()
     ai = current_cfg.get("ai", {})
     wh = current_cfg.get("webhook", {})
@@ -266,11 +304,19 @@ async def ai_job(redis: aioredis.Redis) -> None:
     all_tw = current_cfg.get("twitter", {}).get("accounts", [])
 
     # Route hooks by ai_mode — default "rewrite" for backward compatibility
-    rewrite_wh  = [e for e in all_endpoints if _active(e) and e.get("ai_mode", "rewrite") == "rewrite"]
-    raw_wh      = [e for e in all_endpoints if _active(e) and e.get("ai_mode") == "off"]
-    rewrite_tg  = [c for c in all_tg        if _active(c) and c.get("ai_mode", "rewrite") == "rewrite"]
-    raw_tg      = [c for c in all_tg        if _active(c) and c.get("ai_mode") == "off"]
-    rewrite_tw  = [a for a in all_tw        if _active(a) and a.get("ai_mode", "rewrite") == "rewrite"]
+    rewrite_wh = [
+        e
+        for e in all_endpoints
+        if _active(e) and e.get("ai_mode", "rewrite") == "rewrite"
+    ]
+    raw_wh = [e for e in all_endpoints if _active(e) and e.get("ai_mode") == "off"]
+    rewrite_tg = [
+        c for c in all_tg if _active(c) and c.get("ai_mode", "rewrite") == "rewrite"
+    ]
+    raw_tg = [c for c in all_tg if _active(c) and c.get("ai_mode") == "off"]
+    rewrite_tw = [
+        a for a in all_tw if _active(a) and a.get("ai_mode", "rewrite") == "rewrite"
+    ]
 
     has_hooks = bool(rewrite_wh or raw_wh or rewrite_tg or raw_tg or rewrite_tw)
 
@@ -336,11 +382,18 @@ async def ai_job(redis: aioredis.Redis) -> None:
         _job_states["ai_rewrite"] = "idle"
         _job_last_duration_ms["ai_rewrite"] = dur_ms
         if ws_manager:
-            asyncio.create_task(ws_manager.broadcast("scheduler.job_done", {
-                "job_id": "ai_rewrite", "job_name": "AI Rewrite",
-                "status": "ok", "duration_ms": dur_ms,
-                "meta": {"processed": processed or 0},
-            }))
+            asyncio.create_task(
+                ws_manager.broadcast(
+                    "scheduler.job_done",
+                    {
+                        "job_id": "ai_rewrite",
+                        "job_name": "AI Rewrite",
+                        "status": "ok",
+                        "duration_ms": dur_ms,
+                        "meta": {"processed": processed or 0},
+                    },
+                )
+            )
         await log_system_event(
             "ai_job",
             started,
@@ -357,13 +410,18 @@ async def ai_job(redis: aioredis.Redis) -> None:
     except Exception as exc:
         _job_states["ai_rewrite"] = "error"
         if ws_manager:
-            asyncio.create_task(ws_manager.broadcast("scheduler.job_done", {
-                "job_id": "ai_rewrite", "job_name": "AI Rewrite",
-                "status": "error", "error": str(exc)[:200],
-            }))
-        await log_system_event(
-            "ai_job", started, status="error", error_msg=str(exc)
-        )
+            asyncio.create_task(
+                ws_manager.broadcast(
+                    "scheduler.job_done",
+                    {
+                        "job_id": "ai_rewrite",
+                        "job_name": "AI Rewrite",
+                        "status": "error",
+                        "error": str(exc)[:200],
+                    },
+                )
+            )
+        await log_system_event("ai_job", started, status="error", error_msg=str(exc))
         raise
 
 
@@ -372,10 +430,16 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
     started = datetime.now(timezone.utc)
     _job_states["topic_synthesis"] = "running"
     if ws_manager:
-        asyncio.create_task(ws_manager.broadcast("scheduler.job_start", {
-            "job_id": "topic_synthesis", "job_name": "Synthesis",
-            "started_at": started.isoformat(),
-        }))
+        asyncio.create_task(
+            ws_manager.broadcast(
+                "scheduler.job_start",
+                {
+                    "job_id": "topic_synthesis",
+                    "job_name": "Synthesis",
+                    "started_at": started.isoformat(),
+                },
+            )
+        )
     current_cfg = _load_config()
     ai = current_cfg.get("ai", {})
     synthesis_cfg = ai.get("topic_synthesis", {})
@@ -387,21 +451,29 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
     tg = current_cfg.get("telegram", {})
 
     # Only dispatch to hooks that explicitly opted in to synthetic articles
-    endpoints   = [e for e in wh.get("endpoints", []) if _active(e) and e.get("ai_mode") == "synthetic"]
-    tg_channels = [c for c in tg.get("channels", []) if _active(c) and c.get("ai_mode") == "synthetic"]
+    endpoints = [
+        e
+        for e in wh.get("endpoints", [])
+        if _active(e) and e.get("ai_mode") == "synthetic"
+    ]
+    tg_channels = [
+        c
+        for c in tg.get("channels", [])
+        if _active(c) and c.get("ai_mode") == "synthetic"
+    ]
 
     if not endpoints and not tg_channels:
         return  # no hooks want synthetic articles
 
     # Resolve provider: synthesis can use its own provider or fall back to AI summary provider
     synth_provider_id = synthesis_cfg.get("provider_id") or ai.get("provider_id")
-    synth_api_key, synth_base_url, synth_model_override = _resolve_provider(ai, synth_provider_id)
+    synth_api_key, synth_base_url, synth_model_override = _resolve_provider(
+        ai, synth_provider_id
+    )
     synth_model = synth_model_override
 
     active_cats = [
-        c["id"]
-        for c in current_cfg.get("categories", [])
-        if c.get("enabled", True)
+        c["id"] for c in current_cfg.get("categories", []) if c.get("enabled", True)
     ]
 
     if not active_cats:
@@ -455,11 +527,18 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
         _job_states["topic_synthesis"] = "idle"
         _job_last_duration_ms["topic_synthesis"] = dur_ms
         if ws_manager:
-            asyncio.create_task(ws_manager.broadcast("scheduler.job_done", {
-                "job_id": "topic_synthesis", "job_name": "Synthesis",
-                "status": "ok", "duration_ms": dur_ms,
-                "meta": {"total_generated": total_generated},
-            }))
+            asyncio.create_task(
+                ws_manager.broadcast(
+                    "scheduler.job_done",
+                    {
+                        "job_id": "topic_synthesis",
+                        "job_name": "Synthesis",
+                        "status": "ok",
+                        "duration_ms": dur_ms,
+                        "meta": {"total_generated": total_generated},
+                    },
+                )
+            )
         await log_system_event(
             "topic_synthesis_job",
             started,
@@ -481,10 +560,17 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
     except Exception as exc:
         _job_states["topic_synthesis"] = "error"
         if ws_manager:
-            asyncio.create_task(ws_manager.broadcast("scheduler.job_done", {
-                "job_id": "topic_synthesis", "job_name": "Synthesis",
-                "status": "error", "error": str(exc)[:200],
-            }))
+            asyncio.create_task(
+                ws_manager.broadcast(
+                    "scheduler.job_done",
+                    {
+                        "job_id": "topic_synthesis",
+                        "job_name": "Synthesis",
+                        "status": "error",
+                        "error": str(exc)[:200],
+                    },
+                )
+            )
         await log_system_event(
             "topic_synthesis_job", started, status="error", error_msg=str(exc)
         )
@@ -495,6 +581,7 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
 # ---------------------------------------------------------------------------
 # Phase 2 — Enrichment job (entity extraction + embedding + clustering)
 # ---------------------------------------------------------------------------
+
 
 async def enrich_job(redis: aioredis.Redis) -> None:
     """
@@ -544,7 +631,9 @@ async def enrich_job(redis: aioredis.Redis) -> None:
         # Step 2 — Embedding
         embed_text = embed_text_for_article(art)
         embedding = await get_embedding(
-            embed_text, api_key=api_key, base_url=base_url,
+            embed_text,
+            api_key=api_key,
+            base_url=base_url,
             model=processing_cfg.get("embedding_model"),
         )
 
@@ -553,13 +642,20 @@ async def enrich_job(redis: aioredis.Redis) -> None:
             await save_embedding(redis, article_id, embedding)
             try:
                 topic_id = await assign_topic(
-                    redis, article_id, embedding, category,
+                    redis,
+                    article_id,
+                    embedding,
+                    category,
                     threshold=cluster_threshold,
                 )
             except NotImplementedError:
-                logger.debug("[enrich_job] clusterer._find_matching_topic not yet implemented")
+                logger.debug(
+                    "[enrich_job] clusterer._find_matching_topic not yet implemented"
+                )
             except Exception as exc:
-                logger.warning(f"[enrich_job] clustering failed for {article_id}: {exc}")
+                logger.warning(
+                    f"[enrich_job] clustering failed for {article_id}: {exc}"
+                )
 
         # Step 4 — Persist enrichment fields on article hash
         art["entities"] = entities
@@ -579,7 +675,9 @@ async def enrich_job(redis: aioredis.Redis) -> None:
             if story_id:
                 await redis.hset(f"news:{article_id}", "story_id", story_id)
         except Exception as exc:
-            logger.debug(f"[enrich_job] story assignment skipped for {article_id}: {exc}")
+            logger.debug(
+                f"[enrich_job] story assignment skipped for {article_id}: {exc}"
+            )
 
         # Step 7 — Archive to News Lake (R2 cold storage)
         lake = get_lake()
@@ -593,7 +691,9 @@ async def enrich_job(redis: aioredis.Redis) -> None:
     _job_last_duration_ms["enrich"] = dur_ms
     logger.info(f"Enrich job: {done}/{len(articles)} articles enriched in {dur_ms}ms")
     await log_system_event(
-        "enrich_job", started, status="ok",
+        "enrich_job",
+        started,
+        status="ok",
         metadata={"processed": done, "duration_ms": dur_ms},
     )
 
@@ -602,14 +702,13 @@ async def enrich_job(redis: aioredis.Redis) -> None:
 # Phase 3 jobs — Trend Detection, Story (wired via enrich_job), Newsletter
 # ---------------------------------------------------------------------------
 
+
 async def trend_job(redis: aioredis.Redis) -> None:
     """Compute velocity-based trend scores across all active categories."""
     started = datetime.now(timezone.utc)
     _job_states["trend"] = "running"
     cfg = _load_config()
-    active_cats = [
-        c["id"] for c in cfg.get("categories", []) if c.get("enabled", True)
-    ]
+    active_cats = [c["id"] for c in cfg.get("categories", []) if c.get("enabled", True)]
     if not active_cats:
         _job_states["trend"] = "idle"
         return
@@ -619,7 +718,9 @@ async def trend_job(redis: aioredis.Redis) -> None:
         _job_states["trend"] = "idle"
         _job_last_duration_ms["trend"] = dur_ms
         await log_system_event(
-            "trend_job", started, status="ok",
+            "trend_job",
+            started,
+            status="ok",
             metadata={
                 "trending_categories": result["trending_categories"],
                 "duration_ms": dur_ms,
@@ -647,9 +748,17 @@ async def debate_scheduler_job(redis: aioredis.Redis) -> None:
     tg = cfg.get("telegram", {})
     tw = cfg.get("twitter", {})
 
-    debate_wh = [e for e in wh.get("endpoints", []) if _active(e) and e.get("ai_mode") == "debate"]
-    debate_tg = [c for c in tg.get("channels", []) if _active(c) and c.get("ai_mode") == "debate"]
-    debate_tw = [a for a in tw.get("accounts", []) if _active(a) and a.get("ai_mode") == "debate"]
+    debate_wh = [
+        e
+        for e in wh.get("endpoints", [])
+        if _active(e) and e.get("ai_mode") == "debate"
+    ]
+    debate_tg = [
+        c for c in tg.get("channels", []) if _active(c) and c.get("ai_mode") == "debate"
+    ]
+    debate_tw = [
+        a for a in tw.get("accounts", []) if _active(a) and a.get("ai_mode") == "debate"
+    ]
 
     try:
         count = await _run_debate_job(
@@ -665,12 +774,16 @@ async def debate_scheduler_job(redis: aioredis.Redis) -> None:
         _job_states["debate"] = "idle"
         _job_last_duration_ms["debate"] = dur_ms
         await log_system_event(
-            "debate_job", started, status="ok",
+            "debate_job",
+            started,
+            status="ok",
             metadata={"debated": count, "duration_ms": dur_ms},
         )
     except Exception as exc:
         _job_states["debate"] = "error"
-        await log_system_event("debate_job", started, status="error", error_msg=str(exc))
+        await log_system_event(
+            "debate_job", started, status="error", error_msg=str(exc)
+        )
         raise
 
 
@@ -686,9 +799,7 @@ async def newsletter_job(redis: aioredis.Redis) -> None:
 
     ai_cfg = cfg.get("ai", {})
     api_key, base_url, model_override = _resolve_provider(ai_cfg)
-    active_cats = [
-        c["id"] for c in cfg.get("categories", []) if c.get("enabled", True)
-    ]
+    active_cats = [c["id"] for c in cfg.get("categories", []) if c.get("enabled", True)]
 
     try:
         result = await generate_newsletter(
@@ -715,19 +826,27 @@ async def newsletter_job(redis: aioredis.Redis) -> None:
         _job_states["newsletter"] = "idle"
         _job_last_duration_ms["newsletter"] = dur_ms
         await log_system_event(
-            "newsletter_job", started, status="ok" if not result.get("skipped") else "skipped",
-            metadata={"subject": result.get("subject", ""), "duration_ms": dur_ms,
-                      "smtp": bool(smtp_cfg.get("host"))},
+            "newsletter_job",
+            started,
+            status="ok" if not result.get("skipped") else "skipped",
+            metadata={
+                "subject": result.get("subject", ""),
+                "duration_ms": dur_ms,
+                "smtp": bool(smtp_cfg.get("host")),
+            },
         )
     except Exception as exc:
         _job_states["newsletter"] = "error"
-        await log_system_event("newsletter_job", started, status="error", error_msg=str(exc))
+        await log_system_event(
+            "newsletter_job", started, status="error", error_msg=str(exc)
+        )
         raise
 
 
 # ---------------------------------------------------------------------------
 # Scheduler factory — thin: reads intervals, registers jobs, returns scheduler
 # ---------------------------------------------------------------------------
+
 
 def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
     global _scheduler
@@ -825,6 +944,17 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
             max_instances=1,
             coalesce=True,
         )
+
+    # Scheduled webhook triggers (runs every minute)
+    scheduler.add_job(
+        scheduled_webhook_job,
+        "interval",
+        minutes=1,
+        id="scheduled_webhook",
+        args=[redis],
+        max_instances=1,
+        coalesce=True,
+    )
 
     _scheduler = scheduler
     return scheduler

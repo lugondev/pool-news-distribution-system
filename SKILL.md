@@ -3,10 +3,10 @@ name: news-aggregator-ops
 description: >-
   Manage, monitor, and troubleshoot the News Aggregator via its JSON API.
   Use when the user asks to check system health, inspect articles, view
-  crawl/AI/webhook logs, manage RSS sources, categories, webhooks, AI
-  settings, providers, AI configs, diagnose pipeline issues, search articles
-  semantically (RAG), or view intelligence features (trends, stories,
-  newsletter, debates).
+  crawl/AI/webhook logs, manage RSS sources, categories, webhooks, webhook
+  schedules (cron-based triggers), AI settings, providers, AI configs,
+  diagnose pipeline issues, search articles semantically (RAG), or view
+  intelligence features (trends, stories, newsletter, debates).
 ---
 
 # News Aggregator Operations
@@ -526,6 +526,97 @@ curl -s "$API/logs/webhooks?page=1&limit=20" | jq .
 
 Returns `logs` (article_id, webhook_id, webhook_url, sent_at, status_code, success, error_msg), `total`, `page`, `total_pages`.
 
+## Webhook Schedules
+
+Scheduled webhooks trigger automatically based on cron expressions, independent of RSS crawl or AI processing. Use cases: periodic digests, daily summaries, hourly updates.
+
+### List all schedules
+
+```bash
+curl -s $API/schedules | jq .
+```
+
+Returns all webhook schedules with `id`, `name`, `cron_expression`, `enabled`, `webhook_endpoint_id` or `telegram_channel_id`, `query_params` (category, source, limit filters), `last_run_at`, `next_run_at`.
+
+### Get single schedule
+
+```bash
+curl -s $API/schedules/{schedule_id} | jq .
+```
+
+### Create a schedule
+
+```bash
+curl -s -X POST $API/schedules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "AI News Digest",
+    "cron_expression": "*/5 * * * *",
+    "enabled": true,
+    "webhook_endpoint_id": "my-webhook",
+    "telegram_channel_id": null,
+    "query_params": {
+      "category": "ai",
+      "source": null,
+      "limit": 3
+    }
+  }' | jq .
+```
+
+**Fields:**
+- `name` (required): Display name
+- `cron_expression` (required): Standard cron format `minute hour day month weekday`
+  - Examples: `*/5 * * * *` (every 5min), `0 9 * * *` (daily 9am), `0 */2 * * *` (every 2h)
+- `enabled` (default true): Active/inactive toggle
+- `webhook_endpoint_id` or `telegram_channel_id` (one required): Target delivery endpoint
+- `query_params.category` (optional): Filter by category
+- `query_params.source` (optional): Filter by source_id
+- `query_params.limit` (default 10, max 50): Max articles to fetch per trigger
+
+**Auto-computed fields:**
+- `next_run_at`: Calculated from cron expression (croniter)
+- `last_run_at`: Updated after each execution
+
+### Update a schedule
+
+```bash
+curl -s -X PUT $API/schedules/{schedule_id} \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Updated Name","cron_expression":"0 9 * * *","query_params":{"limit":5}}' | jq .
+```
+
+Partial update — only send fields to change. Updating `cron_expression` recalculates `next_run_at`.
+
+### Toggle schedule
+
+```bash
+curl -s -X POST $API/schedules/{schedule_id}/toggle | jq .
+```
+
+Enables/disables schedule execution.
+
+### Delete a schedule
+
+```bash
+curl -s -X DELETE $API/schedules/{schedule_id} | jq .
+```
+
+### Trigger schedule manually
+
+```bash
+curl -s -X POST $API/schedules/{schedule_id}/trigger | jq .
+```
+
+Executes schedule immediately (ignores cron timing) and updates `next_run_at`.
+
+### View schedule execution logs
+
+```bash
+curl -s "$API/logs/system?event_type=webhook_schedule&page=1&limit=20" | jq .
+```
+
+Filter system logs by `event_type=webhook_schedule`. Each entry includes `metadata.schedule_id`, `metadata.article_count`, `metadata.webhook_id` or `metadata.telegram_id`, and execution status.
+
 ## Telegram Channels
 
 ### List channels
@@ -827,6 +918,14 @@ Returns `{"answer": "...", "sources": [...], "retrieved": N}`. Returns 503 if ve
 2. `curl -s $API/webhooks | jq .endpoints` — verify endpoint config
 3. Common causes: endpoint down, timeout too low, URL incorrect, article filtered out by type/category/source rules
 
+### Scheduled webhook not firing
+
+1. `curl -s $API/schedules | jq '.schedules[] | {name,enabled,next_run_at}'` — check schedule status and next run time
+2. `curl -s "$API/logs/system?event_type=webhook_schedule&limit=10" | jq .` — view recent executions
+3. `curl -s $API/logs/scheduler/status | jq '.jobs[] | select(.id | contains("scheduled_webhook"))'` — verify job is running
+4. Common causes: schedule disabled, invalid cron expression, target webhook/telegram deleted, no articles match filters
+5. Manual trigger test: `curl -s -X POST $API/schedules/{id}/trigger | jq .` — test execution immediately
+
 ### Telegram not sending
 
 1. `curl -s -X POST $API/telegram/{ch_id}/test | jq .` — test the channel
@@ -927,3 +1026,10 @@ redis-cli DEL news:dedup:simhashes
 | GET | `/api/rag/status` | Weaviate vector store status |
 | GET | `/api/rag/search?q=&limit=&category=` | Semantic + keyword hybrid search |
 | POST | `/api/rag/ask` | Full RAG: Q&A with LLM-generated answer |
+| GET | `/api/schedules` | List all webhook schedules |
+| GET | `/api/schedules/{id}` | Get single schedule |
+| POST | `/api/schedules` | Create webhook schedule |
+| PUT | `/api/schedules/{id}` | Update schedule (partial) |
+| POST | `/api/schedules/{id}/toggle` | Toggle schedule enabled/disabled |
+| DELETE | `/api/schedules/{id}` | Delete schedule |
+| POST | `/api/schedules/{id}/trigger` | Manually trigger schedule execution |

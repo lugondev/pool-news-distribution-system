@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Webhook Schedules — News Aggregator</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3e;
+      --text: #e2e8f0; --muted: #718096; --accent: #6366f1;
+      --green: #10b981; --red: #ef4444; --yellow: #f59e0b;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* Header styles (included from partial) */
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px;
+             display: flex; align-items: center; gap: 12px; position: relative; z-index: 10; }
+    header h1 { font-size: 16px; font-weight: 600; }
+    .badge { background: var(--accent); color: white; font-size: 11px; padding: 2px 8px; border-radius: 999px; }
+    .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    .nav-links { margin-left: auto; display: flex; gap: 4px; font-size: 13px; align-items: center; }
+    .nav-links > a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 6px; transition: all .15s; }
+    .nav-links > a:hover, .nav-links > a.active { color: var(--text); background: var(--border); }
+    .dropdown-toggle { cursor: pointer; background: none; border: none; font-size: 13px; font-family: inherit;
+                       color: var(--muted); padding: 4px 10px; border-radius: 6px; transition: all .15s; }
+    .dropdown-toggle:hover, .dropdown-toggle.active { color: var(--text); background: var(--border); }
+    .dropdown { position: relative; }
+    .dropdown-menu { display: none; position: absolute; top: 100%; right: 0; padding-top: 4px;
+                     background: var(--surface); border: 1px solid var(--border);
+                     border-radius: 8px; padding: 4px; min-width: 130px;
+                     z-index: 100; box-shadow: 0 4px 16px rgba(0,0,0,.35); }
+    .dropdown:hover .dropdown-menu { display: flex; flex-direction: column; }
+    .dropdown-menu a { padding: 7px 12px; border-radius: 5px; color: var(--muted);
+                       font-size: 13px; display: block; text-decoration: none; transition: all .15s; }
+    .dropdown-menu a:hover, .dropdown-menu a.active { color: var(--text); background: var(--border); }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    h2 { font-size: 20px; margin-bottom: 6px; }
+    .subtitle { font-size: 12px; color: var(--muted); margin-bottom: 20px; }
+
+    .btn { padding: 8px 18px; border-radius: 6px; font-size: 13px; font-weight: 500;
+           cursor: pointer; border: none; transition: all .15s; }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover { opacity: 0.85; }
+    .btn-sm { padding: 4px 10px; font-size: 11px; border-radius: 4px; }
+    .btn-outline { background: transparent; color: var(--accent); border: 1.5px solid var(--accent); }
+    .btn-outline:hover { background: rgba(99,102,241,0.08); }
+    .btn-danger { background: var(--red); color: white; }
+    .btn-danger:hover { opacity: 0.85; }
+
+    .table-container { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; }
+    th { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
+         text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 12px; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(99,102,241,0.04); }
+    .status-enabled { color: var(--green); font-weight: 600; }
+    .status-disabled { color: var(--red); font-weight: 600; }
+    .mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; }
+    .empty-state { text-align: center; padding: 40px; color: var(--muted); font-size: 12px; }
+
+    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7);
+             z-index: 1000; align-items: center; justify-content: center; }
+    .modal.open { display: flex; }
+    .modal-content { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+                     max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; padding: 24px; }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .modal-title { font-size: 16px; font-weight: 600; }
+    .modal-close { cursor: pointer; font-size: 20px; color: var(--muted); }
+    .modal-close:hover { color: var(--text); }
+
+    .form-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+    .form-group label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+    .form-group .hint { font-size: 11px; color: var(--muted); font-weight: 400; text-transform: none; margin-top: 2px; }
+    .form-group input, .form-group select, .form-group textarea {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      padding: 8px 10px; border-radius: 6px; font-size: 13px; outline: none; transition: border-color .15s;
+      font-family: inherit;
+    }
+    .form-group input:focus, .form-group select:focus { border-color: var(--accent); }
+    .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    .actions-col { display: flex; gap: 6px; }
+    .cron-examples { background: var(--bg); padding: 8px; border-radius: 4px; margin-top: 4px; }
+    .cron-examples code { font-size: 10px; color: var(--accent); display: block; margin-bottom: 2px; }
+  </style>
+</head>
+<body>
+
+{% include 'partials/header.html' %}
+
+<div class="container">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+    <div>
+      <h2>Webhook Schedules</h2>
+      <p class="subtitle">Trigger webhooks on a cron schedule</p>
+    </div>
+    <button class="btn btn-primary" onclick="openNewScheduleModal()">+ New Schedule</button>
+  </div>
+
+  <div class="table-container" id="schedules-container">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Cron</th>
+          <th>Endpoint</th>
+          <th>Enabled</th>
+          <th>Last Run</th>
+          <th>Next Run</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="schedules-body" hx-get="/api/schedules" hx-trigger="load" hx-swap="innerHTML">
+        <tr><td colspan="7" class="empty-state">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- New/Edit Schedule Modal -->
+<div id="schedule-modal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">New Schedule</span>
+      <span class="modal-close" onclick="closeModal()">&times;</span>
+    </div>
+    <form id="schedule-form">
+      <input type="hidden" id="schedule-id">
+      
+      <div class="form-group">
+        <label>Name</label>
+        <input type="text" id="name" required>
+      </div>
+
+      <div class="form-group">
+        <label>Cron Expression</label>
+        <input type="text" id="cron_expression" placeholder="*/5 * * * *" required>
+        <div class="cron-examples">
+          <code>*/5 * * * * — Every 5 minutes</code>
+          <code>0 9 * * * — Daily at 9:00 AM</code>
+          <code>0 */2 * * * — Every 2 hours</code>
+        </div>
+      </div>
+
+      <div class="form-row-2">
+        <div class="form-group">
+          <label>Webhook Endpoint</label>
+          <select id="webhook_endpoint_id">
+            <option value="">None</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Telegram Channel</label>
+          <select id="telegram_channel_id">
+            <option value="">None</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row-2">
+        <div class="form-group">
+          <label>Category Filter (Optional)</label>
+          <select id="query_category">
+            <option value="">All</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Max Articles</label>
+          <input type="number" id="max_articles" value="1" min="1" max="100">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label><input type="checkbox" id="enabled" checked> Enabled</label>
+      </div>
+
+      <div style="margin-top: 16px; display: flex; gap: 8px; justify-content: flex-end;">
+        <button type="button" class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+// Fetch schedules and render table
+htmx.on('htmx:afterSwap', (e) => {
+  if (e.detail.target.id === 'schedules-body') {
+    const data = JSON.parse(e.detail.xhr.responseText);
+    renderSchedules(data.schedules || []);
+  }
+});
+
+function renderSchedules(schedules) {
+  const tbody = document.getElementById('schedules-body');
+  if (!schedules.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No schedules yet. Create one to get started.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = schedules.map(s => `
+    <tr>
+      <td>${s.name}</td>
+      <td class="mono">${s.cron_expression}</td>
+      <td>${s.webhook_endpoint_id || s.telegram_channel_id || s.twitter_account_id || '—'}</td>
+      <td class="${s.enabled ? 'status-enabled' : 'status-disabled'}">${s.enabled ? 'Enabled' : 'Disabled'}</td>
+      <td class="mono">${s.last_run_at ? new Date(s.last_run_at).toLocaleString() : '—'}</td>
+      <td class="mono">${s.next_run_at ? new Date(s.next_run_at).toLocaleString() : '—'}</td>
+      <td class="actions-col">
+        <button class="btn btn-sm btn-outline" onclick="editSchedule('${s.id}')">Edit</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteSchedule('${s.id}')">Delete</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+// Modal functions
+function openNewScheduleModal() {
+  document.getElementById('modal-title').textContent = 'New Schedule';
+  document.getElementById('schedule-form').reset();
+  document.getElementById('schedule-id').value = '';
+  loadDropdowns();
+  document.getElementById('schedule-modal').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('schedule-modal').classList.remove('open');
+}
+
+async function loadDropdowns() {
+  // Load webhooks
+  const whResp = await fetch('/api/webhooks');
+  const whData = await whResp.json();
+  const whSelect = document.getElementById('webhook_endpoint_id');
+  whSelect.innerHTML = '<option value="">None</option>' + 
+    (whData.endpoints || []).map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+
+  // Load telegram channels
+  const tgResp = await fetch('/api/telegram/channels');
+  const tgData = await tgResp.json();
+  const tgSelect = document.getElementById('telegram_channel_id');
+  tgSelect.innerHTML = '<option value="">None</option>' + 
+    (tgData.channels || []).map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+
+  // Load categories
+  const catResp = await fetch('/api/categories');
+  const catData = await catResp.json();
+  const catSelect = document.getElementById('query_category');
+  catSelect.innerHTML = '<option value="">All</option>' + 
+    (catData.categories || []).map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+}
+
+async function editSchedule(id) {
+  const resp = await fetch(`/api/schedules/${id}`);
+  const s = await resp.json();
+  
+  document.getElementById('modal-title').textContent = 'Edit Schedule';
+  document.getElementById('schedule-id').value = s.id;
+  document.getElementById('name').value = s.name;
+  document.getElementById('cron_expression').value = s.cron_expression;
+  document.getElementById('webhook_endpoint_id').value = s.webhook_endpoint_id || '';
+  document.getElementById('telegram_channel_id').value = s.telegram_channel_id || '';
+  document.getElementById('query_category').value = s.query_params?.category || '';
+  document.getElementById('max_articles').value = s.max_articles || 1;
+  document.getElementById('enabled').checked = s.enabled;
+  
+  await loadDropdowns();
+  document.getElementById('schedule-modal').classList.add('open');
+}
+
+async function deleteSchedule(id) {
+  if (!confirm('Delete this schedule?')) return;
+  await fetch(`/api/schedules/${id}`, { method: 'DELETE' });
+  htmx.trigger('#schedules-body', 'load');
+}
+
+// Form submit
+document.getElementById('schedule-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  
+  const id = document.getElementById('schedule-id').value;
+  const body = {
+    name: document.getElementById('name').value,
+    cron_expression: document.getElementById('cron_expression').value,
+    webhook_endpoint_id: document.getElementById('webhook_endpoint_id').value || null,
+    telegram_channel_id: document.getElementById('telegram_channel_id').value || null,
+    query_params: {
+      category: document.getElementById('query_category').value || null,
+    },
+    max_articles: parseInt(document.getElementById('max_articles').value),
+    enabled: document.getElementById('enabled').checked,
+  };
+
+  const method = id ? 'PUT' : 'POST';
+  const url = id ? `/api/schedules/${id}` : '/api/schedules';
+  
+  await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  closeModal();
+  htmx.trigger('#schedules-body', 'load');
+});
+</script>
+
+</body>
+</html>

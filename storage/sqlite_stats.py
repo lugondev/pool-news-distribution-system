@@ -38,6 +38,12 @@ async def init_db() -> None:
         # WAL mode là persistent — chỉ cần set 1 lần, tăng tốc concurrent writes
         await db.execute("PRAGMA journal_mode=WAL")
         await db.execute("PRAGMA synchronous=NORMAL")
+
+        # Import and initialize webhook schedules table
+        from storage.webhook_schedules import init_schedules_db
+
+        await init_schedules_db()
+
         await db.executescript("""
             CREATE TABLE IF NOT EXISTS sources (
                 id          TEXT PRIMARY KEY,
@@ -287,8 +293,12 @@ async def get_dashboard_stats() -> dict:
         )
 
         return {
-            "crawl": {"cnt": s.get("crawl_cnt"), "found": s.get("crawl_found"),
-                      "saved": s.get("crawl_saved"), "dupes": s.get("crawl_dupes")},
+            "crawl": {
+                "cnt": s.get("crawl_cnt"),
+                "found": s.get("crawl_found"),
+                "saved": s.get("crawl_saved"),
+                "dupes": s.get("crawl_dupes"),
+            },
             "webhook": {"total": s.get("hook_total"), "ok": s.get("hook_ok")},
             "telegram": {"total": s.get("tg_total"), "ok": s.get("tg_ok")},
             "ai": {"total": s.get("ai_total"), "tokens": s.get("ai_tokens")},

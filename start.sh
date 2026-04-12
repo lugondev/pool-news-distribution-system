@@ -51,6 +51,12 @@ if ! python -c "import fastapi" 2>/dev/null; then
     pip install -q -r requirements.txt
 fi
 
+# Check for croniter (added in webhook scheduling feature)
+if ! python -c "import croniter" 2>/dev/null; then
+    info "Installing missing dependencies (croniter)..."
+    pip install -q -r requirements.txt
+fi
+
 # ── .env ──────────────────────────────────────────────────────────────────────
 if [ ! -f ".env" ] && [ -f ".env.example" ]; then
     warn ".env not found — copying from .env.example"

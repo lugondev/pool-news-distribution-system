@@ -80,7 +80,9 @@ class _APIRequestLogger(BaseHTTPMiddleware):
         t0 = started.timestamp()
         response = await call_next(request)
         duration_ms = int((datetime.now(timezone.utc).timestamp() - t0) * 1000)
-        error_msg = None if response.status_code < 400 else f"HTTP {response.status_code}"
+        error_msg = (
+            None if response.status_code < 400 else f"HTTP {response.status_code}"
+        )
         try:
             await log_api_request(
                 method=request.method,
@@ -112,32 +114,51 @@ PAGE_SIZE = 20
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "active_page": "feed"})
+    return templates.TemplateResponse(
+        "index.html", {"request": request, "active_page": "feed"}
+    )
 
 
 @app.get("/pipeline", response_class=HTMLResponse)
 async def pipeline_view(request: Request):
-    return templates.TemplateResponse("pipeline.html", {"request": request, "active_page": "pipeline"})
+    return templates.TemplateResponse(
+        "pipeline.html", {"request": request, "active_page": "pipeline"}
+    )
 
 
 @app.get("/intelligence", response_class=HTMLResponse)
 async def intelligence_view(request: Request):
-    return templates.TemplateResponse("intelligence.html", {"request": request, "active_page": "intelligence"})
+    return templates.TemplateResponse(
+        "intelligence.html", {"request": request, "active_page": "intelligence"}
+    )
 
 
 @app.get("/newsletter", response_class=HTMLResponse)
 async def newsletter_view(request: Request):
-    return templates.TemplateResponse("newsletter.html", {"request": request, "active_page": "newsletter"})
+    return templates.TemplateResponse(
+        "newsletter.html", {"request": request, "active_page": "newsletter"}
+    )
+
+
+@app.get("/schedules", response_class=HTMLResponse)
+async def schedules_view(request: Request):
+    return templates.TemplateResponse(
+        "schedules.html", {"request": request, "active_page": "schedules"}
+    )
 
 
 @app.get("/debates", response_class=HTMLResponse)
 async def debates_view(request: Request):
-    return templates.TemplateResponse("debates.html", {"request": request, "active_page": "debates"})
+    return templates.TemplateResponse(
+        "debates.html", {"request": request, "active_page": "debates"}
+    )
 
 
 @app.get("/rag", response_class=HTMLResponse)
 async def rag_view(request: Request):
-    return templates.TemplateResponse("rag.html", {"request": request, "active_page": "rag"})
+    return templates.TemplateResponse(
+        "rag.html", {"request": request, "active_page": "rag"}
+    )
 
 
 @app.websocket("/ws/pipeline")
@@ -168,7 +189,11 @@ async def article_detail(request: Request, article_id: str):
     source_ids_raw = article.get("source_article_ids", "")
     if source_ids_raw:
         try:
-            source_article_ids = json.loads(source_ids_raw) if isinstance(source_ids_raw, str) else source_ids_raw
+            source_article_ids = (
+                json.loads(source_ids_raw)
+                if isinstance(source_ids_raw, str)
+                else source_ids_raw
+            )
         except (json.JSONDecodeError, TypeError):
             pass
 
@@ -192,7 +217,11 @@ async def stats_partial(request: Request):
     redis = get_redis()
     return templates.TemplateResponse(
         "partials/stats.html",
-        {"request": request, "redis": await get_feed_stats(redis), "db": await get_dashboard_stats()},
+        {
+            "request": request,
+            "redis": await get_feed_stats(redis),
+            "db": await get_dashboard_stats(),
+        },
     )
 
 
@@ -207,8 +236,12 @@ async def feed_partial(
     redis = get_redis()
     offset = (page - 1) * PAGE_SIZE
     articles, total = await get_latest_articles(
-        redis, limit=PAGE_SIZE, offset=offset,
-        source_id=source or None, category=category or None, article_type=article_type or None,
+        redis,
+        limit=PAGE_SIZE,
+        offset=offset,
+        source_id=source or None,
+        category=category or None,
+        article_type=article_type or None,
     )
     total_pages = max(1, math.ceil(total / PAGE_SIZE))
     return templates.TemplateResponse(
