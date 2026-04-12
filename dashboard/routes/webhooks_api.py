@@ -41,6 +41,9 @@ class WebhookIn(BaseModel):
     filter_sources: list[str] = []
     filter_article_types_mode: str = "all"
     filter_article_types: list[str] = []
+    ai_mode: str = "rewrite"
+    ai_config_id: str = ""
+    target_language: str = ""
     rate_limit_max: int = 0
     rate_limit_window_minutes: int = 60
     rate_limit_min_gap_seconds: int = 0
@@ -63,6 +66,9 @@ class WebhookUpdate(BaseModel):
     filter_sources: list[str] | None = None
     filter_article_types_mode: str | None = None
     filter_article_types: list[str] | None = None
+    ai_mode: str | None = None
+    ai_config_id: str | None = None
+    target_language: str | None = None
     rate_limit_max: int | None = None
     rate_limit_window_minutes: int | None = None
     rate_limit_min_gap_seconds: int | None = None
@@ -97,6 +103,9 @@ async def add_webhook(body: WebhookIn):
         "filter_sources": body.filter_sources,
         "filter_article_types_mode": body.filter_article_types_mode,
         "filter_article_types": body.filter_article_types,
+        "ai_mode": body.ai_mode if body.ai_mode in ("rewrite", "synthetic", "off") else "rewrite",
+        "ai_config_id": body.ai_config_id.strip(),
+        "target_language": body.target_language.strip(),
         "rate_limit_max": max(0, body.rate_limit_max),
         "rate_limit_window_minutes": max(1, body.rate_limit_window_minutes),
         "rate_limit_min_gap_seconds": max(0, body.rate_limit_min_gap_seconds),
@@ -118,12 +127,17 @@ async def update_webhook(wh_id: str, body: WebhookUpdate):
         "retry_delay_seconds", "timeout_seconds", "payload_mode", "payload_fields",
         "payload_template", "filter_categories_mode", "filter_categories",
         "filter_sources_mode", "filter_sources", "filter_article_types_mode",
-        "filter_article_types", "rate_limit_max", "rate_limit_window_minutes",
-        "rate_limit_min_gap_seconds",
+        "filter_article_types", "ai_mode", "ai_config_id", "target_language",
+        "rate_limit_max", "rate_limit_window_minutes", "rate_limit_min_gap_seconds",
     ):
         val = getattr(body, field, None)
         if val is not None:
-            target[field] = val.upper() if field == "http_method" else val
+            if field == "http_method":
+                target[field] = val.upper()
+            elif field == "ai_mode":
+                target[field] = val if val in ("rewrite", "synthetic", "off") else "rewrite"
+            else:
+                target[field] = val
     save_webhook_endpoints(endpoints)
     logger.info(f"API: webhook updated: {wh_id}")
     return {"ok": True, "endpoint": target}
@@ -263,6 +277,9 @@ class TelegramChannelIn(BaseModel):
     filter_sources: list[str] = []
     filter_article_types_mode: str = "all"
     filter_article_types: list[str] = []
+    ai_mode: str = "rewrite"
+    ai_config_id: str = ""
+    target_language: str = ""
     rate_limit_max: int = 0
     rate_limit_window_minutes: int = 60
     rate_limit_min_gap_seconds: int = 0
@@ -284,6 +301,9 @@ class TelegramChannelUpdate(BaseModel):
     filter_sources: list[str] | None = None
     filter_article_types_mode: str | None = None
     filter_article_types: list[str] | None = None
+    ai_mode: str | None = None
+    ai_config_id: str | None = None
+    target_language: str | None = None
     rate_limit_max: int | None = None
     rate_limit_window_minutes: int | None = None
     rate_limit_min_gap_seconds: int | None = None
@@ -317,6 +337,9 @@ async def add_telegram_channel(body: TelegramChannelIn):
         "filter_sources": body.filter_sources,
         "filter_article_types_mode": body.filter_article_types_mode,
         "filter_article_types": body.filter_article_types,
+        "ai_mode": body.ai_mode if body.ai_mode in ("rewrite", "synthetic", "off") else "rewrite",
+        "ai_config_id": body.ai_config_id.strip(),
+        "target_language": body.target_language.strip(),
         "rate_limit_max": max(0, body.rate_limit_max),
         "rate_limit_window_minutes": max(1, body.rate_limit_window_minutes),
         "rate_limit_min_gap_seconds": max(0, body.rate_limit_min_gap_seconds),
@@ -337,12 +360,16 @@ async def update_telegram_channel(ch_id: str, body: TelegramChannelUpdate):
         "name", "bot_token", "chat_id", "lang", "retry_attempts", "timeout_seconds",
         "payload_mode", "payload_fields", "payload_template", "filter_categories_mode",
         "filter_categories", "filter_sources_mode", "filter_sources",
-        "filter_article_types_mode", "filter_article_types",
-        "rate_limit_max", "rate_limit_window_minutes", "rate_limit_min_gap_seconds",
+        "filter_article_types_mode", "filter_article_types", "ai_mode", "ai_config_id",
+        "target_language", "rate_limit_max", "rate_limit_window_minutes",
+        "rate_limit_min_gap_seconds",
     ):
         val = getattr(body, field, None)
         if val is not None:
-            target[field] = val
+            if field == "ai_mode":
+                target[field] = val if val in ("rewrite", "synthetic", "off") else "rewrite"
+            else:
+                target[field] = val
     save_telegram_channels(channels)
     logger.info(f"API: telegram channel updated: {ch_id}")
     return {"ok": True, "channel": target}

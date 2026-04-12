@@ -35,11 +35,34 @@ def _escape(text: str) -> str:
 
 def _default_format(article: dict, lang: str = "both") -> str:
     """Default Telegram HTML message (mode=full)."""
+    category = article.get("category", "")
+    emoji = CATEGORY_EMOJI.get(category, "\U0001f4f0")
+
+    # ── Synthetic articles have no single source title/url/ai_summary_* ──────
+    if article.get("type") == "synthetic":
+        title = (
+            article.get("title_target") or article.get("title_en") or "Untitled"
+        )
+        body = (
+            article.get("content_target") or article.get("content_en") or ""
+        )
+        angle = article.get("angle", "")
+        num_src = article.get("num_source_articles", "")
+
+        lines = [f"{emoji} <b>{_escape(title)}</b>"]
+        if angle:
+            lines.append(f"\U0001f4cc <i>{_escape(angle)}</i>")
+        lines.append("")
+        if body:
+            lines.append(_escape(body))
+        if num_src:
+            lines.append(f"\n<i>Synthesized from {num_src} sources</i>")
+        return "\n".join(lines)
+
+    # ── Original articles (rewrite / off) ────────────────────────────────────
     title = article.get("title", "Untitled")
     url = article.get("url", "")
     source = article.get("source_name", "")
-    category = article.get("category", "")
-    emoji = CATEGORY_EMOJI.get(category, "\U0001f4f0")
 
     # Prefer per-hook origin/target summaries; fall back to legacy vi/en fields
     origin_text = article.get("ai_summary_origin", "") or article.get("ai_summary_vi", "") or article.get("ai_summary_en", "")

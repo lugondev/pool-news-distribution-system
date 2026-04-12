@@ -18,7 +18,7 @@ from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 import redis.asyncio as aioredis
-from ai.rewriter import get_openai_client, TONE_PROMPTS, _load_ai_config
+from ai.rewriter import get_openai_client, TONE_PROMPTS, _load_ai_config, LANG_NAMES
 from storage.config_cache import cached_yaml  # noqa: F401 — available for future use
 from ai.provider_utils import build_response_format, parse_ai_json, SCHEMA_TOPIC_SYNTHESIS
 from webhook.dispatcher import enqueue_dispatch
@@ -26,7 +26,31 @@ from webhook.dispatcher import enqueue_dispatch
 logger = logging.getLogger(__name__)
 
 
-# AI prompt: Let AI decide output count based on content diversity
+def _build_synth_lang_spec(
+    target_language: str | None,
+    length_guidance: str,
+) -> tuple[list[str], str]:
+    """Build output language list and JSON fields spec for the synthesis prompt.
+
+    Returns (output_languages, output_fields_spec).
+    output_languages: e.g. ["en"] or ["en", "zh"]
+    output_fields_spec: indented field lines to inject into the prompt JSON template
+    """
+    langs = ["en"]
+    if target_language and target_language.lower() != "en":
+        langs.append(target_language.lower())
+
+    lines = []
+    for lang in langs:
+        lang_name = LANG_NAMES.get(lang, lang.upper())
+        lines.append(f'      "title_{lang}": "{lang_name} title (max 100 chars)",')
+        lines.append(f'      "content_{lang}": "{lang_name} summary (3-4 sentences, {length_guidance})",')  # noqa: E501
+
+    return langs, "\n".join(lines)
+
+
+# AI prompt: Let AI decide output count based on content diversity.
+# {output_fields_spec} is built dynamically per hook's target_language.
 TOPIC_SYNTHESIS_PROMPT = """{tone_instruction}
 
 You are analyzing {count} news articles about {category} from the past few hours.
@@ -40,7 +64,7 @@ Your task:
 2. Generate between 1 and 8 summaries, where EACH summary must:
    - Cover a unique angle that is NOT covered by other summaries
    - Provide standalone value (not generic rehash)
-   - Be 3-4 sentences in both Vietnamese and English
+   - Be 3-4 sentences in each required language
    - Include a clear, descriptive title
 
 Decision guidelines:
@@ -56,17 +80,14 @@ Output format (JSON only, no other text):
   "num_summaries": <integer 1-8>,
   "summaries": [
     {{
-      "angle": "timeline|analysis|comparison|impact|perspective|summary",
-      "title_vi": "Vietnamese title (max 100 chars)",
-      "content_vi": "Vietnamese summary (3-4 sentences, {length_guidance})",
-      "title_en": "English title (max 100 chars)",
-      "content_en": "English summary (3-4 sentences, {length_guidance})"
+{output_fields_spec}
+      "angle": "timeline|analysis|comparison|impact|perspective|summary"
     }},
     ...
   ]
 }}
 
-IMPORTANT: Each summary (both vi and en) must be {length_guidance}.
+IMPORTANT: Each summary text must be {length_guidance}.
 """
 
 
@@ -123,6 +144,8 @@ async def synthesize_topic_articles(
     base_url: str | None = None,
     max_tokens: int = 2000,
     temperature: float = 0.5,
+    target_language: str | None = None,
+    prompt_system_override: str | None = None,
 ) -> list[dict]:
     """
     Analyze multiple articles from same category and generate 1-8 synthetic summaries.
@@ -140,9 +163,13 @@ async def synthesize_topic_articles(
     ai_cfg = _load_ai_config()
     resolved_model = model or ai_cfg.get("model", "")
 
-    # Build tone instruction
+    # Build tone instruction — per-hook override takes priority, then global prompt_system, then tone
     custom_system = (ai_cfg.get("prompt_system") or "").strip()
-    tone_instruction = custom_system or TONE_PROMPTS.get(tone, TONE_PROMPTS["general"])
+    tone_instruction = (
+        prompt_system_override.strip()
+        if prompt_system_override and prompt_system_override.strip()
+        else custom_system or TONE_PROMPTS.get(tone, TONE_PROMPTS["general"])
+    )
 
     # Length guidance
     if ai_cfg.get("output_limit_enabled"):
@@ -150,6 +177,9 @@ async def synthesize_topic_articles(
         length_guidance = f"at most {max_chars} characters"
     else:
         length_guidance = "approximately 200-300 characters"
+
+    # Build output language spec (en always present, plus target if configured)
+    output_languages, output_fields_spec = _build_synth_lang_spec(target_language, length_guidance)
 
     # Prepare article metadata
     time_span = _calculate_time_span(articles)
@@ -181,10 +211,13 @@ async def synthesize_topic_articles(
         num_sources=num_sources,
         articles_json=articles_json,
         length_guidance=length_guidance,
+        output_fields_spec=output_fields_spec,
     )
 
+    lang_label = "+".join(output_languages)
     logger.info(
-        f"Synthesizing {len(articles)} {category} articles (span={time_span}, sources={num_sources})"
+        f"Synthesizing {len(articles)} {category} articles "
+        f"(span={time_span}, sources={num_sources}, langs={lang_label})"
     )
 
     # Call AI
@@ -225,16 +258,22 @@ async def synthesize_topic_articles(
     base_synth_id = _generate_synthetic_id(category, articles)
     source_article_ids = [a["id"] for a in articles]
 
+    # Target language for content_target alias (None if target == "en" or not set)
+    _target = (
+        target_language.lower()
+        if target_language and target_language.lower() != "en"
+        else None
+    )
+
     for idx, summary in enumerate(summaries):
-        # Validate each summary
-        if not summary.get("content_vi") or not summary.get("content_en"):
-            logger.warning(f"Skipping invalid summary #{idx}: missing content")
+        # Validate: all required language fields must be present and non-trivial
+        if any(not summary.get(f"content_{lang}") for lang in output_languages):
+            logger.warning(
+                f"Skipping invalid summary #{idx}: missing content for langs={output_languages}"
+            )
             continue
 
-        if (
-            len(summary.get("content_vi", "")) < 50
-            or len(summary.get("content_en", "")) < 50
-        ):
+        if any(len(summary.get(f"content_{lang}", "")) < 50 for lang in output_languages):
             logger.warning(f"Skipping summary #{idx}: content too short")
             continue
 
@@ -244,10 +283,6 @@ async def synthesize_topic_articles(
             "type": "synthetic",
             "category": category,
             "angle": summary.get("angle", "summary"),
-            "title_vi": summary.get("title_vi", ""),
-            "title_en": summary.get("title_en", ""),
-            "content_vi": summary.get("content_vi", ""),
-            "content_en": summary.get("content_en", ""),
             "source_article_ids": source_article_ids,
             "num_source_articles": len(articles),
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -255,6 +290,16 @@ async def synthesize_topic_articles(
             "ai_tokens": tokens_used // len(summaries),  # approximate per-summary cost
             "ai_analysis": analysis if idx == 0 else "",  # only store once
         }
+        # Dynamic per-language fields: title_{lang} + content_{lang}
+        for lang in output_languages:
+            synth[f"title_{lang}"] = summary.get(f"title_{lang}", "")
+            synth[f"content_{lang}"] = summary.get(f"content_{lang}", "")
+
+        # Convenience aliases — mirror ai_summary_target pattern from rewrite mode:
+        # content_target / title_target → target language content (empty if no target)
+        synth["content_target"] = synth.get(f"content_{_target}", "") if _target else ""
+        synth["title_target"] = synth.get(f"title_{_target}", "") if _target else ""
+
         synthetic_articles.append(synth)
 
     return synthetic_articles
@@ -420,6 +465,8 @@ async def process_category_synthesis(
     base_url: str | None = None,
     webhook_endpoints: list[dict] | None = None,
     telegram_channels: list[dict] | None = None,
+    target_language: str | None = None,
+    prompt_system_override: str | None = None,
 ) -> int:
     """
     Process one category for one hook: fetch unseen recent articles, synthesize,
@@ -451,6 +498,8 @@ async def process_category_synthesis(
             tone=tone,
             api_key=api_key,
             base_url=base_url,
+            target_language=target_language,
+            prompt_system_override=prompt_system_override,
         )
     except Exception as e:
         logger.error(f"Synthesis failed for category={category} hook={hook_id}: {e}")

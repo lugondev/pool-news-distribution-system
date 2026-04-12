@@ -36,6 +36,8 @@ ALL_FIELDS = [
     "title_vi",
     "content_en",
     "content_vi",
+    "content_target",
+    "title_target",
     "angle",
     "source_article_ids",
     "num_source_articles",
@@ -49,27 +51,15 @@ _jinja_env = Environment(loader=BaseLoader(), autoescape=False)
 
 
 def build_full_payload(article: dict) -> dict:
-    """Mode 'full': return all article data + sent_at."""
-    return {
-        "id": article.get("id"),
-        "source_id": article.get("source_id"),
-        "source_name": article.get("source_name"),
-        "url": article.get("url"),
-        "title": article.get("title"),
-        "summary": article.get("summary", ""),
-        "content": article.get("content", ""),
-        "lang": article.get("lang"),
-        "declared_lang": article.get("declared_lang", ""),
-        "category": article.get("category"),
-        "published_at": article.get("published_at"),
-        "fetched_at": article.get("fetched_at", ""),
-        "ai_summary_vi": article.get("ai_summary_vi", ""),
-        "ai_summary_en": article.get("ai_summary_en", ""),
-        "ai_summary_origin": article.get("ai_summary_origin", ""),
-        "ai_summary_target": article.get("ai_summary_target", ""),
-        "ai_status": article.get("ai_status", ""),
-        "sent_at": datetime.now(timezone.utc).isoformat(),
-    }
+    """Mode 'full': return all known article fields + sent_at.
+    Covers both original (rewrite/off) and synthetic article types.
+    """
+    payload = {f: article.get(f, "") for f in ALL_FIELDS}
+    # Keep None for id/category so consumers can detect missing values
+    payload["id"] = article.get("id")
+    payload["category"] = article.get("category")
+    payload["sent_at"] = datetime.now(timezone.utc).isoformat()
+    return payload
 
 
 def build_fields_payload(article: dict, fields: list[str]) -> dict:

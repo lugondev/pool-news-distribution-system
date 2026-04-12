@@ -1,8 +1,10 @@
 {# Reusable payload config block for webhook/telegram forms.
-   Expects: prefix (str) — unique prefix for element IDs, e.g. "wh-add" or "tg-edit-myid"
+   Expects: prefix (str) — unique prefix for element IDs, e.g. "wh-add" or "wh-edit-myid"
             current_mode (str) — "full", "fields", or "template"
             current_fields (list) — list of selected field names
             current_template (str) — Jinja2 template string
+   Note: AI Mode select ([name="ai_mode"]) must exist in the same <form>.
+         Docs sections auto-update when AI Mode changes.
 #}
 {% set mode = current_mode or 'full' %}
 {% set fields_csv = (current_fields or [])|join(', ') %}
@@ -11,56 +13,153 @@
 <div class="form-group" style="margin-top:8px">
   <label>Payload Mode</label>
   <select name="payload_mode" id="{{ prefix }}-mode" onchange="togglePayloadMode('{{ prefix }}')">
-    <option value="full" {{ 'selected' if mode == 'full' }}>Full — send all article data</option>
-    <option value="fields" {{ 'selected' if mode == 'fields' }}>Fields — pick specific fields</option>
-    <option value="template" {{ 'selected' if mode == 'template' }}>Template — custom Jinja2</option>
+    <option value="full"     {{ 'selected' if mode == 'full' }}>Full — send all article fields</option>
+    <option value="fields"   {{ 'selected' if mode == 'fields' }}>Fields — pick specific fields</option>
+    <option value="template" {{ 'selected' if mode == 'template' }}>Template — custom Jinja2 body</option>
   </select>
 </div>
 
+<!-- ── Fields mode ─────────────────────────────────────────────── -->
 <div id="{{ prefix }}-fields-cfg" style="display:{{ '' if mode == 'fields' else 'none' }}">
   <div class="form-group">
-    <label>Fields <span class="hint">— comma-separated: title, url, ai_summary_vi, ...</span></label>
+    <label>Fields <span class="hint">— comma-separated field names</span></label>
     <input type="text" name="payload_fields" value="{{ fields_csv }}"
-           placeholder="title, url, source_name, category, ai_summary_vi, ai_summary_en">
+           placeholder="title, url, category, ai_summary_vi, ai_summary_en">
   </div>
-  <div style="font-size:10px;color:var(--muted);margin:-6px 0 8px;line-height:1.5">
-    <div style="margin-bottom:4px"><strong style="color:#94a3b8">Original articles:</strong></div>
-    <code>id</code> <code>type</code> <code>source_id</code> <code>source_name</code> <code>url</code>
-    <code>title</code> <code>summary</code> <code>content</code> <code>lang</code>
-    <code>declared_lang</code> <code>category</code> <code>published_at</code>
-    <code>fetched_at</code> <code>ai_summary_vi</code> <code>ai_summary_en</code> <code>ai_status</code>
-    <div style="margin:6px 0 4px"><strong style="color:#94a3b8">Synthetic articles:</strong></div>
-    <code>id</code> <code>type</code> <code>category</code> <code>title_en</code> <code>title_vi</code>
-    <code>content_en</code> <code>content_vi</code> <code>angle</code> <code>source_article_ids</code>
-    <code>num_source_articles</code> <code>ai_model</code> <code>ai_tokens</code> <code>created_at</code>
+  <div style="font-size:10px;color:var(--muted);margin:-4px 0 8px;line-height:1.7">
+
+    <div style="margin-bottom:4px">
+      <strong style="color:#94a3b8">Common (all modes):</strong>
+      <code>id</code> <code>type</code> <code>category</code> <code>created_at</code>
+    </div>
+
+    <!-- Rewrite mode fields (default visible) -->
+    <div data-mode-doc="rewrite">
+      <strong style="color:#94a3b8">Original article fields <small style="color:#6b7280">(ai_mode: rewrite)</small></strong><br>
+      <code>source_id</code> <code>source_name</code> <code>url</code> <code>title</code>
+      <code>summary</code> <code>content</code> <code>lang</code> <code>declared_lang</code>
+      <code>published_at</code> <code>fetched_at</code> <code>ai_status</code><br>
+      <code>ai_summary_vi</code> <code>ai_summary_en</code> <code>ai_summary_origin</code>
+      <code>ai_summary_target</code>
+      <span style="color:#6b7280;font-size:9px"> ← <code>ai_summary_target</code> only populated when <em>Target Language</em> is configured</span>
+    </div>
+
+    <!-- Off (raw) mode fields -->
+    <div data-mode-doc="off" style="display:none">
+      <strong style="color:#94a3b8">Raw article fields <small style="color:#6b7280">(ai_mode: off — no AI processing)</small></strong><br>
+      <code>source_id</code> <code>source_name</code> <code>url</code> <code>title</code>
+      <code>summary</code> <code>content</code> <code>lang</code> <code>declared_lang</code>
+      <code>published_at</code> <code>fetched_at</code>
+      <span style="color:#6b7280;font-size:9px;display:block"><code>ai_summary_*</code> fields are empty in raw mode</span>
+    </div>
+
+    <!-- Synthetic mode fields -->
+    <div data-mode-doc="synthetic" style="display:none">
+      <strong style="color:#22c55e">Synthetic article fields <small style="color:#6b7280">(ai_mode: synthetic)</small></strong><br>
+      <code>title_vi</code> <code>title_en</code> <code>content_vi</code> <code>content_en</code>
+      <code>angle</code> <code>source_article_ids</code> <code>num_source_articles</code>
+      <code>ai_model</code> <code>ai_tokens</code><br>
+      <code>content_target</code> <code>title_target</code>
+      <span style="color:#6b7280;font-size:9px"> ← alias for target language content (empty if no <em>Target Language</em> set)</span>
+      <span style="color:#6b7280;font-size:9px;display:block"><code>source_name</code>, <code>url</code>, <code>ai_summary_*</code> not available — use <code>content_en</code> / <code>content_vi</code> / <code>content_target</code></span>
+    </div>
+
   </div>
 </div>
 
+<!-- ── Template mode ───────────────────────────────────────────── -->
 <div id="{{ prefix }}-tpl-cfg" style="display:{{ '' if mode == 'template' else 'none' }}">
   <div class="form-group">
-    <label>Template <span class="hint">— Jinja2 syntax, all article fields available as variables</span></label>
+    <label>Template <span class="hint">— Jinja2 syntax; available variables depend on AI Mode above</span></label>
     <textarea name="payload_template" rows="6"
-              placeholder='{"title":"{{ "{{" }} title {{ "}}" }}","summary":"{{ "{{" }} ai_summary_en {{ "}}" }}"}'>{{ tpl }}</textarea>
+              placeholder='{"content":"{{ "{{" }} ai_summary_en {{ "}}" }}"}'>{{ tpl }}</textarea>
   </div>
-  <div style="font-size:10px;color:var(--muted);margin:-6px 0 8px;line-height:1.6">
-    <div style="margin-bottom:6px"><strong style="color:#94a3b8">Original article variables:</strong></div>
-    <code>{{ "{{" }} title {{ "}}" }}</code> <code>{{ "{{" }} url {{ "}}" }}</code>
-    <code>{{ "{{" }} source_name {{ "}}" }}</code> <code>{{ "{{" }} category {{ "}}" }}</code>
-    <code>{{ "{{" }} ai_summary_vi {{ "}}" }}</code> <code>{{ "{{" }} ai_summary_en {{ "}}" }}</code>
-    <code>{{ "{{" }} lang {{ "}}" }}</code> <code>{{ "{{" }} published_at {{ "}}" }}</code>
-    <code>{{ "{{" }} sent_at {{ "}}" }}</code>
-    
-    <div style="margin:8px 0 6px"><strong style="color:#94a3b8">Synthetic article variables:</strong></div>
-    <code>{{ "{{" }} content_en {{ "}}" }}</code> <code>{{ "{{" }} content_vi {{ "}}" }}</code>
-    <code>{{ "{{" }} title_en {{ "}}" }}</code> <code>{{ "{{" }} title_vi {{ "}}" }}</code>
-    <code>{{ "{{" }} angle {{ "}}" }}</code> <code>{{ "{{" }} num_source_articles {{ "}}" }}</code>
-    <code>{{ "{{" }} ai_model {{ "}}" }}</code> <code>{{ "{{" }} created_at {{ "}}" }}</code>
-    
-    <div style="margin:8px 0 6px"><strong style="color:#94a3b8">Universal (both types):</strong></div>
-    <code>{{ "{{" }} id {{ "}}" }}</code> <code>{{ "{{" }} type {{ "}}" }}</code> <code>{{ "{{" }} category {{ "}}" }}</code>
-    
-    <div style="margin:8px 0 6px"><strong style="color:#94a3b8">Conditionals & fallbacks:</strong></div>
-    <code>{{ "{%" }} if type == 'synthetic' {{ "%}" }}...{{ "{%" }} endif {{ "%}" }}</code>
-    <code>{{ "{{" }} content_en|default(ai_summary_en) {{ "}}" }}</code>
+  <div style="font-size:10px;color:var(--muted);margin:-4px 0 8px;line-height:1.7">
+
+    <div style="margin-bottom:5px">
+      <strong style="color:#94a3b8">Universal (all modes):</strong>
+      <code>{{ "{{" }} id {{ "}}" }}</code>
+      <code>{{ "{{" }} type {{ "}}" }}</code>
+      <code>{{ "{{" }} category {{ "}}" }}</code>
+      <code>{{ "{{" }} sent_at {{ "}}" }}</code>
+    </div>
+
+    <!-- Rewrite mode template vars (default visible) -->
+    <div data-mode-doc="rewrite">
+      <strong style="color:#94a3b8">Rewrite mode variables <small style="color:#6b7280">(ai_mode: rewrite)</small></strong><br>
+      <code>{{ "{{" }} title {{ "}}" }}</code>
+      <code>{{ "{{" }} url {{ "}}" }}</code>
+      <code>{{ "{{" }} source_name {{ "}}" }}</code>
+      <code>{{ "{{" }} lang {{ "}}" }}</code>
+      <code>{{ "{{" }} published_at {{ "}}" }}</code><br>
+      <code>{{ "{{" }} ai_summary_vi {{ "}}" }}</code>
+      <code>{{ "{{" }} ai_summary_en {{ "}}" }}</code>
+      <code>{{ "{{" }} ai_summary_origin {{ "}}" }}</code>
+      <code>{{ "{{" }} ai_summary_target {{ "}}" }}</code>
+      <span style="color:#6b7280;font-size:9px"> ← requires <em>Target Language</em> to be set</span>
+    </div>
+
+    <!-- Off (raw) mode template vars -->
+    <div data-mode-doc="off" style="display:none">
+      <strong style="color:#94a3b8">Raw mode variables <small style="color:#6b7280">(ai_mode: off — no AI)</small></strong><br>
+      <code>{{ "{{" }} title {{ "}}" }}</code>
+      <code>{{ "{{" }} url {{ "}}" }}</code>
+      <code>{{ "{{" }} source_name {{ "}}" }}</code>
+      <code>{{ "{{" }} lang {{ "}}" }}</code>
+      <code>{{ "{{" }} published_at {{ "}}" }}</code>
+      <code>{{ "{{" }} summary {{ "}}" }}</code>
+      <code>{{ "{{" }} content {{ "}}" }}</code>
+      <span style="color:#6b7280;font-size:9px;display:block"><code>ai_summary_*</code> is empty — not processed by AI</span>
+    </div>
+
+    <!-- Synthetic mode template vars -->
+    <div data-mode-doc="synthetic" style="display:none">
+      <strong style="color:#22c55e">Synthetic mode variables <small style="color:#6b7280">(ai_mode: synthetic)</small></strong><br>
+      <code>{{ "{{" }} title_vi {{ "}}" }}</code>
+      <code>{{ "{{" }} title_en {{ "}}" }}</code>
+      <code>{{ "{{" }} content_vi {{ "}}" }}</code>
+      <code>{{ "{{" }} content_en {{ "}}" }}</code>
+      <code>{{ "{{" }} angle {{ "}}" }}</code>
+      <code>{{ "{{" }} num_source_articles {{ "}}" }}</code>
+      <code>{{ "{{" }} ai_model {{ "}}" }}</code><br>
+      <code>{{ "{{" }} content_target {{ "}}" }}</code>
+      <code>{{ "{{" }} title_target {{ "}}" }}</code>
+      <span style="color:#6b7280;font-size:9px"> ← alias for target language (empty if no <em>Target Language</em> set)</span>
+      <span style="color:#6b7280;font-size:9px;display:block"><code>title</code>, <code>url</code>, <code>source_name</code>, <code>ai_summary_*</code> are not set — synthetic has no single source article</span>
+    </div>
+
+    <div style="margin-top:6px">
+      <strong style="color:#94a3b8">Conditionals &amp; fallbacks:</strong>
+      <code>{{ "{%" }} if type == 'synthetic' {{ "%}" }}...{{ "{%" }} endif {{ "%}" }}</code>
+      <code>{{ "{{" }} content_en|default(ai_summary_en) {{ "}}" }}</code>
+    </div>
+
   </div>
 </div>
+
+<script>
+(function() {
+  var pfx = '{{ prefix }}';
+  function updateModeDocs(aiMode) {
+    [pfx + '-fields-cfg', pfx + '-tpl-cfg'].forEach(function(cid) {
+      var c = document.getElementById(cid);
+      if (!c) return;
+      c.querySelectorAll('[data-mode-doc]').forEach(function(el) {
+        el.style.display = el.getAttribute('data-mode-doc') === aiMode ? '' : 'none';
+      });
+    });
+  }
+  function init() {
+    var modeEl = document.getElementById(pfx + '-mode');
+    if (!modeEl) return;
+    var form = modeEl.closest('form');
+    if (!form) return;
+    var aiSel = form.querySelector('[name="ai_mode"]');
+    if (!aiSel) return;
+    aiSel.addEventListener('change', function() { updateModeDocs(this.value); });
+    updateModeDocs(aiSel.value || 'rewrite');
+  }
+  if (document.readyState !== 'loading') { setTimeout(init, 0); }
+  else { document.addEventListener('DOMContentLoaded', init); }
+})();
+</script>

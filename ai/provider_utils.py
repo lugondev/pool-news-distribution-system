@@ -110,6 +110,8 @@ SCHEMA_NEWSLETTER = {
 }
 
 # topic_synthesis.py
+# additionalProperties on summary items allows dynamic title_{lang} / content_{lang}
+# fields based on per-hook target_language (e.g. content_zh, title_ja).
 SCHEMA_TOPIC_SYNTHESIS = {
     "type": "object",
     "properties": {
@@ -121,11 +123,8 @@ SCHEMA_TOPIC_SYNTHESIS = {
                 "type": "object",
                 "properties": {
                     "angle": {"type": "string"},
-                    "title_vi": {"type": "string"},
-                    "content_vi": {"type": "string"},
-                    "title_en": {"type": "string"},
-                    "content_en": {"type": "string"},
                 },
+                "additionalProperties": {"type": "string"},
             },
         },
     },

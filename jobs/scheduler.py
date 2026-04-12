@@ -488,17 +488,29 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
     total_generated = 0
     results_by_hook = {}
 
-    # Build list of (hook_id, webhook_endpoints, telegram_channels) per hook.
+    # Build list of (hook_id, wh_eps, tg_chs, target_lang, tone, prompt_system) per hook.
     # Each hook tracks its own seen-article set independently, so the same
     # source articles are never re-used for the same hook but hooks are independent.
     synth_hooks = []
     for ep in endpoints:
-        synth_hooks.append((ep.get("id", "wh"), [ep], []))
+        resolved = _resolve_ai_config(ai, ep.get("ai_config_id") or None)
+        synth_hooks.append((
+            ep.get("id", "wh"), [ep], [],
+            ep.get("target_language") or None,
+            resolved["tone"],
+            resolved["prompt_system"],
+        ))
     for ch in tg_channels:
-        synth_hooks.append((ch.get("id", "tg"), [], [ch]))
+        resolved = _resolve_ai_config(ai, ch.get("ai_config_id") or None)
+        synth_hooks.append((
+            ch.get("id", "tg"), [], [ch],
+            ch.get("target_language") or None,
+            resolved["tone"],
+            resolved["prompt_system"],
+        ))
 
     try:
-        for hook_id, wh_eps, tg_chs in synth_hooks:
+        for hook_id, wh_eps, tg_chs, hook_target_lang, hook_tone, hook_prompt_system in synth_hooks:
             for category in active_cats:
                 count = await process_category_synthesis(
                     redis=redis,
@@ -507,11 +519,13 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
                     min_articles=synthesis_cfg.get("min_articles", 5),
                     max_articles=synthesis_cfg.get("max_articles", 15),
                     model=synth_model,
-                    tone=ai.get("tone", "general"),
+                    tone=hook_tone,
                     api_key=synth_api_key or None,
                     base_url=synth_base_url or None,
                     webhook_endpoints=wh_eps,
                     telegram_channels=tg_chs,
+                    target_language=hook_target_lang,
+                    prompt_system_override=hook_prompt_system,
                 )
 
                 if count > 0:

@@ -201,11 +201,53 @@ function loadFilterOptions() {
           <input type="number" name="timeout" value="{{ ep.timeout_seconds or 10 }}" min="1" max="60">
         </div>
       </div>
+      <!-- AI Processing: choose mode first so payload template docs are accurate -->
+      <div class="filter-section" style="margin-top:10px;padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:6px">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">AI Processing</div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>AI Mode <span class="hint">— determines which variables are available in the payload template</span></label>
+            <select name="ai_mode" onchange="toggleAiModeFields(this)">
+              <option value="rewrite"   {{ 'selected' if (ep.ai_mode or 'rewrite') == 'rewrite' }}>Rewrite — per-article AI summary</option>
+              <option value="synthetic" {{ 'selected' if ep.ai_mode == 'synthetic' }}>Synthetic — multi-article batch synthesis</option>
+              <option value="off"       {{ 'selected' if ep.ai_mode == 'off' }}>Off — raw article, no AI</option>
+            </select>
+          </div>
+          <div class="form-group" id="ai-cfg-row-edit-{{ ep.id }}" style="{{ 'display:none' if ep.ai_mode == 'off' else '' }}">
+            <label>AI Config <span class="hint">— tone/prompt preset</span></label>
+            <select name="ai_config_id">
+              <option value="">— Built-in (global settings) —</option>
+              {% for c in ai_configs %}
+              <option value="{{ c.id }}" {{ 'selected' if ep.ai_config_id == c.id }}>{{ c.name }}{% if c.is_default %} (default){% endif %} — {{ c.tone or 'general' }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="form-row-2" id="ai-lang-row-edit-{{ ep.id }}" style="{{ 'display:none' if ep.ai_mode == 'off' else '' }}">
+          <div class="form-group">
+            <label>Target Language <span class="hint">— rewrite: <code>ai_summary_target</code> · synthetic: <code>content_target</code></span></label>
+            <select name="target_language">
+              <option value="" {{ 'selected' if not ep.target_language }}>— Origin language only —</option>
+              <option value="en" {{ 'selected' if ep.target_language == 'en' }}>English (en)</option>
+              <option value="vi" {{ 'selected' if ep.target_language == 'vi' }}>Vietnamese (vi)</option>
+              <option value="ja" {{ 'selected' if ep.target_language == 'ja' }}>Japanese (ja)</option>
+              <option value="ko" {{ 'selected' if ep.target_language == 'ko' }}>Korean (ko)</option>
+              <option value="zh" {{ 'selected' if ep.target_language == 'zh' }}>Chinese (zh)</option>
+              <option value="fr" {{ 'selected' if ep.target_language == 'fr' }}>French (fr)</option>
+              <option value="de" {{ 'selected' if ep.target_language == 'de' }}>German (de)</option>
+              <option value="es" {{ 'selected' if ep.target_language == 'es' }}>Spanish (es)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <p style="font-size:10px;color:var(--muted);padding-top:20px;line-height:1.5">Rewrite: populates <code>ai_summary_target</code> · Synthetic: populates <code>content_target</code></p>
+          </div>
+        </div>
+      </div>
       {% with prefix="wh-edit-" + ep.id, current_mode=ep.payload_mode or 'full', current_fields=ep.payload_fields or [], current_template=ep.payload_template or '' %}
         {% include "partials/payload_config.html" %}
       {% endwith %}
       <div class="filter-section" style="margin-top:10px;padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:6px">
-        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Filters & Rate Limit</div>
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Content Filters & Rate Limit</div>
         <div class="form-row-2">
           <div class="form-group">
             <label>Categories</label>
@@ -247,44 +289,6 @@ function loadFilterOptions() {
             <label>Types <span class="hint">original, synthetic</span></label>
             <input type="text" name="filter_article_types" value="{{ ep.filter_article_types|join(', ') if ep.filter_article_types else '' }}" placeholder="original, synthetic">
           </div>
-        </div>
-        <div class="form-row-2">
-          <div class="form-group">
-            <label>AI Mode <span class="hint">— what this hook receives</span></label>
-            <select name="ai_mode">
-              <option value="rewrite"   {{ 'selected' if (ep.ai_mode or 'rewrite') == 'rewrite' }}>AI Rewrite — per-article summary</option>
-              <option value="synthetic" {{ 'selected' if ep.ai_mode == 'synthetic' }}>AI Synthetic — batch synthesis</option>
-              <option value="off"       {{ 'selected' if ep.ai_mode == 'off' }}>Off — raw article, no AI</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>AI Config <span class="hint">— tone/prompt preset (built-in if none)</span></label>
-            <select name="ai_config_id">
-              <option value="">— Built-in (global settings) —</option>
-              {% for c in ai_configs %}
-              <option value="{{ c.id }}" {{ 'selected' if ep.ai_config_id == c.id }}>
-                {{ c.name }}{% if c.is_default %} (default){% endif %} — {{ c.tone or 'general' }}
-              </option>
-              {% endfor %}
-            </select>
-          </div>
-        </div>
-        <div class="form-row-2">
-          <div class="form-group">
-            <label>Target Language <span class="hint">— translate to (empty = origin only)</span></label>
-            <select name="target_language">
-              <option value="" {{ 'selected' if not ep.target_language }}>— Origin language only —</option>
-              <option value="en" {{ 'selected' if ep.target_language == 'en' }}>English (en)</option>
-              <option value="vi" {{ 'selected' if ep.target_language == 'vi' }}>Vietnamese (vi)</option>
-              <option value="ja" {{ 'selected' if ep.target_language == 'ja' }}>Japanese (ja)</option>
-              <option value="ko" {{ 'selected' if ep.target_language == 'ko' }}>Korean (ko)</option>
-              <option value="zh" {{ 'selected' if ep.target_language == 'zh' }}>Chinese (zh)</option>
-              <option value="fr" {{ 'selected' if ep.target_language == 'fr' }}>French (fr)</option>
-              <option value="de" {{ 'selected' if ep.target_language == 'de' }}>German (de)</option>
-              <option value="es" {{ 'selected' if ep.target_language == 'es' }}>Spanish (es)</option>
-            </select>
-          </div>
-          <div class="form-group"></div>
         </div>
         <div class="form-row-2" style="margin-top:6px">
           <div class="form-group">
@@ -372,11 +376,53 @@ function loadFilterOptions() {
           <input type="number" name="timeout" value="10" min="1" max="60">
         </div>
       </div>
+      <!-- AI Processing: choose mode first so payload template docs are accurate -->
+      <div class="filter-section" style="margin-top:10px;padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:6px">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">AI Processing</div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>AI Mode <span class="hint">— determines which variables are available in the payload template</span></label>
+            <select name="ai_mode" onchange="toggleAiModeFields(this)">
+              <option value="rewrite" selected>Rewrite — per-article AI summary</option>
+              <option value="synthetic">Synthetic — multi-article batch synthesis</option>
+              <option value="off">Off — raw article, no AI</option>
+            </select>
+          </div>
+          <div class="form-group" id="ai-cfg-row-add">
+            <label>AI Config <span class="hint">— tone/prompt preset</span></label>
+            <select name="ai_config_id">
+              <option value="">— Built-in (global settings) —</option>
+              {% for c in ai_configs %}
+              <option value="{{ c.id }}">{{ c.name }}{% if c.is_default %} (default){% endif %} — {{ c.tone or 'general' }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="form-row-2" id="ai-lang-row-add">
+          <div class="form-group">
+            <label>Target Language <span class="hint">— rewrite: <code>ai_summary_target</code> · synthetic: <code>content_target</code></span></label>
+            <select name="target_language">
+              <option value="" selected>— Origin language only —</option>
+              <option value="en">English (en)</option>
+              <option value="vi">Vietnamese (vi)</option>
+              <option value="ja">Japanese (ja)</option>
+              <option value="ko">Korean (ko)</option>
+              <option value="zh">Chinese (zh)</option>
+              <option value="fr">French (fr)</option>
+              <option value="de">German (de)</option>
+              <option value="es">Spanish (es)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <p style="font-size:10px;color:var(--muted);padding-top:20px;line-height:1.5">Rewrite: populates <code>ai_summary_target</code> · Synthetic: populates <code>content_target</code></p>
+          </div>
+        </div>
+      </div>
       {% with prefix="wh-add", current_mode="full", current_fields=[], current_template="" %}
         {% include "partials/payload_config.html" %}
       {% endwith %}
       <div class="filter-section" style="margin-top:10px;padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:6px">
-        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Filters & Rate Limit</div>
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Content Filters & Rate Limit</div>
         <div class="form-row-2">
           <div class="form-group">
             <label>Categories</label>
@@ -418,44 +464,6 @@ function loadFilterOptions() {
             <label>Types <span class="hint">original, synthetic</span></label>
             <input type="text" name="filter_article_types" placeholder="original, synthetic">
           </div>
-        </div>
-        <div class="form-row-2">
-          <div class="form-group">
-            <label>AI Mode <span class="hint">— what this hook receives</span></label>
-            <select name="ai_mode">
-              <option value="rewrite" selected>AI Rewrite — per-article summary</option>
-              <option value="synthetic">AI Synthetic — batch synthesis</option>
-              <option value="off">Off — raw article, no AI</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-row-2">
-          <div class="form-group">
-            <label>AI Config <span class="hint">— tone/prompt preset (built-in if none)</span></label>
-            <select name="ai_config_id">
-              <option value="">— Built-in (global settings) —</option>
-              {% for c in ai_configs %}
-              <option value="{{ c.id }}">{{ c.name }}{% if c.is_default %} (default){% endif %} — {{ c.tone or 'general' }}</option>
-              {% endfor %}
-            </select>
-          </div>
-        </div>
-        <div class="form-row-2">
-          <div class="form-group">
-            <label>Target Language <span class="hint">— translate to (empty = origin only)</span></label>
-            <select name="target_language">
-              <option value="" selected>— Origin language only —</option>
-              <option value="en">English (en)</option>
-              <option value="vi">Vietnamese (vi)</option>
-              <option value="ja">Japanese (ja)</option>
-              <option value="ko">Korean (ko)</option>
-              <option value="zh">Chinese (zh)</option>
-              <option value="fr">French (fr)</option>
-              <option value="de">German (de)</option>
-              <option value="es">Spanish (es)</option>
-            </select>
-          </div>
-          <div class="form-group"></div>
         </div>
         <div class="form-row-2" style="margin-top:6px">
           <div class="form-group">
@@ -632,6 +640,18 @@ function loadFilterOptions() {
     }
   }
 
+  function toggleAiModeFields(sel) {
+    var form = sel.closest('form');
+    if (!form) return;
+    var mode = sel.value;
+    // AI Config: hidden only for 'off' mode (rewrite + synthetic both need it)
+    var cfgRow = form.querySelector('[id^="ai-cfg-row-"]');
+    if (cfgRow) cfgRow.style.display = mode === 'off' ? 'none' : '';
+    // Target Language: supported for both rewrite and synthetic; hidden only for 'off'
+    var langRow = form.querySelector('[id^="ai-lang-row-"]');
+    if (langRow) langRow.style.display = mode === 'off' ? 'none' : '';
+  }
+
   function cloneWebhook(epId) {
     var srcForm = document.getElementById('edit-' + epId);
     var addDiv = document.getElementById('wh-add-form');
@@ -685,6 +705,10 @@ function loadFilterOptions() {
       dstMode.value = srcMode.value;
       togglePayloadMode('wh-add');
     }
+
+    // Sync AI mode field visibility in destination form
+    var dstAiMode = dstForm.querySelector('[name="ai_mode"]');
+    if (dstAiMode) toggleAiModeFields(dstAiMode);
 
     addDiv.scrollIntoView({behavior: 'smooth', block: 'start'});
   }
