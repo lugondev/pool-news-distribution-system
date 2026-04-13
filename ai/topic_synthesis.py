@@ -383,33 +383,44 @@ async def _get_unseen_articles(
     hook_id: str,
     max_articles: int,
 ) -> list[dict]:
-    """Return articles for the category that this hook has not yet synthesized.
+    """Return real (non-synthetic) articles for the category that this hook has not yet synthesized.
 
-    Optimised: pushes age-filter to Redis via ZRANGEBYSCORE (timestamp cutoff)
-    and fetches used_ids in the same pipeline — avoids Python-side filtering
-    and eliminates the 3× over-fetch pattern.
+    Uses three Redis sources in one pipeline:
+    - news:cat:{category}        — all articles (real + synthetic), newest-first
+    - news:synth:cat:{category}  — synthetic article IDs only (used to pre-filter)
+    - news:synth:used:{hook_id}:{category} — IDs already consumed by this hook
+
+    Fetches a large pool (max_articles × 15) so that after excluding synthetic and
+    already-used IDs, enough real articles remain — even when synthetic articles
+    dominate the recent end of the sorted set.
     """
     now_ts = datetime.now(timezone.utc).timestamp()
     cutoff = now_ts - SYNTH_MAX_AGE_SECONDS
     used_key = f"{SYNTH_USED_KEY}:{hook_id}:{category}"
     feed_key = f"news:cat:{category}"
+    synth_cat_key = f"news:synth:cat:{category}"
 
-    # Single pipeline: get fresh candidate IDs + used IDs simultaneously
+    # One pipeline: candidates (newest first) + used IDs + synthetic IDs
+    # synth_cat fetch is capped at the same pool size to avoid unbounded scans
+    # (synthesis accumulates ~8 × interval ticks over the 11h window)
+    pool = max_articles * 15
     pipe = redis.pipeline()
-    # ZRANGEBYSCORE returns IDs with score (pub timestamp) >= cutoff, newest-first
-    # Fetch 2× to have pool after filtering out used ones and synthetics
-    pipe.zrangebyscore(feed_key, cutoff, "+inf", start=0, num=max_articles * 2)
+    pipe.zrevrangebyscore(feed_key, "+inf", cutoff, start=0, num=pool)
     pipe.zrange(used_key, 0, -1)
-    candidate_raw, used_raw = await pipe.execute()
+    pipe.zrevrangebyscore(synth_cat_key, "+inf", cutoff, start=0, num=pool)
+    candidate_raw, used_raw, synth_raw = await pipe.execute()
 
     if not candidate_raw:
         return []
 
-    used_ids = {m.decode() if isinstance(m, bytes) else m for m in used_raw}
+    def _d(m: bytes | str) -> str:
+        return m.decode() if isinstance(m, bytes) else m
+
+    used_ids = {_d(m) for m in used_raw}
+    synth_ids = {_d(m) for m in synth_raw}
     unseen_ids = [
-        (r.decode() if isinstance(r, bytes) else r)
-        for r in candidate_raw
-        if (r.decode() if isinstance(r, bytes) else r) not in used_ids
+        rid for r in candidate_raw
+        if (rid := _d(r)) not in used_ids and rid not in synth_ids
     ][:max_articles]
 
     if not unseen_ids:
@@ -426,8 +437,6 @@ async def _get_unseen_articles(
         if not raw:
             continue
         article = {k.decode(): v.decode() for k, v in raw.items()}
-        if article.get("type") == "synthetic":
-            continue
         articles.append(article)
 
     return articles

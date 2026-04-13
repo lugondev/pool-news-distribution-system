@@ -342,6 +342,24 @@ async def ai_job(redis: aioredis.Redis) -> None:
     if not config_groups:
         config_groups[("", "")] = {"wh": [], "tg": []}
 
+    # BUG FIX: Only pop articles if we have rewrite hooks OR raw hooks to dispatch
+    # Otherwise articles will be popped but skipped (webhook_endpoints=[]) and lost forever
+    has_rewrite_hooks = bool(rewrite_wh or rewrite_tg or rewrite_tw)
+    has_raw_hooks = bool(raw_wh or raw_tg)
+
+    if not has_rewrite_hooks and not has_raw_hooks:
+        # No rewrite or raw hooks → articles should stay in queue for synthesis job
+        # or future hook configuration changes
+        await log_system_event(
+            "ai_job",
+            started,
+            status="skipped",
+            metadata={
+                "reason": "no rewrite/raw hooks configured (only synthetic hooks exist)"
+            },
+        )
+        return
+
     # Pop articles once — shared across all config groups
     articles = await pop_pending_ai_articles(redis, limit=ai.get("batch_size", 10))
 
@@ -426,7 +444,12 @@ async def ai_job(redis: aioredis.Redis) -> None:
 
 
 async def topic_synthesis_job(redis: aioredis.Redis) -> None:
-    """Generates synthetic articles from grouped content per category."""
+    """Generates synthetic articles from grouped content per category.
+
+    Supports two trigger modes (configured via ai.topic_synthesis.trigger_mode):
+    - "interval": Run on schedule, process all active categories (default)
+    - "on_demand": Only process categories that have enabled synthetic hooks
+    """
     started = datetime.now(timezone.utc)
     _job_states["topic_synthesis"] = "running"
     if ws_manager:
@@ -485,6 +508,9 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
         )
         return
 
+    # Check trigger_mode: "interval" (default) vs "on_demand"
+    trigger_mode = synthesis_cfg.get("trigger_mode", "interval")
+
     total_generated = 0
     results_by_hook = {}
 
@@ -494,24 +520,70 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
     synth_hooks = []
     for ep in endpoints:
         resolved = _resolve_ai_config(ai, ep.get("ai_config_id") or None)
-        synth_hooks.append((
-            ep.get("id", "wh"), [ep], [],
-            ep.get("target_language") or None,
-            resolved["tone"],
-            resolved["prompt_system"],
-        ))
+        synth_hooks.append(
+            (
+                ep.get("id", "wh"),
+                [ep],
+                [],
+                ep.get("target_language") or None,
+                resolved["tone"],
+                resolved["prompt_system"],
+            )
+        )
     for ch in tg_channels:
         resolved = _resolve_ai_config(ai, ch.get("ai_config_id") or None)
-        synth_hooks.append((
-            ch.get("id", "tg"), [], [ch],
-            ch.get("target_language") or None,
-            resolved["tone"],
-            resolved["prompt_system"],
-        ))
+        synth_hooks.append(
+            (
+                ch.get("id", "tg"),
+                [],
+                [ch],
+                ch.get("target_language") or None,
+                resolved["tone"],
+                resolved["prompt_system"],
+            )
+        )
+
+    def _cat_in_scope(category: str, ep: dict) -> bool:
+        """Return True if category would pass the hook's filter — avoids wasting AI
+        quota on categories that will be blocked by passes_filter at dispatch time."""
+        mode = ep.get("filter_categories_mode", "all")
+        cats = ep.get("filter_categories") or []
+        if mode == "include" and cats:
+            return category in cats
+        if mode == "exclude" and cats:
+            return category not in cats
+        return True
 
     try:
-        for hook_id, wh_eps, tg_chs, hook_target_lang, hook_tone, hook_prompt_system in synth_hooks:
-            for category in active_cats:
+        for (
+            hook_id,
+            wh_eps,
+            tg_chs,
+            hook_target_lang,
+            hook_tone,
+            hook_prompt_system,
+        ) in synth_hooks:
+            hook_cfg = wh_eps[0] if wh_eps else tg_chs[0] if tg_chs else {}
+
+            # Determine which categories to process based on trigger_mode
+            if trigger_mode == "on_demand":
+                # ON_DEMAND: Only process categories this hook wants (respects filter)
+                categories_to_process = [
+                    cat for cat in active_cats if _cat_in_scope(cat, hook_cfg)
+                ]
+                if not categories_to_process:
+                    logger.debug(
+                        f"Hook {hook_id}: no matching categories (filter excludes all), skipping"
+                    )
+                    continue
+            else:
+                # INTERVAL (default): Process all active categories, but still respect filter
+                categories_to_process = active_cats
+
+            for category in categories_to_process:
+                # Skip if hook's filter excludes this category
+                if not _cat_in_scope(category, hook_cfg):
+                    continue
                 count = await process_category_synthesis(
                     redis=redis,
                     category=category,
@@ -560,7 +632,7 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
             metadata={
                 "total_generated": total_generated,
                 "hooks_processed": len(synth_hooks),
-                "categories_per_hook": len(active_cats),
+                "trigger_mode": trigger_mode,
                 "results": results_by_hook,
             },
         )

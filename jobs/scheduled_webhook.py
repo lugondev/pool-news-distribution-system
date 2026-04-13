@@ -21,6 +21,38 @@ from storage.config_cache import cached_yaml
 logger = logging.getLogger(__name__)
 
 
+def _should_dispatch_article(article: dict, ai_mode: str) -> bool:
+    """
+    Check if article should be dispatched based on endpoint's ai_mode.
+
+    - "off" or None: dispatch all articles (raw)
+    - "rewrite": only dispatch articles that have been AI-processed (ai_status="done")
+    - "synthetic": only dispatch synthetic articles (type="synthetic")
+    - "debate": only dispatch debate articles (type="debate")
+
+    This ensures scheduled webhooks respect the same ai_mode logic as
+    ai_job/synthesis_job, preventing confusion when a webhook is configured
+    for synthetic but receives original articles.
+    """
+    if not ai_mode or ai_mode == "off":
+        return True  # Dispatch all articles
+
+    if ai_mode == "rewrite":
+        # Only dispatch if AI has processed this article
+        return article.get("ai_status") == "done"
+
+    if ai_mode == "synthetic":
+        # Only dispatch synthetic articles
+        return article.get("type") == "synthetic"
+
+    if ai_mode == "debate":
+        # Only dispatch debate articles
+        return article.get("type") == "debate"
+
+    # Unknown ai_mode: default to allowing dispatch
+    return True
+
+
 async def scheduled_webhook_job(redis: aioredis.Redis) -> None:
     """
     Check for due webhook schedules and execute them.
@@ -98,8 +130,35 @@ async def scheduled_webhook_job(redis: aioredis.Redis) -> None:
                 await update_schedule_run_time(schedule_id, now, next_run)
                 continue
 
-            # Dispatch each article
+            # Dispatch each article (respecting ai_mode filter)
+            dispatched_count = 0
             for article in articles:
+                # Check ai_mode compatibility for each endpoint type
+                should_dispatch = True
+
+                if webhook_endpoint:
+                    ai_mode = webhook_endpoint.get("ai_mode", "off")
+                    if not _should_dispatch_article(article, ai_mode):
+                        logger.debug(
+                            f"Schedule {schedule_name}: skipping article {article.get('id', '?')} "
+                            f"(ai_mode={ai_mode}, article type={article.get('type', 'original')}, "
+                            f"ai_status={article.get('ai_status', 'pending')})"
+                        )
+                        should_dispatch = False
+
+                if telegram_channel and should_dispatch:
+                    ai_mode = telegram_channel.get("ai_mode", "off")
+                    if not _should_dispatch_article(article, ai_mode):
+                        should_dispatch = False
+
+                if twitter_account and should_dispatch:
+                    ai_mode = twitter_account.get("ai_mode", "off")
+                    if not _should_dispatch_article(article, ai_mode):
+                        should_dispatch = False
+
+                if not should_dispatch:
+                    continue
+
                 endpoints = [webhook_endpoint] if webhook_endpoint else []
                 channels = [telegram_channel] if telegram_channel else []
                 accounts = [twitter_account] if twitter_account else []
@@ -110,16 +169,41 @@ async def scheduled_webhook_job(redis: aioredis.Redis) -> None:
                     telegram_channels=channels,
                     twitter_accounts=accounts,
                 )
+                dispatched_count += 1
 
-            logger.info(
-                f"Schedule {schedule_name} ({schedule_id}): dispatched {len(articles)} articles"
-            )
+            # Log result with clear status
+            if dispatched_count == 0:
+                if len(articles) == 0:
+                    logger.info(
+                        f"Schedule {schedule_name} ({schedule_id}): no articles found in Redis"
+                    )
+                else:
+                    # Articles exist but all filtered out by ai_mode
+                    ai_mode_str = ""
+                    if webhook_endpoint:
+                        ai_mode_str = webhook_endpoint.get("ai_mode", "off")
+                    elif telegram_channel:
+                        ai_mode_str = telegram_channel.get("ai_mode", "off")
+                    elif twitter_account:
+                        ai_mode_str = twitter_account.get("ai_mode", "off")
+
+                    logger.info(
+                        f"Schedule {schedule_name} ({schedule_id}): 0/{len(articles)} articles dispatched "
+                        f"(all filtered by ai_mode={ai_mode_str}). "
+                        f"Hint: No articles match ai_mode filter. Check if synthesis/AI job has run."
+                    )
+            else:
+                logger.info(
+                    f"Schedule {schedule_name} ({schedule_id}): dispatched {dispatched_count}/{len(articles)} articles"
+                )
 
             # Update next_run_at
             iter = croniter(cron_expr, now)
             next_run = iter.get_next(datetime)
             await update_schedule_run_time(schedule_id, now, next_run)
-            await log_schedule_execution(schedule_id, "ok", article_count=len(articles))
+            await log_schedule_execution(
+                schedule_id, "ok", article_count=dispatched_count
+            )
 
         except Exception as exc:
             logger.error(
