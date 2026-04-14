@@ -355,12 +355,19 @@ async def get_due_source_ids(
     Sources not yet in the schedule (first run) are treated as immediately due.
     """
     now = datetime.now(timezone.utc).timestamp()
+    active_ids_set = set(all_source_ids)
 
-    # Sources already scheduled and overdue
+    # Sources already scheduled and overdue — filter to active sources only
+    # (disabled sources may still exist in Redis schedule from previous runs)
     raw_due = await redis.zrangebyscore(
-        CRAWL_SCHEDULE_KEY, 0, now, start=0, num=limit * 2
+        CRAWL_SCHEDULE_KEY, 0, now, start=0, num=limit * 5
     )
-    due = [b.decode() if isinstance(b, bytes) else b for b in raw_due]
+    due = [
+        sid
+        for b in raw_due
+        for sid in [(b.decode() if isinstance(b, bytes) else b)]
+        if sid in active_ids_set
+    ]
 
     # Sources never scheduled (brand new or after Redis flush)
     all_raw = await redis.zrange(CRAWL_SCHEDULE_KEY, 0, -1)
