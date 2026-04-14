@@ -12,6 +12,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy source (config/data are volume-mounted at runtime — see docker-compose.yml)
+# Ensure config dir exists as a directory before COPY so it can never become a file
+RUN mkdir -p /app/config
 COPY . .
 
 # Exclude local dev artifacts
