@@ -7,7 +7,7 @@ import pathlib
 from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel
 
-from dashboard.config_io import read_settings, SOURCES_PATH
+from dashboard.config_io import read_settings, read_sources
 from dashboard.redis_state import get_redis
 from storage.redis_store import get_article, get_feed_stats, get_latest_articles, get_pending_ai_articles
 from storage.redis_keys import DEDUP_SIMHASHES_KEY
@@ -25,8 +25,6 @@ from storage.sqlite_stats import (
     get_system_logs,
     get_system_summary,
 )
-
-import yaml
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -359,8 +357,7 @@ async def get_filter_options(q: str = ""):
         for c in cfg.get("categories", [])
         if c.get("enabled", True)
     ]
-    with open(SOURCES_PATH) as f:
-        raw_sources = yaml.safe_load(f).get("sources", [])
+    raw_sources = read_sources()
     sources = [
         {"id": s["id"], "name": s.get("name", s["id"]), "category": s.get("category", ""), "lang": s.get("lang", "")}
         for s in raw_sources
