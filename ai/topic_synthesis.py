@@ -159,9 +159,17 @@ async def synthesize_topic_articles(
         )
         return []
 
-    client = get_openai_client(api_key=api_key, base_url=base_url)
+    # Load timeout from settings
+    from dashboard.config_io import cached_yaml
+    cfg = cached_yaml("config/settings.yaml")
+    timeout = cfg.get("channels_config", {}).get("ai_timeout_seconds", 60)
+
+    # Load AI config to get actual base_url if not provided
     ai_cfg = _load_ai_config()
+    resolved_base_url = base_url or ai_cfg.get("base_url", "https://api.openai.com/v1")
     resolved_model = model or ai_cfg.get("model", "")
+    
+    client = get_openai_client(api_key=api_key, base_url=resolved_base_url, timeout=timeout)
 
     # Build tone instruction — per-hook override takes priority, then global prompt_system, then tone
     custom_system = (ai_cfg.get("prompt_system") or "").strip()
@@ -225,7 +233,7 @@ async def synthesize_topic_articles(
         model=resolved_model,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=max_tokens,
-        response_format=build_response_format(base_url, "topic_synthesis", SCHEMA_TOPIC_SYNTHESIS),
+        response_format=build_response_format(resolved_base_url, "topic_synthesis", SCHEMA_TOPIC_SYNTHESIS),
         temperature=temperature,
     )
 

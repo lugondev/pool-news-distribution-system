@@ -1,0 +1,283 @@
+{% if success %}
+<div class="alert alert-success">{{ success }}</div>
+{% endif %}
+
+<div class="panel">
+  <h3>Provider Routing Configuration</h3>
+  <p class="desc">Select which AI provider to use for each action type. Different providers have different strengths and pricing.</p>
+
+  <form hx-post="/ai-providers/update" hx-target="#config-panel" hx-swap="innerHTML">
+    
+    <div class="form-group">
+      <label>Rewrite (One-to-one article summarization)</label>
+      <select name="rewrite">
+        <option value="">-- Select Provider --</option>
+        {% for p in providers %}
+        <option value="{{ p.id }}" {% if routing.get('rewrite') == p.id %}selected{% endif %}>
+          {{ p.name }} — {{ p.model }}
+        </option>
+        {% endfor %}
+      </select>
+      <span class="hint">Used for: Channel rewrite mode, webhook ai_mode=rewrite</span>
+      {% if routing.get('rewrite') %}
+      <span class="provider-badge {{ routing.get('rewrite') }}">Current: {{ routing.get('rewrite') }}</span>
+      {% endif %}
+    </div>
+
+    <div class="form-group">
+      <label>Synthesis (Multi-article topic synthesis)</label>
+      <select name="synthesis">
+        <option value="">-- Select Provider --</option>
+        {% for p in providers %}
+        <option value="{{ p.id }}" {% if routing.get('synthesis') == p.id %}selected{% endif %}>
+          {{ p.name }} — {{ p.model }}
+        </option>
+        {% endfor %}
+      </select>
+      <span class="hint">Used for: Channel synthetic mode, webhook ai_mode=synthetic, topic synthesis job</span>
+      {% if routing.get('synthesis') %}
+      <span class="provider-badge {{ routing.get('synthesis') }}">Current: {{ routing.get('synthesis') }}</span>
+      {% endif %}
+    </div>
+
+    <div class="form-group">
+      <label>Debate (Multi-agent debate generation)</label>
+      <select name="debate">
+        <option value="">-- Select Provider --</option>
+        {% for p in providers %}
+        <option value="{{ p.id }}" {% if routing.get('debate') == p.id %}selected{% endif %}>
+          {{ p.name }} — {{ p.model }}
+        </option>
+        {% endfor %}
+      </select>
+      <span class="hint">Used for: Channel debate mode, webhook ai_mode=debate</span>
+      {% if routing.get('debate') %}
+      <span class="provider-badge {{ routing.get('debate') }}">Current: {{ routing.get('debate') }}</span>
+      {% endif %}
+    </div>
+
+    <div class="form-group">
+      <label>Newsletter (Newsletter generation)</label>
+      <select name="newsletter">
+        <option value="">-- Select Provider --</option>
+        {% for p in providers %}
+        <option value="{{ p.id }}" {% if routing.get('newsletter') == p.id %}selected{% endif %}>
+          {{ p.name }} — {{ p.model }}
+        </option>
+        {% endfor %}
+      </select>
+      <span class="hint">Used for: Newsletter generation job</span>
+      {% if routing.get('newsletter') %}
+      <span class="provider-badge {{ routing.get('newsletter') }}">Current: {{ routing.get('newsletter') }}</span>
+      {% endif %}
+    </div>
+
+    <div class="form-group">
+      <label>Embedding (Semantic vector generation)</label>
+      <select name="embedding">
+        <option value="system" {% if routing.get('embedding') == 'system' or not routing.get('embedding') %}selected{% endif %}>
+          System (Use first provider's embedding_model)
+        </option>
+        {% for p in providers %}
+        {% if p.get('embedding_model') %}
+        <option value="{{ p.id }}" {% if routing.get('embedding') == p.id %}selected{% endif %}>
+          {{ p.name }} — {{ p.embedding_model }}
+        </option>
+        {% endif %}
+        {% endfor %}
+      </select>
+      <span class="hint">Used for: Article embeddings, semantic search, topic clustering</span>
+      {% if routing.get('embedding') %}
+      <span class="provider-badge {{ routing.get('embedding') }}">Current: {{ routing.get('embedding') }}</span>
+      {% endif %}
+    </div>
+
+    <button type="submit" class="btn btn-primary">Save Routing Configuration</button>
+  </form>
+</div>
+
+<div class="panel" style="margin-top: 24px;">
+  <h3>AI Providers</h3>
+  <p class="desc">Manage api_key + base_url per provider; reference by name in routing above</p>
+  
+  <div id="providers-list" style="margin-bottom:16px">
+    {% if providers %}
+    <table style="width:100%;font-size:12px;border-collapse:collapse">
+      <thead>
+        <tr style="color:var(--muted);text-align:left;border-bottom:1px solid var(--border)">
+          <th style="padding:6px 8px">Name</th>
+          <th style="padding:6px 8px">Base URL</th>
+          <th style="padding:6px 8px">Model</th>
+          <th style="padding:6px 8px">Embedding Model</th>
+          <th style="padding:6px 8px">API Key</th>
+          <th style="padding:6px 8px;text-align:right">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in providers %}
+        <tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:8px;font-weight:600">{{ p.name }}</td>
+          <td style="padding:8px;font-family:monospace;font-size:11px;color:var(--muted)">{{ p.base_url }}</td>
+          <td style="padding:8px;font-family:monospace;font-size:11px;color:var(--muted)">{{ p.model or '—' }}</td>
+          <td style="padding:8px;font-family:monospace;font-size:11px;color:var(--muted)">{{ p.get('embedding_model') or '—' }}</td>
+          <td style="padding:8px;font-family:monospace;font-size:11px;color:var(--muted)">{{ p.api_key[:12] }}…</td>
+          <td style="padding:8px;text-align:right;white-space:nowrap">
+            <button class="btn btn-outline" style="font-size:11px;padding:3px 8px"
+                    onclick="editProvider('{{ p.id }}')">Edit</button>
+            <button class="btn btn-outline" style="font-size:11px;padding:3px 8px"
+                    onclick="testProvider('{{ p.id }}', this)">Test</button>
+            <button class="btn btn-outline" style="font-size:11px;padding:3px 8px;color:var(--red)"
+                    onclick="deleteProvider('{{ p.id }}','{{ p.name }}')">Delete</button>
+            <span id="provider-test-{{ p.id }}" style="font-size:11px;margin-left:4px"></span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="font-size:12px;color:var(--muted);padding:10px;background:var(--surface);border-radius:6px">
+      No providers configured. Add one below.
+    </div>
+    {% endif %}
+  </div>
+
+  {# Add / Edit Provider form #}
+  <div id="provider-form-wrap" style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:8px">
+    <p style="font-size:13px;font-weight:600;margin:0 0 12px 0" id="provider-form-title">Add Provider</p>
+    <input type="hidden" id="editing-provider-id" value="">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+      <div class="form-group" style="margin-bottom:0">
+        <label>Name</label>
+        <input type="text" id="prov-name" placeholder="Together AI" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:8px 12px;border-radius:6px;font-size:13px">
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>Base URL</label>
+        <input type="url" id="prov-base-url" placeholder="https://api.together.xyz/v1" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:8px 12px;border-radius:6px;font-size:13px">
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+      <div class="form-group" style="margin-bottom:0">
+        <label>API Key</label>
+        <div style="display:flex;gap:6px">
+          <input type="password" id="prov-api-key" placeholder="sk-..." autocomplete="off" style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:8px 12px;border-radius:6px;font-family:monospace;font-size:12px">
+          <button type="button" class="btn btn-outline" style="font-size:11px;padding:3px 8px;white-space:nowrap"
+                  onclick="var el=document.getElementById('prov-api-key');el.type=el.type==='password'?'text':'password';this.textContent=el.type==='password'?'Show':'Hide'">Show</button>
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>Model <span class="hint">— default model for this provider (optional)</span></label>
+        <input type="text" id="prov-model" placeholder="e.g. google/gemma-3n-e4b-it" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:8px 12px;border-radius:6px;font-family:monospace;font-size:12px">
+      </div>
+    </div>
+    <div class="form-group" style="margin-bottom:10px">
+      <label>Embedding Model <span class="hint">— for semantic search (optional)</span></label>
+      <input type="text" id="prov-embedding-model" placeholder="e.g. perplexity/pplx-embed-v1-0.6b" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:8px 12px;border-radius:6px;font-family:monospace;font-size:12px">
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn btn-primary" style="font-size:12px" onclick="saveProvider()">Save Provider</button>
+      <button class="btn btn-outline" style="font-size:12px" onclick="resetProviderForm()">Cancel</button>
+      <span id="provider-save-msg" style="font-size:12px;color:var(--muted)"></span>
+    </div>
+  </div>
+</div>
+
+<style>
+.btn-outline {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn-outline:hover {
+  background: var(--surface);
+  border-color: var(--accent);
+}
+</style>
+
+<script>
+function resetProviderForm() {
+  document.getElementById('editing-provider-id').value = '';
+  document.getElementById('prov-name').value = '';
+  document.getElementById('prov-base-url').value = '';
+  document.getElementById('prov-api-key').value = '';
+  document.getElementById('prov-model').value = '';
+  document.getElementById('prov-embedding-model').value = '';
+  document.getElementById('provider-form-title').textContent = 'Add Provider';
+  document.getElementById('provider-save-msg').textContent = '';
+}
+
+async function editProvider(id) {
+  const res = await fetch(`/api/providers/${id}`);
+  if (!res.ok) return;
+  const p = await res.json();
+  document.getElementById('editing-provider-id').value = p.id;
+  document.getElementById('prov-name').value = p.name || '';
+  document.getElementById('prov-base-url').value = p.base_url || '';
+  document.getElementById('prov-api-key').value = p.api_key || '';
+  document.getElementById('prov-model').value = p.model || '';
+  document.getElementById('prov-embedding-model').value = p.embedding_model || '';
+  document.getElementById('provider-form-title').textContent = 'Edit Provider: ' + p.name;
+  document.getElementById('provider-form-wrap').scrollIntoView({behavior:'smooth'});
+}
+
+async function saveProvider() {
+  const id = document.getElementById('editing-provider-id').value;
+  const body = {
+    name: document.getElementById('prov-name').value.trim(),
+    base_url: document.getElementById('prov-base-url').value.trim(),
+    api_key: document.getElementById('prov-api-key').value.trim(),
+    model: document.getElementById('prov-model').value.trim(),
+    embedding_model: document.getElementById('prov-embedding-model').value.trim(),
+  };
+  const msg = document.getElementById('provider-save-msg');
+  if (!body.name || !body.base_url || !body.api_key) {
+    msg.textContent = 'Name, Base URL and API Key are required.';
+    msg.style.color = 'var(--red)';
+    return;
+  }
+  msg.textContent = 'Saving…'; msg.style.color = 'var(--muted)';
+  const url = id ? `/api/providers/${id}` : '/api/providers';
+  const method = id ? 'PUT' : 'POST';
+  const res = await fetch(url, {method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  if (res.ok) {
+    msg.textContent = 'Saved!'; msg.style.color = 'var(--green)';
+    htmx.ajax('GET', '/partials/ai-providers-config', {target: '#config-panel', swap: 'innerHTML'});
+  } else {
+    msg.textContent = 'Error saving.'; msg.style.color = 'var(--red)';
+  }
+}
+
+async function testProvider(id, btn) {
+  const el = document.getElementById('provider-test-' + id);
+  el.textContent = 'Testing…'; el.style.color = 'var(--muted)';
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/providers/${id}/test`, {method:'POST'});
+    const data = await res.json();
+    if (data.ok) {
+      el.textContent = `✓ OK  ${data.ms}ms  ${data.tokens || ''}tok`;
+      el.style.color = 'var(--green)';
+    } else {
+      el.textContent = `✗ ${data.error || 'Failed'}`;
+      el.style.color = 'var(--red)';
+    }
+  } catch(e) {
+    el.textContent = '✗ Network error'; el.style.color = 'var(--red)';
+  }
+  btn.disabled = false;
+  setTimeout(() => { el.textContent = ''; }, 8000);
+}
+
+async function deleteProvider(id, name) {
+  if (!confirm(`Delete provider "${name}"?`)) return;
+  const res = await fetch(`/api/providers/${id}`, {method:'DELETE'});
+  if (res.ok) {
+    htmx.ajax('GET', '/partials/ai-providers-config', {target: '#config-panel', swap: 'innerHTML'});
+  } else {
+    alert('Failed to delete provider');
+  }
+}
+</script>

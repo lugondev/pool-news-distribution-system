@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import httpx
 from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -56,11 +57,18 @@ def _load_ai_config() -> dict:
 
 
 def get_openai_client(
-    api_key: str | None = None, base_url: str | None = None
+    api_key: str | None = None,
+    base_url: str | None = None,
+    timeout: float | None = None,
 ) -> AsyncOpenAI:
     """
     Return a cached AsyncOpenAI client. Recreates if connection params changed.
     All config comes from settings.yaml (managed via Settings UI).
+    
+    Args:
+        api_key: OpenAI API key (optional, loads from settings if not provided)
+        base_url: API base URL (optional, loads from settings if not provided)
+        timeout: Request timeout in seconds (optional, defaults to 600s)
     """
     global _client, _client_fingerprint
 
@@ -69,7 +77,15 @@ def get_openai_client(
         api_key = api_key or cfg.get("api_key", "")
         base_url = base_url or cfg.get("base_url", "https://api.openai.com/v1")
 
-    fingerprint = f"{api_key}|{base_url}"
+    # Default timeout from settings or 60s
+    if timeout is None:
+        cfg = cached_yaml(_SETTINGS_PATH)
+        timeout = cfg.get("channels_config", {}).get("ai_timeout_seconds", 60)
+
+    # Create httpx.Timeout object for OpenAI SDK
+    timeout_obj = httpx.Timeout(timeout, connect=5.0)
+    
+    fingerprint = f"{api_key}|{base_url}|{timeout}"
 
     if _client is not None and _client_fingerprint == fingerprint:
         return _client
@@ -80,13 +96,14 @@ def get_openai_client(
     _client = AsyncOpenAI(
         api_key=api_key,
         base_url=base_url,
+        timeout=timeout_obj,
         default_headers={
             "HTTP-Referer": "https://github.com/news-aggregator",
             "X-Title": "News Aggregator",
         },
     )
     _client_fingerprint = fingerprint
-    logger.info(f"OpenAI client initialized: base_url={base_url}")
+    logger.info(f"OpenAI client initialized: base_url={base_url}, timeout={timeout}s")
     return _client
 
 

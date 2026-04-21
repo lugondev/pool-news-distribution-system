@@ -18,6 +18,11 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+
+# Reduce noise from APScheduler
+logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)
+logging.getLogger("apscheduler.scheduler").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 # Import app sau load_dotenv để env vars có sẵn
@@ -118,14 +123,32 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    logger.info("Shutting down gracefully...")
+    
+    # Step 1: Stop scheduler (wait for running jobs to complete, max 10s)
+    if scheduler:
+        logger.info("Stopping scheduler (waiting for running jobs)...")
+        try:
+            # shutdown(wait=True) blocks until all jobs finish
+            # Use asyncio.wait_for to add timeout protection
+            await asyncio.wait_for(
+                asyncio.to_thread(scheduler.shutdown, wait=True),
+                timeout=10.0
+            )
+            logger.info("Scheduler stopped cleanly")
+        except asyncio.TimeoutError:
+            logger.warning("Scheduler shutdown timeout — forcing stop")
+            scheduler.shutdown(wait=False)
+    
+    # Step 2: Cancel dispatch worker
     if _dispatch_task:
         _dispatch_task.cancel()
         try:
             await _dispatch_task
         except asyncio.CancelledError:
             pass
-    if scheduler:
-        scheduler.shutdown(wait=False)
+    
+    # Step 3: Close external connections
     await close_weaviate()
     await redis.aclose()
     logger.info("Shutdown complete")

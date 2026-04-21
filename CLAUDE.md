@@ -158,6 +158,8 @@ Channels are pull-based alternatives to webhooks. External services (Twitter bot
 - `ai_mode=synthetic`: 3-10 articles → AI synthesize → return 1 result (cached 1h per batch)
 - `ai_mode=debate`: 3-10 articles → AI debate → return 1 result (cached 1h per batch)
 
+**Timeout:** AI processing timeout is configurable via `channels_config.ai_timeout_seconds` in settings.yaml (default: 60s). If AI call exceeds this limit, request fails with 500 error. Applies to all AI modes (rewrite/synthetic/debate).
+
 **Minimum articles:** synthetic/debate modes require ≥3 articles. If insufficient, endpoints return 204 No Content.
 
 **Caching strategy:** AI results cached in Redis to save API quota:

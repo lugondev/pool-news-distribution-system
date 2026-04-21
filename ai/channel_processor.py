@@ -14,6 +14,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+import httpx
+from openai import APITimeoutError
 from ai.rewriter import rewrite_article, LANG_NAMES, TONE_PROMPTS, _load_ai_config, get_openai_client
 from ai.provider_utils import build_response_format, parse_ai_json
 from ai.style_transform import PLATFORM_PRESETS, OUTPUT_FORMAT_INSTRUCTIONS
@@ -153,13 +155,12 @@ async def process_rewrite(
     ai_source = channel.get("ai_source", "system")
     if ai_source == "client" and client_api_key:
         api_key = client_api_key
-        base_url = client_base_url
+        base_url = client_base_url or "https://api.openai.com/v1"
         model = client_model
     else:
-        ai_cfg = _load_ai_config()
-        api_key = ai_cfg.get("api_key")
-        base_url = ai_cfg.get("base_url")
-        model = ai_cfg.get("model", "")
+        # Use provider routing for rewrite action
+        from ai.provider_routing import get_provider_for_action
+        api_key, base_url, model = get_provider_for_action("rewrite")
     
     if not api_key:
         logger.warning(f"No AI credentials for channel {channel['id']}")
@@ -200,7 +201,12 @@ async def process_rewrite(
     
     # Call AI with merged prompt
     try:
-        client = get_openai_client(api_key=api_key, base_url=base_url)
+        # Load timeout from settings
+        from dashboard.config_io import cached_yaml
+        cfg = cached_yaml("config/settings.yaml")
+        timeout = cfg.get("channels_config", {}).get("ai_timeout_seconds", 60)
+        
+        client = get_openai_client(api_key=api_key, base_url=base_url, timeout=timeout)
         response = await client.chat.completions.create(
             model=model or "",
             messages=[{"role": "user", "content": prompt}],
@@ -224,6 +230,10 @@ async def process_rewrite(
         article["ai_status"] = "done"
         article["styled_tokens"] = tokens
         
+        # Backward compatibility aliases
+        article["content_target"] = article["styled_content"]  # For old templates
+        article[f"title_target"] = article.get("title", "")  # For completeness
+        
         # Cache result (1 hour TTL)
         import json
         cache_data = {
@@ -231,12 +241,16 @@ async def process_rewrite(
             "styled_content": article["styled_content"],
             "styled_hashtags": article["styled_hashtags"],
             "styled_char_count": article["styled_char_count"],
+            "content_target": article["styled_content"],  # Backward compat alias
         }
         await redis.setex(cache_key, 3600, json.dumps(cache_data))
         
         logger.info(f"Channel {channel['id']}: rewrite+style done for {article['id']} ({tokens} tokens)")
         return article
         
+    except (asyncio.TimeoutError, httpx.ReadTimeout, httpx.TimeoutException, APITimeoutError) as e:
+        logger.error(f"Channel {channel['id']}: rewrite+style timeout for {article['id']} (>{timeout}s): {e}")
+        raise ValueError(f"AI processing timeout after {timeout}s")
     except Exception as e:
         logger.error(f"Channel {channel['id']}: rewrite+style failed for {article['id']}: {e}")
         raise
@@ -278,14 +292,20 @@ async def process_synthetic(
     
     # Process with AI
     try:
-        # Use topic_synthesis logic
+        # Use topic_synthesis logic with provider routing
         from ai.topic_synthesis import synthesize_topic_articles
+        from ai.provider_routing import get_provider_for_action
+        
+        api_key, base_url, model = get_provider_for_action("synthesis")
         
         results = await synthesize_topic_articles(
             articles=articles,
             category=category,
             redis=redis,
             target_language=target_lang,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
         )
         
         if not results:
@@ -303,6 +323,9 @@ async def process_synthetic(
         await redis.setex(cache_key, 3600, json.dumps(synthetic))
         
         return synthetic
+    except (asyncio.TimeoutError, httpx.ReadTimeout, httpx.TimeoutException, APITimeoutError) as e:
+        logger.error(f"Channel {channel['id']}: synthesis timeout for {category}: {e}")
+        raise ValueError(f"AI synthesis timeout")
     except Exception as e:
         logger.error(f"Channel {channel['id']}: synthesis failed for {category}: {e}")
         raise
@@ -344,14 +367,20 @@ async def process_debate(
     
     # Process with AI (debate detection + synthesis)
     try:
-        # Use synthesis with debate-focused prompt
+        # Use synthesis with debate-focused prompt and provider routing
         from ai.topic_synthesis import synthesize_topic_articles
+        from ai.provider_routing import get_provider_for_action
+        
+        api_key, base_url, model = get_provider_for_action("debate")
         
         results = await synthesize_topic_articles(
             articles=articles,
             category=category,
             redis=redis,
             target_language=target_lang,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
         )
         
         if not results:
@@ -369,6 +398,9 @@ async def process_debate(
         await redis.setex(cache_key, 3600, json.dumps(debate))
         
         return debate
+    except (asyncio.TimeoutError, httpx.ReadTimeout, httpx.TimeoutException, APITimeoutError) as e:
+        logger.error(f"Channel {channel['id']}: debate timeout for {category}: {e}")
+        raise ValueError(f"AI debate timeout")
     except Exception as e:
         logger.error(f"Channel {channel['id']}: debate generation failed for {category}: {e}")
         raise

@@ -527,6 +527,23 @@ async def channel_feed(
             error_msg=e.detail if hasattr(e, 'detail') else str(e),
         )
         raise
+    except ValueError as e:
+        # Catch timeout errors from AI processing
+        if "timeout" in str(e).lower():
+            duration_ms = int((time.time() - start_time) * 1000)
+            await log_channel_request(
+                channel_id=ch_id,
+                client_id=client_id,
+                endpoint="/feed",
+                method="GET",
+                status_code=504,
+                auth_method=auth_method,
+                items_count=0,
+                duration_ms=duration_ms,
+                error_msg=str(e),
+            )
+            raise HTTPException(504, str(e))
+        raise
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)
         await log_channel_request(
@@ -710,6 +727,23 @@ async def channel_next(
             duration_ms=duration_ms,
             error_msg=e.detail if hasattr(e, 'detail') else str(e),
         )
+        raise
+    except ValueError as e:
+        # Catch timeout errors from AI processing
+        if "timeout" in str(e).lower():
+            duration_ms = int((time.time() - start_time) * 1000)
+            await log_channel_request(
+                channel_id=ch_id,
+                client_id=client_id,
+                endpoint="/next",
+                method="GET",
+                status_code=504,
+                auth_method=auth_method,
+                items_count=0,
+                duration_ms=duration_ms,
+                error_msg=str(e),
+            )
+            raise HTTPException(504, str(e))
         raise
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)

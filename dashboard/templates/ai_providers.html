@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Providers & Routing — News Aggregator</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3e;
+      --text: #e2e8f0; --muted: #718096; --accent: #6366f1;
+      --green: #10b981; --red: #ef4444; --yellow: #f59e0b;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .container { max-width: 960px; margin: 0 auto; padding: 24px; }
+
+    .form-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 16px; }
+    .form-group label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+    .form-group .hint { font-size: 11px; color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; margin-top: 2px; }
+    .form-group select {
+      background: var(--bg); color: var(--text); border: 1px solid var(--border);
+      padding: 8px 12px; border-radius: 6px; font-size: 13px;
+    }
+    .form-group select:focus { outline: none; border-color: var(--accent); }
+
+    .btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover { background: #5558e3; }
+
+    .alert { padding: 12px 16px; border-radius: 6px; font-size: 13px; margin-bottom: 16px; }
+    .alert-success { background: rgba(16, 185, 129, 0.1); border: 1px solid var(--green); color: var(--green); }
+
+    .provider-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; margin-left: 8px; }
+    .provider-badge.cloudflare-ai { background: rgba(246, 133, 27, 0.1); color: #f6851b; }
+    .provider-badge.together-ai { background: rgba(99, 102, 241, 0.1); color: var(--accent); }
+    .provider-badge.openrouter { background: rgba(16, 185, 129, 0.1); color: var(--green); }
+
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 24px; margin-bottom: 24px; }
+    .panel h3 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+    .panel .desc { font-size: 12px; color: var(--muted); margin-bottom: 18px; }
+
+    table { width: 100%; margin-top: 12px; border-collapse: collapse; }
+    thead tr { border-bottom: 1px solid var(--border); text-align: left; }
+    thead th { padding: 8px; font-size: 11px; color: var(--muted); text-transform: uppercase; }
+    tbody tr { border-bottom: 1px solid var(--border); }
+    tbody td { padding: 8px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  {% include 'partials/header.html' %}
+
+  <div class="container">
+    <div id="config-panel" hx-get="/partials/ai-providers-config" hx-trigger="load" hx-swap="innerHTML">
+      <div class="panel">
+        <p style="color:var(--muted);font-size:12px">Loading AI provider routing...</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

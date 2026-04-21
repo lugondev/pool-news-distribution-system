@@ -280,6 +280,70 @@
       </div>
     </div>
 
+    <hr class="divider" style="margin:24px 0">
+    
+    <p class="section-title">
+      Multi-Agent Debate
+      <span class="hint">— AI agents debate different perspectives on news stories</span>
+    </p>
+    
+    <div style="background:var(--accent-bg, rgba(99,102,241,.08));border:1px solid var(--accent);border-radius:8px;padding:14px;margin-bottom:16px;font-size:12px">
+      <div style="font-weight:600;margin-bottom:6px;color:var(--accent)">🎭 Debate Mode</div>
+      <div style="line-height:1.5;color:var(--text)">
+        Multiple AI agents analyze the same story from different viewpoints (optimist, pessimist, analyst, skeptic) and engage in structured debate. 
+        <b>Generates balanced, multi-perspective analysis</b> of complex news events.
+      </div>
+    </div>
+    
+    <div class="toggle-row" style="margin-bottom:16px">
+      <input type="hidden" name="debate_enabled" value="off">
+      <input type="checkbox" name="debate_enabled" value="on" id="debate-enabled"
+             {% if debate and debate.enabled %}checked{% endif %}
+             style="accent-color:var(--accent)"
+             onchange="document.getElementById('debate-settings').style.display=this.checked?'':'none'">
+      <label for="debate-enabled" class="toggle-label">Enable multi-agent debate</label>
+      {% if debate and debate.enabled %}
+        <span class="toggle-status toggle-on">ACTIVE</span>
+      {% else %}
+        <span class="toggle-status toggle-off">DISABLED</span>
+      {% endif %}
+    </div>
+    
+    <div id="debate-settings" style="display:{% if debate and debate.enabled %}''{% else %}none{% endif %};padding-left:20px;border-left:2px solid var(--border)">
+      {% if providers %}
+      <div class="form-row-2" style="margin-bottom:14px">
+        <div class="form-group" style="margin-bottom:0">
+          <label>Provider <span class="hint">— leave blank to inherit from AI Summary</span></label>
+          <select name="debate_provider_id" style="width:100%">
+            <option value="">— inherit from AI Summary —</option>
+            {% for p in providers %}
+            <option value="{{ p.id }}" {% if debate and debate.provider_id == p.id %}selected{% endif %}>
+              {{ p.name }} — {{ p.base_url }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      {% else %}
+      <input type="hidden" name="debate_provider_id" value="">
+      {% endif %}
+
+      <div class="form-group" style="margin-bottom:0">
+        <label>Debate Interval <span class="hint">min</span></label>
+        <input type="number" name="debate_interval" 
+               value="{{ debate.interval_minutes if debate else 30 }}" 
+               min="5" max="120">
+        <div style="font-size:10px;color:var(--muted);margin-top:4px">
+          How often to run debate job (default: 30 min)
+        </div>
+      </div>
+      
+      <div style="font-size:11px;color:var(--muted);margin-top:12px;padding:10px;background:var(--panel);border-radius:6px">
+        <b>Note:</b> Debate mode requires webhooks/channels with <code>ai_mode: debate</code>. 
+        Each debate uses 4 AI calls (one per agent perspective). Model is inherited from the selected provider.
+      </div>
+    </div>
+
     <div class="form-actions">
       <button type="submit" class="btn btn-primary">Save Settings</button>
     </div>
@@ -302,164 +366,19 @@
 
   <hr class="divider">
 
-  {# ── Providers Management ──────────────────────────────────────────────── #}
+  {# ── Providers Management (moved to AI Providers page) ──────────────────── #}
   <p class="section-title">AI Providers
-    <span class="hint">— manage api_key + base_url per provider; reference by name in jobs above</span>
+    <span class="hint">— manage providers and routing</span>
   </p>
-
-  <div id="providers-list" style="margin-bottom:16px">
-    {% if providers %}
-    <table style="width:100%;font-size:12px;border-collapse:collapse">
-      <thead>
-        <tr style="color:var(--muted);text-align:left;border-bottom:1px solid var(--border)">
-          <th style="padding:6px 8px">Name</th>
-          <th style="padding:6px 8px">Base URL</th>
-          <th style="padding:6px 8px">Model</th>
-          <th style="padding:6px 8px">API Key</th>
-          <th style="padding:6px 8px;text-align:right">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for p in providers %}
-        <tr style="border-bottom:1px solid var(--border)">
-          <td style="padding:8px;font-weight:600">{{ p.name }}</td>
-          <td style="padding:8px;font-family:monospace;font-size:11px;color:var(--muted)">{{ p.base_url }}</td>
-          <td style="padding:8px;font-family:monospace;font-size:11px;color:var(--muted)">{{ p.model or '—' }}</td>
-          <td style="padding:8px;font-family:monospace;font-size:11px;color:var(--muted)">{{ p.api_key[:12] }}…</td>
-          <td style="padding:8px;text-align:right;white-space:nowrap">
-            <button class="btn btn-outline" style="font-size:11px;padding:3px 8px"
-                    onclick="editProvider('{{ p.id }}')">Edit</button>
-            <button class="btn btn-outline" style="font-size:11px;padding:3px 8px"
-                    onclick="testProvider('{{ p.id }}', this)">Test</button>
-            <button class="btn btn-outline" style="font-size:11px;padding:3px 8px;color:var(--danger,#ef4444)"
-                    onclick="deleteProvider('{{ p.id }}','{{ p.name }}')">Delete</button>
-            <span id="provider-test-{{ p.id }}" style="font-size:11px;margin-left:4px"></span>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <div style="font-size:12px;color:var(--muted);padding:10px;background:var(--panel);border-radius:6px">
-      No providers configured. Add one below.
-    </div>
-    {% endif %}
+  
+  <div style="padding:12px 16px;background:var(--panel);border:1px solid var(--border);border-radius:8px;margin-bottom:16px">
+    <p style="font-size:13px;color:var(--text);margin-bottom:8px">
+      Provider management has been moved to a dedicated page for better organization.
+    </p>
+    <a href="/ai-providers" style="display:inline-block;padding:8px 16px;background:var(--accent);color:white;border-radius:6px;font-size:13px;font-weight:500;text-decoration:none">
+      Go to AI Providers & Routing →
+    </a>
   </div>
-
-  {# Add / Edit Provider form #}
-  <div id="provider-form-wrap" style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:8px">
-    <p class="section-title" style="margin-top:0" id="provider-form-title">Add Provider</p>
-    <input type="hidden" id="editing-provider-id" value="">
-    <div class="form-row-2" style="margin-bottom:10px">
-      <div class="form-group" style="margin-bottom:0">
-        <label>Name</label>
-        <input type="text" id="prov-name" placeholder="Together AI" style="width:100%">
-      </div>
-      <div class="form-group" style="margin-bottom:0">
-        <label>Base URL</label>
-        <input type="url" id="prov-base-url" placeholder="https://api.together.xyz/v1" style="width:100%">
-      </div>
-    </div>
-    <div class="form-row-2" style="margin-bottom:10px">
-      <div class="form-group" style="margin-bottom:0">
-        <label>API Key</label>
-        <div style="display:flex;gap:6px">
-          <input type="text" id="prov-api-key" placeholder="sk-..." autocomplete="off" style="flex:1;font-family:monospace;font-size:12px">
-          <button type="button" class="btn btn-outline" style="font-size:11px;padding:3px 8px;white-space:nowrap"
-                  onclick="var el=document.getElementById('prov-api-key');el.type=el.type==='password'?'text':'password';this.textContent=el.type==='password'?'Show':'Hide'">Show</button>
-        </div>
-      </div>
-      <div class="form-group" style="margin-bottom:0">
-        <label>Model <span class="hint">— default model for this provider (optional)</span></label>
-        <input type="text" id="prov-model" placeholder="e.g. google/gemma-3n-e4b-it" style="width:100%;font-family:monospace;font-size:12px">
-      </div>
-    </div>
-    <div style="display:flex;gap:8px;align-items:center">
-      <button class="btn btn-primary" style="font-size:12px" onclick="saveProvider()">Save Provider</button>
-      <button class="btn btn-outline" style="font-size:12px" onclick="resetProviderForm()">Cancel</button>
-      <span id="provider-save-msg" style="font-size:12px;color:var(--muted)"></span>
-    </div>
-  </div>
-
-  <script>
-  function resetProviderForm() {
-    document.getElementById('editing-provider-id').value = '';
-    document.getElementById('prov-name').value = '';
-    document.getElementById('prov-base-url').value = '';
-    document.getElementById('prov-api-key').value = '';
-    document.getElementById('prov-model').value = '';
-    document.getElementById('provider-form-title').textContent = 'Add Provider';
-    document.getElementById('provider-save-msg').textContent = '';
-  }
-
-  async function editProvider(id) {
-    const res = await fetch(`/api/providers/${id}`);
-    if (!res.ok) return;
-    const p = await res.json();
-    document.getElementById('editing-provider-id').value = p.id;
-    document.getElementById('prov-name').value = p.name || '';
-    document.getElementById('prov-base-url').value = p.base_url || '';
-    document.getElementById('prov-api-key').value = p.api_key || '';
-    document.getElementById('prov-model').value = p.model || '';
-    document.getElementById('provider-form-title').textContent = 'Edit Provider: ' + p.name;
-    document.getElementById('provider-form-wrap').scrollIntoView({behavior:'smooth'});
-  }
-
-  async function saveProvider() {
-    const id = document.getElementById('editing-provider-id').value;
-    const body = {
-      name: document.getElementById('prov-name').value.trim(),
-      base_url: document.getElementById('prov-base-url').value.trim(),
-      api_key: document.getElementById('prov-api-key').value.trim(),
-      model: document.getElementById('prov-model').value.trim(),
-    };
-    const msg = document.getElementById('provider-save-msg');
-    if (!body.name || !body.base_url || !body.api_key) {
-      msg.textContent = 'Name, Base URL and API Key are required.';
-      msg.style.color = 'var(--danger,#ef4444)';
-      return;
-    }
-    msg.textContent = 'Saving…'; msg.style.color = 'var(--muted)';
-    const url = id ? `/api/providers/${id}` : '/api/providers';
-    const method = id ? 'PUT' : 'POST';
-    const res = await fetch(url, {method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-    if (res.ok) {
-      msg.textContent = 'Saved!'; msg.style.color = 'var(--accent)';
-      htmx.ajax('GET', '/partials/settings-ai', {target: '#tab-panel-ai', swap: 'innerHTML'});
-    } else {
-      msg.textContent = 'Error saving.'; msg.style.color = 'var(--danger,#ef4444)';
-    }
-  }
-
-  async function testProvider(id, btn) {
-    const el = document.getElementById('provider-test-' + id);
-    el.textContent = 'Testing…'; el.style.color = 'var(--muted)';
-    btn.disabled = true;
-    try {
-      const res = await fetch(`/api/providers/${id}/test`, {method:'POST'});
-      const data = await res.json();
-      if (data.ok) {
-        el.textContent = `✓ OK  ${data.ms}ms  ${data.tokens || ''}tok`;
-        el.style.color = 'var(--success,#22c55e)';
-      } else {
-        el.textContent = `✗ ${data.error || 'Failed'}`;
-        el.style.color = 'var(--danger,#ef4444)';
-      }
-    } catch(e) {
-      el.textContent = '✗ Network error'; el.style.color = 'var(--danger,#ef4444)';
-    }
-    btn.disabled = false;
-    setTimeout(() => { el.textContent = ''; }, 8000);
-  }
-
-  async function deleteProvider(id, name) {
-    if (!confirm('Delete provider "' + name + '"?')) return;
-    const res = await fetch(`/api/providers/${id}`, {method:'DELETE'});
-    if (res.ok) {
-      htmx.ajax('GET', '/partials/settings-ai', {target: '#tab-panel-ai', swap: 'innerHTML'});
-    }
-  }
-  </script>
 
   <hr class="divider">
 

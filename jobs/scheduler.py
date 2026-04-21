@@ -163,55 +163,56 @@ async def crawl_job(redis: aioredis.Redis) -> None:
                 },
             )
         )
-    current_cfg = _load_config()
-    crawler = current_cfg.get("crawler", {})
-    active_cats = {
-        c["id"] for c in current_cfg.get("categories", []) if c.get("enabled", True)
-    }
-    all_sources = _load_sources()
-    filtered = [
-        s
-        for s in all_sources
-        if s.get("enabled", True) and s.get("category", "world") in active_cats
-    ]
-    if not filtered:
-        await log_system_event(
-            "crawl_job",
-            started,
-            status="skipped",
-            metadata={"reason": "no enabled sources"},
-        )
-        return
-
-    sources_per_tick = crawler.get("sources_per_tick", 3)
-    all_ids = [s["id"] for s in filtered]
-    source_map = {s["id"]: s for s in filtered}
-
-    # Pick sources whose next_crawl_at is due (or never scheduled)
-    due_ids = await get_due_source_ids(redis, all_ids, limit=sources_per_tick)
-    if not due_ids:
-        await log_system_event(
-            "crawl_job",
-            started,
-            status="skipped",
-            metadata={"reason": "no sources due", "eligible": len(filtered)},
-        )
-        return
-
-    batch = [source_map[sid] for sid in due_ids if sid in source_map]
-    logger.info(f"=== Crawl tick: {len(batch)} sources due ({due_ids}) ===")
-
-    default_interval_sec = crawler.get("default_crawl_interval_minutes", 45) * 60
-    cat_intervals = crawler.get("category_crawl_interval_minutes", {})
-    source_intervals = {
-        s["id"]: cat_intervals.get(
-            s.get("category", ""), crawler.get("default_crawl_interval_minutes", 45)
-        )
-        * 60
-        for s in batch
-    }
-
+    
     try:
+        current_cfg = _load_config()
+        crawler = current_cfg.get("crawler", {})
+        active_cats = {
+            c["id"] for c in current_cfg.get("categories", []) if c.get("enabled", True)
+        }
+        all_sources = _load_sources()
+        filtered = [
+            s
+            for s in all_sources
+            if s.get("enabled", True) and s.get("category", "world") in active_cats
+        ]
+        if not filtered:
+            await log_system_event(
+                "crawl_job",
+                started,
+                status="skipped",
+                metadata={"reason": "no enabled sources"},
+            )
+            return
+
+        sources_per_tick = crawler.get("sources_per_tick", 3)
+        all_ids = [s["id"] for s in filtered]
+        source_map = {s["id"]: s for s in filtered}
+
+        # Pick sources whose next_crawl_at is due (or never scheduled)
+        due_ids = await get_due_source_ids(redis, all_ids, limit=sources_per_tick)
+        if not due_ids:
+            await log_system_event(
+                "crawl_job",
+                started,
+                status="skipped",
+                metadata={"reason": "no sources due", "eligible": len(filtered)},
+            )
+            return
+
+        batch = [source_map[sid] for sid in due_ids if sid in source_map]
+        logger.debug(f"=== Crawl tick: {len(batch)} sources due ({due_ids}) ===")
+
+        default_interval_sec = crawler.get("default_crawl_interval_minutes", 45) * 60
+        cat_intervals = crawler.get("category_crawl_interval_minutes", {})
+        source_intervals = {
+            s["id"]: cat_intervals.get(
+                s.get("category", ""), crawler.get("default_crawl_interval_minutes", 45)
+            )
+            * 60
+            for s in batch
+        }
+
         results = await fetch_all_sources(
             sources=batch,
             redis=redis,
@@ -255,6 +256,11 @@ async def crawl_job(redis: aioredis.Redis) -> None:
                 )
             )
         await log_system_event("crawl_job", started, status="ok", metadata=meta)
+    except asyncio.CancelledError:
+        # Graceful shutdown — don't log as error
+        _job_states["crawl_all"] = "cancelled"
+        logger.info("Crawl job cancelled during shutdown")
+        raise  # Re-raise to let asyncio handle cleanup
     except Exception as exc:
         _job_states["crawl_all"] = "error"
         if ws_manager:
@@ -425,6 +431,10 @@ async def ai_job(redis: aioredis.Redis) -> None:
                 "config_groups": len(config_groups),
             },
         )
+    except asyncio.CancelledError:
+        _job_states["ai_rewrite"] = "cancelled"
+        logger.info("AI job cancelled during shutdown")
+        raise
     except Exception as exc:
         _job_states["ai_rewrite"] = "error"
         if ws_manager:
@@ -643,6 +653,10 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
                 f"across {len(synth_hooks)} hooks × {len(active_cats)} categories"
             )
 
+    except asyncio.CancelledError:
+        _job_states["topic_synthesis"] = "cancelled"
+        logger.info("Topic synthesis job cancelled during shutdown")
+        raise
     except Exception as exc:
         _job_states["topic_synthesis"] = "error"
         if ws_manager:
@@ -678,110 +692,116 @@ async def enrich_job(redis: aioredis.Redis) -> None:
     started = datetime.now(timezone.utc)
     _job_states["enrich"] = "running"
 
-    cfg = _load_config()
-    processing_cfg = cfg.get("processing", {})
-    if not processing_cfg.get("enabled", True):
-        _job_states["enrich"] = "idle"
-        return
+    try:
+        cfg = _load_config()
+        processing_cfg = cfg.get("processing", {})
+        if not processing_cfg.get("enabled", True):
+            _job_states["enrich"] = "idle"
+            return
 
-    ai_cfg = cfg.get("ai", {})
-    api_key, base_url, _ = _resolve_provider(ai_cfg)
-    batch_size = processing_cfg.get("enrich_batch_size", 10)
-    cluster_threshold = float(processing_cfg.get("cluster_threshold", 0.75))
+        ai_cfg = cfg.get("ai", {})
+        api_key, base_url, _ = _resolve_provider(ai_cfg)
+        batch_size = processing_cfg.get("enrich_batch_size", 10)
+        cluster_threshold = float(processing_cfg.get("cluster_threshold", 0.75))
 
-    article_ids = await pop_pending_enrichments(redis, count=batch_size)
-    if not article_ids:
-        _job_states["enrich"] = "idle"
-        return
+        article_ids = await pop_pending_enrichments(redis, count=batch_size)
+        if not article_ids:
+            _job_states["enrich"] = "idle"
+            return
 
-    # Fetch full article data in a single chunked pipeline (replaces N sequential get_article calls)
-    articles = await get_articles_batch(redis, article_ids)
+        # Fetch full article data in a single chunked pipeline (replaces N sequential get_article calls)
+        articles = await get_articles_batch(redis, article_ids)
 
-    if not articles:
-        _job_states["enrich"] = "idle"
-        return
+        if not articles:
+            _job_states["enrich"] = "idle"
+            return
 
-    logger.info(f"=== Enrich job: processing {len(articles)} articles ===")
+        logger.info(f"=== Enrich job: processing {len(articles)} articles ===")
 
-    # Step 1 — Entity extraction + sentiment (batch, up to 5 parallel)
-    enrich_results = await batch_enrich(articles, api_key=api_key, base_url=base_url)
+        # Step 1 — Entity extraction + sentiment (batch, up to 5 parallel)
+        enrich_results = await batch_enrich(articles, api_key=api_key, base_url=base_url)
 
-    done = 0
-    for art, enrichment in zip(articles, enrich_results):
-        article_id = art["id"]
-        category = art.get("category", "general")
-        entities = enrichment.get("entities", [])
-        sentiment = enrichment.get("sentiment", "neutral")
-        topic_id = ""
+        done = 0
+        for art, enrichment in zip(articles, enrich_results):
+            article_id = art["id"]
+            category = art.get("category", "general")
+            entities = enrichment.get("entities", [])
+            sentiment = enrichment.get("sentiment", "neutral")
+            topic_id = ""
 
-        # Step 2 — Embedding
-        embed_text = embed_text_for_article(art)
-        embedding = await get_embedding(
-            embed_text,
-            api_key=api_key,
-            base_url=base_url,
-            model=processing_cfg.get("embedding_model"),
-        )
+            # Step 2 — Embedding (uses provider routing)
+            embed_text = embed_text_for_article(art)
+            embedding = await get_embedding(embed_text)
 
-        # Step 3 — Topic clustering (only if embedding succeeded)
-        if embedding:
-            await save_embedding(redis, article_id, embedding)
+            # Step 3 — Topic clustering (only if embedding succeeded)
+            if embedding:
+                await save_embedding(redis, article_id, embedding)
+                try:
+                    topic_id = await assign_topic(
+                        redis,
+                        article_id,
+                        embedding,
+                        category,
+                        threshold=cluster_threshold,
+                    )
+                except NotImplementedError:
+                    logger.debug(
+                        "[enrich_job] clusterer._find_matching_topic not yet implemented"
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"[enrich_job] clustering failed for {article_id}: {exc}"
+                    )
+
+            # Step 4 — Persist enrichment fields on article hash
+            art["entities"] = entities
+            art["sentiment"] = sentiment
+            art["topic_id"] = topic_id
+            await save_article_enrichment(redis, article_id, entities, sentiment, topic_id)
+
+            # Step 5 — Index to Weaviate (vector store for RAG)
+            if embedding:
+                indexed = await index_article(art, embedding)
+                if not indexed:
+                    logger.debug(f"[enrich_job] Weaviate indexing skipped for {article_id}")
+
+            # Step 6 — Assign to story cluster
             try:
-                topic_id = await assign_topic(
-                    redis,
-                    article_id,
-                    embedding,
-                    category,
-                    threshold=cluster_threshold,
-                )
-            except NotImplementedError:
-                logger.debug(
-                    "[enrich_job] clusterer._find_matching_topic not yet implemented"
-                )
+                story_id = await assign_story(redis, art)
+                if story_id:
+                    await redis.hset(f"news:{article_id}", "story_id", story_id)
             except Exception as exc:
-                logger.warning(
-                    f"[enrich_job] clustering failed for {article_id}: {exc}"
+                logger.debug(
+                    f"[enrich_job] story assignment skipped for {article_id}: {exc}"
                 )
 
-        # Step 4 — Persist enrichment fields on article hash
-        art["entities"] = entities
-        art["sentiment"] = sentiment
-        art["topic_id"] = topic_id
-        await save_article_enrichment(redis, article_id, entities, sentiment, topic_id)
+            # Step 7 — Archive to News Lake (R2 cold storage)
+            lake = get_lake()
+            if lake:
+                await lake.archive_article(art)
 
-        # Step 5 — Index to Weaviate (vector store for RAG)
-        if embedding:
-            indexed = await index_article(art, embedding)
-            if not indexed:
-                logger.debug(f"[enrich_job] Weaviate indexing skipped for {article_id}")
+            done += 1
 
-        # Step 6 — Assign to story cluster
-        try:
-            story_id = await assign_story(redis, art)
-            if story_id:
-                await redis.hset(f"news:{article_id}", "story_id", story_id)
-        except Exception as exc:
-            logger.debug(
-                f"[enrich_job] story assignment skipped for {article_id}: {exc}"
-            )
-
-        # Step 7 — Archive to News Lake (R2 cold storage)
-        lake = get_lake()
-        if lake:
-            await lake.archive_article(art)
-
-        done += 1
-
-    dur_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
-    _job_states["enrich"] = "idle"
-    _job_last_duration_ms["enrich"] = dur_ms
-    logger.info(f"Enrich job: {done}/{len(articles)} articles enriched in {dur_ms}ms")
-    await log_system_event(
-        "enrich_job",
-        started,
-        status="ok",
-        metadata={"processed": done, "duration_ms": dur_ms},
-    )
+        dur_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+        _job_states["enrich"] = "idle"
+        _job_last_duration_ms["enrich"] = dur_ms
+        logger.info(f"Enrich job: {done}/{len(articles)} articles enriched in {dur_ms}ms")
+        await log_system_event(
+            "enrich_job",
+            started,
+            status="ok",
+            metadata={"processed": done, "duration_ms": dur_ms},
+        )
+    
+    except asyncio.CancelledError:
+        _job_states["enrich"] = "cancelled"
+        logger.info("Enrich job cancelled during shutdown")
+        raise
+    except Exception as exc:
+        _job_states["enrich"] = "error"
+        logger.error(f"Enrich job failed: {exc}")
+        await log_system_event("enrich_job", started, status="error", error_msg=str(exc))
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -812,6 +832,10 @@ async def trend_job(redis: aioredis.Redis) -> None:
                 "duration_ms": dur_ms,
             },
         )
+    except asyncio.CancelledError:
+        _job_states["trend"] = "cancelled"
+        logger.info("Trend job cancelled during shutdown")
+        raise
     except Exception as exc:
         _job_states["trend"] = "error"
         await log_system_event("trend_job", started, status="error", error_msg=str(exc))
@@ -829,7 +853,9 @@ async def debate_scheduler_job(redis: aioredis.Redis) -> None:
         return
 
     ai_cfg = cfg.get("ai", {})
-    api_key, base_url, model_override = _resolve_provider(ai_cfg)
+    api_key, base_url, model_override = _resolve_provider(
+        ai_cfg, provider_id=debate_cfg.get("provider_id")
+    )
     wh = cfg.get("webhook", {})
     tg = cfg.get("telegram", {})
     tw = cfg.get("twitter", {})
@@ -854,7 +880,7 @@ async def debate_scheduler_job(redis: aioredis.Redis) -> None:
             twitter_accounts=debate_tw,
             api_key=api_key or None,
             base_url=base_url or None,
-            model=model_override or debate_cfg.get("model", ""),
+            model=model_override or None,
         )
         dur_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
         _job_states["debate"] = "idle"
@@ -865,6 +891,10 @@ async def debate_scheduler_job(redis: aioredis.Redis) -> None:
             status="ok",
             metadata={"debated": count, "duration_ms": dur_ms},
         )
+    except asyncio.CancelledError:
+        _job_states["debate"] = "cancelled"
+        logger.info("Debate job cancelled during shutdown")
+        raise
     except Exception as exc:
         _job_states["debate"] = "error"
         await log_system_event(
@@ -921,6 +951,10 @@ async def newsletter_job(redis: aioredis.Redis) -> None:
                 "smtp": bool(smtp_cfg.get("host")),
             },
         )
+    except asyncio.CancelledError:
+        _job_states["newsletter"] = "cancelled"
+        logger.info("Newsletter job cancelled during shutdown")
+        raise
     except Exception as exc:
         _job_states["newsletter"] = "error"
         await log_system_event(

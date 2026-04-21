@@ -1,24 +1,15 @@
 """
 Phase 2 – Embeddings: generate semantic vectors for articles.
-Uses the same OpenAI-compatible provider configured in settings.yaml.
+Uses provider routing from settings.yaml (embedding action).
 Falls back gracefully if the provider doesn't support embeddings.
 """
 
 import logging
 
-import yaml
-
+from ai.provider_routing import get_provider_for_action
 from ai.rewriter import get_openai_client
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_EMBED_MODEL = "text-embedding-3-small"
-
-
-def _load_embedding_config() -> dict:
-    with open("config/settings.yaml") as f:
-        cfg = yaml.safe_load(f)
-    return cfg.get("processing", {})
 
 
 async def get_embedding(
@@ -33,13 +24,15 @@ async def get_embedding(
 
     The returned vector is normalized to unit length for efficient cosine similarity:
         cosine_sim(a, b) = dot(a, b)  (since |a| = |b| = 1)
+    
+    If api_key/base_url/model are not provided, uses provider routing (embedding action).
     """
-    processing_cfg = _load_embedding_config()
-    resolved_model = (
-        model
-        or processing_cfg.get("embedding_model")
-        or _DEFAULT_EMBED_MODEL
-    )
+    # Use provider routing if credentials not explicitly provided
+    if not api_key or not base_url or not model:
+        routed_key, routed_url, routed_model = get_provider_for_action("embedding")
+        api_key = api_key or routed_key
+        base_url = base_url or routed_url
+        model = model or routed_model
 
     # Trim text to keep costs low — title + first 512 chars of content is enough
     text = text[:1024].strip()
@@ -50,11 +43,11 @@ async def get_embedding(
 
     try:
         response = await client.embeddings.create(
-            model=resolved_model,
+            model=model,
             input=text,
         )
     except Exception as exc:
-        logger.warning(f"[embedder] embedding call failed ({resolved_model}): {exc}")
+        logger.warning(f"[embedder] embedding call failed ({model}): {exc}")
         return None
 
     if not response.data:

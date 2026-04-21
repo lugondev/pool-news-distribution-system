@@ -77,6 +77,7 @@ def _ai_partial_ctx(cfg: dict, request: Request, **extra) -> dict:
         "providers": ai_cfg.get("providers", []),
         "ai_configs": ai_cfg.get("configs", []),
         "crawler": cfg.get("crawler", {}),
+        "debate": cfg.get("debate", {}),
         "builtin_tone_prompts": TONE_PROMPTS,
         "builtin_prompt_template": SUMMARIZE_PROMPT.replace("{length_guidance}", length_guidance),
         **extra,
@@ -115,6 +116,9 @@ async def settings_ai_update(
     topic_synthesis_temperature: float = Form(0.5),
     topic_synthesis_min_articles: int = Form(5),
     topic_synthesis_max_articles: int = Form(15),
+    debate_enabled: str = Form("off"),
+    debate_provider_id: str = Form(""),
+    debate_interval: int = Form(30),
 ):
     delay_parts = domain_delay.replace(" ", "").split("-")
     try:
@@ -157,10 +161,15 @@ async def settings_ai_update(
         "domain_delay_min": delay_min,
         "domain_delay_max": delay_max,
     })
+    cfg["debate"] = {
+        "enabled": debate_enabled == "on",
+        "provider_id": debate_provider_id.strip() or None,
+        "interval_minutes": max(5, min(debate_interval, 120)),
+    }
     write_settings(cfg)
     logger.info(
         f"Settings updated: crawl={crawl_interval}min×{stagger_groups}groups, "
-        f"ai={ai_interval}min, synthesis={topic_synthesis_enabled}"
+        f"ai={ai_interval}min, synthesis={topic_synthesis_enabled}, debate={debate_enabled}"
     )
     return templates.TemplateResponse(
         "partials/settings_ai.html",

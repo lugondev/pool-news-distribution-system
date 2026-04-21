@@ -294,7 +294,7 @@ async def fetch_all_sources(
     total_saved = sum(r["saved"] for r in results)
     total_found = sum(r["found"] for r in results)
     failed = sum(1 for r in results if r["errors"] > 0)
-    logger.info(
+    logger.debug(
         f"Crawl tick done: {total_found} found, {total_saved} saved, "
         f"{failed} failed from {len(results)} sources"
     )
