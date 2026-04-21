@@ -18,44 +18,39 @@ def get_provider_for_action(action: str) -> tuple[str, str, str]:
         (api_key, base_url, model) tuple
         
     For embedding action:
-        - If routing is 'system', uses first provider's credentials + embedding_model fallback
-        - If routing is a provider_id, uses that provider's embedding_model (or model if not set)
+        - Uses dedicated embedding.providers section
+        - Requires active_provider_id to be configured
+        - Raises ValueError if not configured or provider not found
     """
     cfg = cached_yaml("config/settings.yaml")
+    
+    # Special handling for embedding action
+    if action == "embedding":
+        embedding_cfg = cfg.get("embedding", {})
+        providers = embedding_cfg.get("providers", [])
+        active_id = embedding_cfg.get("active_provider_id")
+        
+        # Must have active_provider_id configured
+        if not active_id:
+            raise ValueError("No active embedding provider configured. Please set one in /embedding-providers")
+        
+        # Find active provider
+        for p in providers:
+            if p.get("id") == active_id:
+                return (
+                    p.get("api_key", ""),
+                    p.get("base_url", "https://api.openai.com/v1"),
+                    p.get("model", "text-embedding-3-small"),
+                )
+        
+        raise ValueError(f"Active embedding provider '{active_id}' not found in providers list")
+    
+    # For other actions (rewrite, synthesis, debate, newsletter)
     ai_cfg = cfg.get("ai", {})
     
     # Get routing config
     routing = ai_cfg.get("provider_routing", {})
     provider_id = routing.get(action)
-    
-    # Special handling for embedding action
-    if action == "embedding":
-        # If routing is 'system', use first provider
-        if provider_id == "system" or not provider_id:
-            providers = ai_cfg.get("providers", [])
-            if providers:
-                p = providers[0]
-                # Try embedding_model first, fallback to processing.embedding_model
-                model = p.get("embedding_model")
-                if not model:
-                    processing_cfg = cfg.get("processing", {})
-                    model = processing_cfg.get("embedding_model", "text-embedding-3-small")
-                return (
-                    p.get("api_key", ""),
-                    p.get("base_url", "https://api.openai.com/v1"),
-                    model,
-                )
-        # Otherwise find the specified provider
-        else:
-            for p in ai_cfg.get("providers", []):
-                if p.get("id") == provider_id:
-                    # Use embedding_model if available, otherwise fall back to model
-                    model = p.get("embedding_model") or p.get("model", "")
-                    return (
-                        p.get("api_key", ""),
-                        p.get("base_url", "https://api.openai.com/v1"),
-                        model,
-                    )
     
     # Fallback to legacy provider_id if routing not configured
     if not provider_id:

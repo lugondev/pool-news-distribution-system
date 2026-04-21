@@ -20,6 +20,15 @@ async def ai_providers_page(request: Request):
     )
 
 
+@router.get("/embedding-providers", response_class=HTMLResponse)
+async def embedding_providers_page(request: Request):
+    """Embedding Provider management page."""
+    return templates.TemplateResponse(
+        "embedding_providers.html",
+        {"request": request, "active_page": "embedding-providers"}
+    )
+
+
 @router.get("/partials/ai-providers-config", response_class=HTMLResponse)
 async def ai_providers_partial(request: Request):
     """Render AI provider routing config partial."""
@@ -45,19 +54,17 @@ async def ai_providers_update(
     synthesis: str = Form(""),
     debate: str = Form(""),
     newsletter: str = Form(""),
-    embedding: str = Form("system"),
 ):
     """Update AI provider routing configuration."""
     cfg = read_settings()
     ai_cfg = cfg.setdefault("ai", {})
     
-    # Update routing
+    # Update routing (embedding is now managed separately)
     routing = {
         "rewrite": rewrite,
         "synthesis": synthesis,
         "debate": debate,
         "newsletter": newsletter,
-        "embedding": embedding,
     }
     ai_cfg["provider_routing"] = routing
     

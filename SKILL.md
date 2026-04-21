@@ -195,6 +195,30 @@ curl -s -X POST $API/settings/ai/debate/toggle | jq .
 
 Debate mode runs multi-agent AI debates (4 perspectives) on stories with enough articles. Configurable via Settings UI → AI → Multi-Agent Debate.
 
+### Get social article settings
+
+```bash
+curl -s $API/settings/social-article | jq .
+```
+
+Returns current social article configuration (enabled, provider_id, default_style, default_category, default_hours, min_articles, max_articles, temperature, max_tokens, interval_minutes, auto_generate).
+
+### Update social article settings
+
+```bash
+curl -s -X PUT $API/settings/social-article \
+  -H "Content-Type: application/json" \
+  -d '{"enabled":true,"provider_id":"together-ai","default_style":"blog_formal","auto_generate":true}' | jq .
+```
+
+Partial update — fields: `enabled`, `provider_id`, `default_style`, `default_category`, `default_hours`, `min_articles`, `max_articles`, `temperature`, `max_tokens`, `interval_minutes`, `auto_generate`.
+
+### Toggle social article on/off
+
+```bash
+curl -s -X POST $API/settings/social-article/toggle | jq .
+```
+
 ## AI Providers
 
 Providers hold API credentials (api_key, base_url, model). Multiple providers can be configured.
@@ -624,6 +648,101 @@ curl -s "$API/logs/system?event_type=webhook_schedule&page=1&limit=20" | jq .
 ```
 
 Filter system logs by `event_type=webhook_schedule`. Each entry includes `metadata.schedule_id`, `metadata.article_count`, `metadata.webhook_id` or `metadata.telegram_id`, and execution status.
+
+## Social Articles (Long-form Content)
+
+Social Articles are AI-generated long-form content (2000-3000 words) with structured sections and detailed image prompts for DALL-E/Midjourney.
+
+### List style presets
+
+```bash
+curl -s $API/social-article/styles | jq .
+```
+
+Returns available style presets: `blog_formal`, `blog_casual`, `linkedin`, `medium`, `newsletter`, `twitter_thread`. Each preset includes tone, length, section count, and description.
+
+### Generate a social article
+
+```bash
+curl -s -X POST $API/social-article/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider_id": "together-ai",
+    "category": "tech",
+    "style_preset": "blog_formal",
+    "hours": 24,
+    "min_articles": 3,
+    "max_articles": 20,
+    "temperature": 0.7,
+    "max_tokens": 4000,
+    "save": true
+  }' | jq .
+```
+
+**Fields:**
+- `provider_id` (optional): AI provider ID (null = use default from settings)
+- `category` (optional): Filter articles by category (null = all categories)
+- `style_preset` (optional): Style preset ID (default: blog_formal)
+- `custom_style` (optional): Custom style object (overrides preset)
+- `hours` (default 24): Look back N hours for source articles
+- `min_articles` (default 3): Minimum articles required
+- `max_articles` (default 20): Maximum articles to analyze
+- `temperature` (default 0.7): AI temperature
+- `max_tokens` (default 4000): Max tokens for AI response
+- `save` (default true): Save to Redis after generation
+
+Returns generated article with `title`, `subtitle`, `sections` (each with heading, content, image_prompt), `thumbnail_prompt`, `tags`, `estimated_read_time`, and `metadata`.
+
+### Quick generate (with defaults)
+
+```bash
+curl -s -X POST $API/social-article/quick-generate | jq .
+```
+
+Generates article using default settings from config. Requires `social_article.enabled=true` in settings.
+
+### List recent articles
+
+```bash
+curl -s "$API/social-article/list?limit=10" | jq .
+```
+
+Returns recent social articles (metadata only): `id`, `title`, `subtitle`, `tags`, `estimated_read_time`, `metadata`.
+
+### Get single article
+
+```bash
+curl -s $API/social-article/{article_id} | jq .
+```
+
+Returns full article with all sections and image prompts.
+
+### Delete an article
+
+```bash
+curl -s -X DELETE $API/social-article/{article_id} | jq .
+```
+
+Removes article from Redis and index.
+
+### Custom style example
+
+```bash
+curl -s -X POST $API/social-article/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "category": "ai",
+    "custom_style": {
+      "name": "Technical Deep Dive",
+      "description": "In-depth technical analysis with code examples",
+      "tone": "formal",
+      "length": "3000-4000 words",
+      "sections": 6
+    },
+    "hours": 48,
+    "save": true
+  }' | jq .
+```
 
 ## Telegram Channels
 
@@ -1177,6 +1296,15 @@ redis-cli DEL news:dedup:simhashes
 | POST | `/api/settings/ai/toggle` | Toggle AI summary on/off |
 | POST | `/api/settings/ai/synthesis/toggle` | Toggle topic synthesis on/off |
 | POST | `/api/settings/ai/debate/toggle` | Toggle debate mode on/off |
+| GET | `/api/settings/social-article` | Get social article settings |
+| PUT | `/api/settings/social-article` | Update social article settings |
+| POST | `/api/settings/social-article/toggle` | Toggle social article on/off |
+| GET | `/api/social-article/styles` | List style presets |
+| POST | `/api/social-article/generate` | Generate social article |
+| POST | `/api/social-article/quick-generate` | Quick generate with defaults |
+| GET | `/api/social-article/list?limit=` | List recent articles |
+| GET | `/api/social-article/{id}` | Get single article |
+| DELETE | `/api/social-article/{id}` | Delete article |
 | GET | `/api/providers` | List AI providers (api_key masked) |
 | GET | `/api/providers/{id}` | Get provider (full api_key) |
 | POST | `/api/providers` | Add provider |

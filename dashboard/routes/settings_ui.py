@@ -28,6 +28,11 @@ async def logs_page(request: Request):
     return templates.TemplateResponse("logs.html", {"request": request, "active_page": "logs"})
 
 
+@router.get("/social-articles", response_class=HTMLResponse)
+async def social_articles_page(request: Request):
+    return templates.TemplateResponse("social_articles.html", {"request": request, "active_page": "social_articles"})
+
+
 # ── General settings ──────────────────────────────────────────────────────────
 
 

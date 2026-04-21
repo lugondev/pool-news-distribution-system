@@ -9,8 +9,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
-from openai import AsyncOpenAI
-from tenacity import retry, stop_after_attempt, wait_exponential
+from openai import AsyncOpenAI, RateLimitError
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_not_exception_type
 
 import redis.asyncio as aioredis
 from ai.provider_utils import build_response_format, parse_ai_json, SCHEMA_LANG_SUMMARY, SCHEMA_TEST_SUMMARY
@@ -197,7 +197,11 @@ def _build_lang_spec(
     return count, reqs, fmt
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_not_exception_type(RateLimitError)
+)
 async def rewrite_article(
     article: dict,
     model: str | None = None,

@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from openai import APITimeoutError
+from openai import APITimeoutError, RateLimitError
 from ai.rewriter import rewrite_article, LANG_NAMES, TONE_PROMPTS, _load_ai_config, get_openai_client
 from ai.provider_utils import build_response_format, parse_ai_json
 from ai.style_transform import PLATFORM_PRESETS, OUTPUT_FORMAT_INSTRUCTIONS
@@ -251,6 +251,9 @@ async def process_rewrite(
     except (asyncio.TimeoutError, httpx.ReadTimeout, httpx.TimeoutException, APITimeoutError) as e:
         logger.error(f"Channel {channel['id']}: rewrite+style timeout for {article['id']} (>{timeout}s): {e}")
         raise ValueError(f"AI processing timeout after {timeout}s")
+    except RateLimitError as e:
+        logger.error(f"Channel {channel['id']}: rate limit hit for {article['id']}: {e}")
+        raise ValueError(f"AI rate limit exceeded: {str(e)}")
     except Exception as e:
         logger.error(f"Channel {channel['id']}: rewrite+style failed for {article['id']}: {e}")
         raise
@@ -326,6 +329,9 @@ async def process_synthetic(
     except (asyncio.TimeoutError, httpx.ReadTimeout, httpx.TimeoutException, APITimeoutError) as e:
         logger.error(f"Channel {channel['id']}: synthesis timeout for {category}: {e}")
         raise ValueError(f"AI synthesis timeout")
+    except RateLimitError as e:
+        logger.error(f"Channel {channel['id']}: rate limit hit for synthesis {category}: {e}")
+        raise ValueError(f"AI rate limit exceeded: {str(e)}")
     except Exception as e:
         logger.error(f"Channel {channel['id']}: synthesis failed for {category}: {e}")
         raise
@@ -401,6 +407,9 @@ async def process_debate(
     except (asyncio.TimeoutError, httpx.ReadTimeout, httpx.TimeoutException, APITimeoutError) as e:
         logger.error(f"Channel {channel['id']}: debate timeout for {category}: {e}")
         raise ValueError(f"AI debate timeout")
+    except RateLimitError as e:
+        logger.error(f"Channel {channel['id']}: rate limit hit for debate {category}: {e}")
+        raise ValueError(f"AI rate limit exceeded: {str(e)}")
     except Exception as e:
         logger.error(f"Channel {channel['id']}: debate generation failed for {category}: {e}")
         raise

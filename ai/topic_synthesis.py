@@ -14,8 +14,8 @@ import logging
 import hashlib
 from datetime import datetime, timezone
 
-from openai import AsyncOpenAI
-from tenacity import retry, stop_after_attempt, wait_exponential
+from openai import AsyncOpenAI, RateLimitError
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_not_exception_type
 
 import redis.asyncio as aioredis
 from ai.rewriter import get_openai_client, TONE_PROMPTS, _load_ai_config, LANG_NAMES
@@ -148,7 +148,11 @@ def _count_unique_sources(articles: list[dict]) -> int:
     return len(set(a.get("source_id", "") for a in articles if a.get("source_id")))
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_not_exception_type(RateLimitError)
+)
 async def synthesize_topic_articles(
     articles: list[dict],
     category: str,

@@ -41,6 +41,7 @@ The system is a pipeline: **RSS feeds → SimHash dedup → Redis → AI batch �
    - `ai_mode: rewrite` — only dispatch articles with ai_status="done"
    - `ai_mode: synthetic` — only dispatch synthetic articles (type="synthetic")
    - `ai_mode: debate` — only dispatch debate articles (type="debate")
+6. **Social article job** (default every 6 hours, optional): generates long-form articles (2000-3000 words) from recent news → AI creates structured content with multiple sections → generates detailed image prompts for thumbnails and illustrations → saves to Redis. **Only runs when social_article.enabled=true and social_article.auto_generate=true.**
 
 **Anti-ban measures** (`crawler/fetcher.py`): per-domain locks (same-domain feeds serialized), random delays (1-3s), User-Agent rotation, 429 retry with Retry-After, request order shuffling.
 
@@ -64,6 +65,14 @@ The system is a pipeline: **RSS feeds → SimHash dedup → Redis → AI batch �
   - `synthetic` — multi-article synthesis, only dispatches type="synthetic"
   - `debate` — multi-agent debate (4 perspectives), only dispatches type="debate"
 - **Debate mode**: Configurable via Settings UI → AI → Multi-Agent Debate. Toggle on/off, select AI provider (inherits from global if empty), set interval (5-120 min, default 30). Model is inherited from the selected provider. Requires webhooks/channels with `ai_mode: debate`.
+- **Social Article**: Long-form content generator (2000-3000 words) with AI-generated image prompts. Configurable via Settings UI → AI → Social Article Generator. Features:
+  - **Style presets**: blog_formal, blog_casual, linkedin, medium, newsletter, twitter_thread
+  - **Custom styles**: Define tone, length, section count, description
+  - **Image prompts**: Detailed DALL-E/Midjourney prompts for thumbnail + each section
+  - **Auto-generation**: Optional scheduled generation (default every 6h)
+  - **On-demand**: Manual generation via `/social-articles` UI
+  - **Storage**: Redis with 7-day TTL, indexed in `social_articles:index` sorted set
+  - **API**: Full CRUD via `/api/social-article/*` endpoints
 - **Webhook scheduling**: Cron-based scheduled webhook triggers managed via UI. SQLite stores schedules, APScheduler executes every minute. Scheduled webhooks respect ai_mode filters.
 - **Synthesis trigger modes**: `interval` (process all categories on schedule) vs `on_demand` (only categories with enabled synthetic hooks). On-demand mode prevents wasting API quota on unused categories.
 - **Age-based skip**: Articles older than category-specific thresholds (busy: 15min, moderate: 20min, quiet: 30min) are skipped during AI processing to save API quota. Configurable via `settings.yaml`. See `docs/AGE_SKIP_EXPLAINED.md` for details.
@@ -142,6 +151,9 @@ sqlite3 data/stats.db "SELECT endpoint, AVG(duration_ms) FROM channel_logs GROUP
 | `dashboard/routes/channels_api.py` | Pull-based content channels API (CRUD + feed/ack), global key auth |
 | `ai/channel_processor.py` | On-demand AI processing for channels — **MERGED**: rewrite+style in ONE call |
 | `ai/style_transform.py` | Style transform helpers (platform presets, format instructions) — used by channel_processor |
+| `ai/social_article.py` | Long-form article generator with image prompts (2000-3000 words, structured sections) |
+| `dashboard/routes/social_article_api.py` | REST API for social article generation, CRUD, and management |
+| `jobs/social_article_job.py` | Scheduled social article generation job (runs every 6h by default) |
 | `dashboard/config_io.py` | YAML I/O helpers (sources, settings, webhooks, channels, channels_config) |
 
 ## Content Channels (Pull-based API)

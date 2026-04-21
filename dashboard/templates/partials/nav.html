@@ -2,22 +2,24 @@
   <a href="/" {% if active_page == 'feed' %}class="active"{% endif %}>Feed</a>
   <a href="/newsletter" {% if active_page == 'newsletter' %}class="active"{% endif %}>Newsletter</a>
   <div class="dropdown">
-    <button class="dropdown-toggle {% if active_page in ['intelligence', 'debates', 'rag', 'social_agents', 'social_sim'] %}active{% endif %}">AI ▾</button>
+    <button class="dropdown-toggle {% if active_page in ['intelligence', 'debates', 'rag', 'social_agents', 'social_sim', 'social_articles'] %}active{% endif %}">AI ▾</button>
     <div class="dropdown-menu">
       <a href="/intelligence" {% if active_page == 'intelligence' %}class="active"{% endif %}>Intelligence</a>
       <a href="/debates" {% if active_page == 'debates' %}class="active"{% endif %}>Debates</a>
       <a href="/rag" {% if active_page == 'rag' %}class="active"{% endif %}>RAG</a>
       <a href="/social-agents" {% if active_page == 'social_agents' %}class="active"{% endif %}>Social Agents</a>
       <a href="/social-sim" {% if active_page == 'social_sim' %}class="active"{% endif %}>Social Sim</a>
+      <a href="/social-articles" {% if active_page == 'social_articles' %}class="active"{% endif %}>Social Articles</a>
     </div>
   </div>
   <div class="dropdown">
-    <button class="dropdown-toggle {% if active_page in ['pipeline', 'sources', 'settings', 'ai-providers', 'schedules', 'logs'] %}active{% endif %}">System ▾</button>
+    <button class="dropdown-toggle {% if active_page in ['pipeline', 'sources', 'settings', 'ai-providers', 'embedding-providers', 'schedules', 'logs'] %}active{% endif %}">System ▾</button>
     <div class="dropdown-menu">
       <a href="/pipeline" {% if active_page == 'pipeline' %}class="active"{% endif %}>Pipeline</a>
       <a href="/sources" {% if active_page == 'sources' %}class="active"{% endif %}>Sources</a>
       <a href="/settings" {% if active_page == 'settings' %}class="active"{% endif %}>Settings</a>
       <a href="/ai-providers" {% if active_page == 'ai-providers' %}class="active"{% endif %}>AI Providers</a>
+      <a href="/embedding-providers" {% if active_page == 'embedding-providers' %}class="active"{% endif %}>Embedding Providers</a>
       <a href="/schedules" {% if active_page == 'schedules' %}class="active"{% endif %}>Schedules</a>
       <a href="/logs" {% if active_page == 'logs' %}class="active"{% endif %}>Logs</a>
     </div>

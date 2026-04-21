@@ -74,22 +74,10 @@
 
     <div class="form-group">
       <label>Embedding (Semantic vector generation)</label>
-      <select name="embedding">
-        <option value="system" {% if routing.get('embedding') == 'system' or not routing.get('embedding') %}selected{% endif %}>
-          System (Use first provider's embedding_model)
-        </option>
-        {% for p in providers %}
-        {% if p.get('embedding_model') %}
-        <option value="{{ p.id }}" {% if routing.get('embedding') == p.id %}selected{% endif %}>
-          {{ p.name }} — {{ p.embedding_model }}
-        </option>
-        {% endif %}
-        {% endfor %}
-      </select>
-      <span class="hint">Used for: Article embeddings, semantic search, topic clustering</span>
-      {% if routing.get('embedding') %}
-      <span class="provider-badge {{ routing.get('embedding') }}">Current: {{ routing.get('embedding') }}</span>
-      {% endif %}
+      <p class="hint" style="margin-bottom: 8px;">
+        Embedding providers are now managed separately. 
+        <a href="/embedding-providers" style="color: var(--accent);">Go to Embedding Providers →</a>
+      </p>
     </div>
 
     <button type="submit" class="btn btn-primary">Save Routing Configuration</button>
@@ -108,7 +96,6 @@
           <th style="padding:6px 8px">Name</th>
           <th style="padding:6px 8px">Base URL</th>
           <th style="padding:6px 8px">Model</th>
-          <th style="padding:6px 8px">Embedding Model</th>
           <th style="padding:6px 8px">API Key</th>
           <th style="padding:6px 8px;text-align:right">Actions</th>
         </tr>
@@ -119,7 +106,6 @@
           <td style="padding:8px;font-weight:600">{{ p.name }}</td>
           <td style="padding:8px;font-family:monospace;font-size:11px;color:var(--muted)">{{ p.base_url }}</td>
           <td style="padding:8px;font-family:monospace;font-size:11px;color:var(--muted)">{{ p.model or '—' }}</td>
-          <td style="padding:8px;font-family:monospace;font-size:11px;color:var(--muted)">{{ p.get('embedding_model') or '—' }}</td>
           <td style="padding:8px;font-family:monospace;font-size:11px;color:var(--muted)">{{ p.api_key[:12] }}…</td>
           <td style="padding:8px;text-align:right;white-space:nowrap">
             <button class="btn btn-outline" style="font-size:11px;padding:3px 8px"
@@ -164,14 +150,9 @@
                   onclick="var el=document.getElementById('prov-api-key');el.type=el.type==='password'?'text':'password';this.textContent=el.type==='password'?'Show':'Hide'">Show</button>
         </div>
       </div>
-      <div class="form-group" style="margin-bottom:0">
-        <label>Model <span class="hint">— default model for this provider (optional)</span></label>
-        <input type="text" id="prov-model" placeholder="e.g. google/gemma-3n-e4b-it" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:8px 12px;border-radius:6px;font-family:monospace;font-size:12px">
-      </div>
-    </div>
     <div class="form-group" style="margin-bottom:10px">
-      <label>Embedding Model <span class="hint">— for semantic search (optional)</span></label>
-      <input type="text" id="prov-embedding-model" placeholder="e.g. perplexity/pplx-embed-v1-0.6b" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:8px 12px;border-radius:6px;font-family:monospace;font-size:12px">
+      <label>Model <span class="hint">— default model for this provider</span></label>
+      <input type="text" id="prov-model" placeholder="e.g. google/gemma-3n-e4b-it" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:8px 12px;border-radius:6px;font-family:monospace;font-size:12px">
     </div>
     <div style="display:flex;gap:8px;align-items:center">
       <button class="btn btn-primary" style="font-size:12px" onclick="saveProvider()">Save Provider</button>
@@ -204,7 +185,6 @@ function resetProviderForm() {
   document.getElementById('prov-base-url').value = '';
   document.getElementById('prov-api-key').value = '';
   document.getElementById('prov-model').value = '';
-  document.getElementById('prov-embedding-model').value = '';
   document.getElementById('provider-form-title').textContent = 'Add Provider';
   document.getElementById('provider-save-msg').textContent = '';
 }
@@ -218,7 +198,6 @@ async function editProvider(id) {
   document.getElementById('prov-base-url').value = p.base_url || '';
   document.getElementById('prov-api-key').value = p.api_key || '';
   document.getElementById('prov-model').value = p.model || '';
-  document.getElementById('prov-embedding-model').value = p.embedding_model || '';
   document.getElementById('provider-form-title').textContent = 'Edit Provider: ' + p.name;
   document.getElementById('provider-form-wrap').scrollIntoView({behavior:'smooth'});
 }
@@ -230,7 +209,6 @@ async function saveProvider() {
     base_url: document.getElementById('prov-base-url').value.trim(),
     api_key: document.getElementById('prov-api-key').value.trim(),
     model: document.getElementById('prov-model').value.trim(),
-    embedding_model: document.getElementById('prov-embedding-model').value.trim(),
   };
   const msg = document.getElementById('provider-save-msg');
   if (!body.name || !body.base_url || !body.api_key) {

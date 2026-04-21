@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Embedding Providers — News Aggregator</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3e;
+      --text: #e2e8f0; --muted: #718096; --accent: #6366f1;
+      --green: #10b981; --red: #ef4444; --yellow: #f59e0b;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 24px; margin-bottom: 24px; }
+    .panel h3 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+    .panel .desc { font-size: 12px; color: var(--muted); margin-bottom: 18px; }
+
+    .btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: all 0.2s; }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover { background: #5558e3; }
+    .btn-success { background: var(--green); color: white; }
+    .btn-success:hover { background: #0ea472; }
+    .btn-danger { background: var(--red); color: white; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-sm { padding: 6px 12px; font-size: 12px; }
+
+    .form-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 16px; }
+    .form-group label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+    .form-group input, .form-group select {
+      background: var(--bg); color: var(--text); border: 1px solid var(--border);
+      padding: 8px 12px; border-radius: 6px; font-size: 13px;
+    }
+    .form-group input:focus, .form-group select:focus { outline: none; border-color: var(--accent); }
+
+    table { width: 100%; margin-top: 12px; border-collapse: collapse; }
+    thead tr { border-bottom: 1px solid var(--border); text-align: left; }
+    thead th { padding: 8px; font-size: 11px; color: var(--muted); text-transform: uppercase; }
+    tbody tr { border-bottom: 1px solid var(--border); }
+    tbody td { padding: 8px; font-size: 13px; }
+
+    .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+    .badge-active { background: rgba(16, 185, 129, 0.1); color: var(--green); }
+    .badge-inactive { background: rgba(113, 128, 150, 0.1); color: var(--muted); }
+
+    .alert { padding: 12px 16px; border-radius: 6px; font-size: 13px; margin-bottom: 16px; }
+    .alert-success { background: rgba(16, 185, 129, 0.1); border: 1px solid var(--green); color: var(--green); }
+    .alert-error { background: rgba(239, 68, 68, 0.1); border: 1px solid var(--red); color: var(--red); }
+
+    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; }
+    .modal.active { display: flex; align-items: center; justify-content: center; }
+    .modal-content { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 24px; max-width: 500px; width: 90%; }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .modal-header h3 { font-size: 16px; font-weight: 600; }
+    .modal-close { background: none; border: none; color: var(--muted); font-size: 24px; cursor: pointer; }
+    .modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  {% include 'partials/header.html' %}
+
+  <div class="container">
+    <div class="panel">
+      <h3>Embedding Providers</h3>
+      <p class="desc">Manage embedding model providers for RAG, semantic search, and content analysis.</p>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <div id="alert-container"></div>
+        <button class="btn btn-primary" onclick="openCreateModal()">+ Add Provider</button>
+      </div>
+
+      <div id="providers-list">
+        <p style="color:var(--muted);font-size:12px">Loading providers...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create/Edit Modal -->
+  <div id="provider-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modal-title">Add Embedding Provider</h3>
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+      </div>
+      <form id="provider-form">
+        <input type="hidden" id="original-id" value="">
+        <div class="form-group">
+          <label>Provider ID</label>
+          <input type="text" id="provider-id" required placeholder="e.g., openai-embed">
+        </div>
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" id="provider-name" required placeholder="e.g., OpenAI Embeddings">
+        </div>
+        <div class="form-group">
+          <label>API Key</label>
+          <input type="password" id="provider-api-key" required placeholder="sk-...">
+        </div>
+        <div class="form-group">
+          <label>Base URL</label>
+          <input type="url" id="provider-base-url" required placeholder="https://api.openai.com/v1">
+        </div>
+        <div class="form-group">
+          <label>Model</label>
+          <input type="text" id="provider-model" required placeholder="text-embedding-3-small">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    let providers = [];
+    let activeProviderId = null;
+
+    // Load providers on page load
+    async function loadProviders() {
+      try {
+        const res = await fetch('/api/embedding-providers');
+        const data = await res.json();
+        providers = data.providers || [];
+        activeProviderId = data.active_provider_id;
+        renderProviders();
+      } catch (err) {
+        showAlert('Failed to load providers: ' + err.message, 'error');
+      }
+    }
+
+    function renderProviders() {
+      const container = document.getElementById('providers-list');
+      if (providers.length === 0) {
+        container.innerHTML = '<p style="color:var(--muted);font-size:12px">No providers configured yet.</p>';
+        return;
+      }
+
+      const html = `
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Model</th>
+              <th>Base URL</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${providers.map(p => `
+              <tr>
+                <td><strong>${p.name}</strong></td>
+                <td><code style="font-size:11px;color:var(--muted)">${p.model}</code></td>
+                <td><code style="font-size:11px;color:var(--muted)">${p.base_url}</code></td>
+                <td>
+                  ${p.id === activeProviderId 
+                    ? '<span class="badge badge-active">ACTIVE</span>' 
+                    : '<span class="badge badge-inactive">Inactive</span>'}
+                </td>
+                <td>
+                  <button class="btn btn-sm btn-success" onclick="testProvider('${p.id}')">Test</button>
+                  ${p.id !== activeProviderId 
+                    ? `<button class="btn btn-sm btn-primary" onclick="setActive('${p.id}')">Set Active</button>` 
+                    : ''}
+                  <button class="btn btn-sm" onclick="editProvider('${p.id}')">Edit</button>
+                  <button class="btn btn-sm btn-danger" onclick="deleteProvider('${p.id}')">Delete</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+      container.innerHTML = html;
+    }
+
+    function openCreateModal() {
+      document.getElementById('modal-title').textContent = 'Add Embedding Provider';
+      document.getElementById('provider-form').reset();
+      document.getElementById('original-id').value = '';
+      document.getElementById('provider-modal').classList.add('active');
+    }
+
+    function editProvider(id) {
+      const provider = providers.find(p => p.id === id);
+      if (!provider) return;
+
+      document.getElementById('modal-title').textContent = 'Edit Embedding Provider';
+      document.getElementById('original-id').value = id;
+      document.getElementById('provider-id').value = provider.id;
+      document.getElementById('provider-name').value = provider.name;
+      document.getElementById('provider-api-key').value = provider.api_key;
+      document.getElementById('provider-base-url').value = provider.base_url;
+      document.getElementById('provider-model').value = provider.model;
+      document.getElementById('provider-modal').classList.add('active');
+    }
+
+    function closeModal() {
+      document.getElementById('provider-modal').classList.remove('active');
+    }
+
+    async function testProvider(id) {
+      try {
+        showAlert('Testing connection...', 'success');
+        const res = await fetch(`/api/embedding-providers/${id}/test`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+          showAlert(data.message, 'success');
+        } else {
+          showAlert('Test failed: ' + data.detail, 'error');
+        }
+      } catch (err) {
+        showAlert('Test failed: ' + err.message, 'error');
+      }
+    }
+
+    async function setActive(id) {
+      try {
+        const res = await fetch(`/api/embedding/active-provider?provider_id=${id}`, { method: 'PUT' });
+        const data = await res.json();
+        if (res.ok) {
+          showAlert('Active provider updated', 'success');
+          loadProviders();
+        } else {
+          showAlert('Failed: ' + data.detail, 'error');
+        }
+      } catch (err) {
+        showAlert('Failed: ' + err.message, 'error');
+      }
+    }
+
+    async function deleteProvider(id) {
+      if (!confirm('Delete this provider?')) return;
+      try {
+        const res = await fetch(`/api/embedding-providers/${id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (res.ok) {
+          showAlert('Provider deleted', 'success');
+          loadProviders();
+        } else {
+          showAlert('Failed: ' + data.detail, 'error');
+        }
+      } catch (err) {
+        showAlert('Failed: ' + err.message, 'error');
+      }
+    }
+
+    document.getElementById('provider-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const originalId = document.getElementById('original-id').value;
+      const isEdit = !!originalId;
+
+      const payload = {
+        id: document.getElementById('provider-id').value,
+        name: document.getElementById('provider-name').value,
+        api_key: document.getElementById('provider-api-key').value,
+        base_url: document.getElementById('provider-base-url').value,
+        model: document.getElementById('provider-model').value,
+      };
+
+      try {
+        const url = isEdit ? `/api/embedding-providers/${originalId}` : '/api/embedding-providers';
+        const method = isEdit ? 'PUT' : 'POST';
+        const res = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showAlert(isEdit ? 'Provider updated' : 'Provider created', 'success');
+          closeModal();
+          loadProviders();
+        } else {
+          showAlert('Failed: ' + data.detail, 'error');
+        }
+      } catch (err) {
+        showAlert('Failed: ' + err.message, 'error');
+      }
+    });
+
+    function showAlert(message, type) {
+      const container = document.getElementById('alert-container');
+      container.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
+      setTimeout(() => { container.innerHTML = ''; }, 5000);
+    }
+
+    // Load on page load
+    loadProviders();
+  </script>
+</body>
+</html>

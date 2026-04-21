@@ -7,7 +7,8 @@ import json
 import logging
 from typing import Any
 
-from tenacity import retry, stop_after_attempt, wait_exponential
+from openai import RateLimitError
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_not_exception_type
 
 from ai.rewriter import get_openai_client, _load_ai_config
 from ai.provider_utils import build_response_format, parse_ai_json, SCHEMA_ENRICHMENT
@@ -25,7 +26,11 @@ Respond ONLY in JSON, no explanation:
 {{"entities": ["Entity1", "Entity2"], "sentiment": "positive|negative|neutral"}}"""
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_not_exception_type(RateLimitError)
+)
 async def enrich_article(
     article: dict[str, Any],
     api_key: str | None = None,

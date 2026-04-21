@@ -35,7 +35,8 @@ from email.mime.text import MIMEText
 from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
-from tenacity import retry, stop_after_attempt, wait_exponential
+from openai import RateLimitError
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_not_exception_type
 
 from ai.rewriter import get_openai_client, _load_ai_config
 from ai.provider_utils import build_response_format, parse_ai_json, SCHEMA_NEWSLETTER
@@ -93,7 +94,11 @@ Guidelines:
 
 # ── AI call ───────────────────────────────────────────────────────────────────
 
-@retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=2, max=8))
+@retry(
+    stop=stop_after_attempt(2),
+    wait=wait_exponential(multiplier=1, min=2, max=8),
+    retry=retry_if_not_exception_type(RateLimitError)
+)
 async def _call_newsletter_ai(
     articles_by_category: dict[str, list[dict]],
     language: str,

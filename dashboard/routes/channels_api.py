@@ -729,8 +729,9 @@ async def channel_next(
         )
         raise
     except ValueError as e:
-        # Catch timeout errors from AI processing
-        if "timeout" in str(e).lower():
+        # Catch timeout and rate limit errors from AI processing
+        error_msg = str(e).lower()
+        if "timeout" in error_msg:
             duration_ms = int((time.time() - start_time) * 1000)
             await log_channel_request(
                 channel_id=ch_id,
@@ -744,6 +745,20 @@ async def channel_next(
                 error_msg=str(e),
             )
             raise HTTPException(504, str(e))
+        elif "rate limit" in error_msg:
+            duration_ms = int((time.time() - start_time) * 1000)
+            await log_channel_request(
+                channel_id=ch_id,
+                client_id=client_id,
+                endpoint="/next",
+                method="GET",
+                status_code=429,
+                auth_method=auth_method,
+                items_count=0,
+                duration_ms=duration_ms,
+                error_msg=str(e),
+            )
+            raise HTTPException(429, str(e))
         raise
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)

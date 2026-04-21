@@ -41,8 +41,8 @@ import logging
 from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
-from openai import AsyncOpenAI
-from tenacity import retry, stop_after_attempt, wait_exponential
+from openai import AsyncOpenAI, RateLimitError
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_not_exception_type
 
 from ai.provider_utils import build_response_format, parse_ai_json
 from ai.rewriter import LANG_NAMES, TONE_PROMPTS, _load_ai_config, get_openai_client
@@ -273,7 +273,11 @@ async def cache_styled(
     await redis.set(key, json.dumps(result, ensure_ascii=False), ex=ttl)
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_not_exception_type(RateLimitError)
+)
 async def _call_style_ai(
     prompt: str,
     model: str,
