@@ -39,13 +39,18 @@ _client_fingerprint: str | None = None
 def _load_ai_config() -> dict:
     cfg = cached_yaml(_SETTINGS_PATH)
     ai = cfg.get("ai", {})
-    # Inject the active provider's model as top-level "model" so all callers
-    # that do cfg.get("model") get the value from settings.yaml, not a hardcode.
-    if not ai.get("model"):
-        pid = ai.get("provider_id")
+    # Inject the active provider's credentials as top-level fields
+    # so all callers get the values from settings.yaml, not hardcoded defaults.
+    pid = ai.get("provider_id")
+    if pid:
         for p in ai.get("providers", []):
-            if p.get("id") == pid and p.get("model"):
-                ai = {**ai, "model": p["model"]}
+            if p.get("id") == pid:
+                if not ai.get("api_key") and p.get("api_key"):
+                    ai = {**ai, "api_key": p["api_key"]}
+                if not ai.get("base_url") and p.get("base_url"):
+                    ai = {**ai, "base_url": p["base_url"]}
+                if not ai.get("model") and p.get("model"):
+                    ai = {**ai, "model": p["model"]}
                 break
     return ai
 

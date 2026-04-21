@@ -8,10 +8,14 @@ from fastapi.responses import HTMLResponse
 
 from dashboard.config_io import (
     get_categories,
+    get_channels_config,
+    get_content_channels,
     get_telegram_channels,
     get_webhook_endpoints,
     read_settings,
     read_sources,
+    save_channels_config,
+    save_content_channels,
     save_telegram_channels,
     save_webhook_endpoints,
 )
@@ -462,3 +466,206 @@ async def telegram_test(request: Request, ch_id: str):
         return HTMLResponse(f'<span style="color:var(--red)">{error}</span>')
     except Exception as e:
         return HTMLResponse(f'<span style="color:var(--red)">{e}</span>')
+
+
+# ── Content Channels HTML routes ──────────────────────────────────────────────
+
+
+def _channels_ctx(request: Request, **extra) -> dict:
+    return {
+        "request": request,
+        "channels": get_content_channels(),
+        "channels_config": get_channels_config(),
+        "all_categories": _get_all_categories(),
+        "all_sources": _get_all_source_ids(),
+        "ai_configs": _get_ai_configs(),
+        **extra,
+    }
+
+
+@router.get("/partials/settings-channels", response_class=HTMLResponse)
+async def settings_channels_partial(request: Request):
+    return templates.TemplateResponse("partials/settings_channels.html", _channels_ctx(request))
+
+
+@router.post("/channels/global-config", response_class=HTMLResponse)
+async def channels_global_config_save(
+    request: Request,
+    global_api_key: str = Form(""),
+):
+    cfg = get_channels_config()
+    cfg["global_api_key"] = global_api_key.strip()
+    save_channels_config(cfg)
+    return templates.TemplateResponse(
+        "partials/settings_channels.html",
+        _channels_ctx(request, success="Global channel config saved"),
+    )
+
+
+@router.post("/channels/add", response_class=HTMLResponse)
+async def channel_add(
+    request: Request,
+    id: str = Form(...),
+    name: str = Form(...),
+    max_items_per_fetch: int = Form(20),
+    require_api_key: str = Form("true"),
+    ai_mode: str = Form("off"),
+    ai_config_id: str = Form(""),
+    target_language: str = Form(""),
+    payload_mode: str = Form("full"),
+    payload_fields: str = Form(""),
+    payload_template: str = Form(""),
+    filter_categories_mode: str = Form("all"),
+    filter_categories: str = Form(""),
+    filter_sources_mode: str = Form("all"),
+    filter_sources: str = Form(""),
+    filter_article_types_mode: str = Form("all"),
+    filter_article_types: str = Form(""),
+    # Style transform
+    platform: str = Form("custom"),
+    content_mode: str = Form("rewrite"),
+    output_format: str = Form("summary"),
+    ai_source: str = Form("system"),
+    style_source: str = Form("preset"),
+    style_max_length: str = Form(""),
+    style_tone: str = Form(""),
+    style_include_hashtags: str = Form("false"),
+    style_include_link: str = Form("false"),
+    style_custom_prompt: str = Form(""),
+):
+    import secrets as _secrets
+
+    channels = get_content_channels()
+    if any(ch["id"] == id.strip() for ch in channels):
+        return templates.TemplateResponse("partials/settings_channels.html", _channels_ctx(request, error=f"Channel '{id}' already exists"))
+
+    VALID_TYPES = {"original", "synthetic"}
+    channels.append({
+        "id": id.strip(),
+        "name": name.strip(),
+        "enabled": True,
+        "api_key": _secrets.token_urlsafe(32),
+        "require_api_key": require_api_key.lower() != "false",
+        "max_items_per_fetch": max(1, min(max_items_per_fetch, 100)),
+        "ai_mode": ai_mode if ai_mode in ("off", "rewrite", "synthetic", "debate") else "off",
+        "ai_config_id": ai_config_id.strip() or "",
+        "target_language": target_language.strip() or "",
+        "payload_mode": payload_mode,
+        "payload_fields": _parse_comma_list(payload_fields),
+        "payload_template": payload_template,
+        "filter_categories_mode": filter_categories_mode,
+        "filter_categories": _parse_comma_list(filter_categories),
+        "filter_sources_mode": filter_sources_mode,
+        "filter_sources": _parse_comma_list(filter_sources),
+        "filter_article_types_mode": filter_article_types_mode,
+        "filter_article_types": _parse_comma_list(filter_article_types, VALID_TYPES),
+        "platform": platform if platform in ("twitter", "facebook", "blog", "telegram", "custom") else "custom",
+        "content_mode": content_mode if content_mode in ("rewrite", "synthetic", "newsletter", "long_article", "debate") else "rewrite",
+        "output_format": output_format if output_format in ("summary", "thread", "breaking", "listicle", "hot_take", "deep_dive", "quote_highlight", "carousel") else "summary",
+        "ai_source": ai_source if ai_source in ("system", "client") else "system",
+        "style_source": style_source if style_source in ("preset", "custom", "client") else "preset",
+        "style": {
+            k: v for k, v in {
+                "max_length": int(style_max_length) if style_max_length.strip().isdigit() else None,
+                "tone": style_tone.strip() or None,
+                "include_hashtags": style_include_hashtags.lower() == "true",
+                "include_link": style_include_link.lower() == "true",
+                "custom_prompt": style_custom_prompt.strip() or None,
+            }.items() if v is not None
+        },
+    })
+    save_content_channels(channels)
+    logger.info(f"Content channel added: {id}")
+    return templates.TemplateResponse("partials/settings_channels.html", _channels_ctx(request, success=f"Channel '{name}' added"))
+
+
+@router.post("/channels/{ch_id}/toggle", response_class=HTMLResponse)
+async def channel_toggle(request: Request, ch_id: str):
+    channels = get_content_channels()
+    for ch in channels:
+        if ch["id"] == ch_id:
+            ch["enabled"] = not ch.get("enabled", True)
+            break
+    save_content_channels(channels)
+    return templates.TemplateResponse("partials/settings_channels.html", _channels_ctx(request))
+
+
+@router.put("/channels/{ch_id}", response_class=HTMLResponse)
+async def channel_update(
+    request: Request,
+    ch_id: str,
+    name: str = Form(...),
+    max_items_per_fetch: int = Form(20),
+    require_api_key: str = Form("true"),
+    ai_mode: str = Form("off"),
+    ai_config_id: str = Form(""),
+    target_language: str = Form(""),
+    payload_mode: str = Form("full"),
+    payload_fields: str = Form(""),
+    payload_template: str = Form(""),
+    filter_categories_mode: str = Form("all"),
+    filter_categories: str = Form(""),
+    filter_sources_mode: str = Form("all"),
+    filter_sources: str = Form(""),
+    filter_article_types_mode: str = Form("all"),
+    filter_article_types: str = Form(""),
+    # Style transform
+    platform: str = Form("custom"),
+    content_mode: str = Form("rewrite"),
+    output_format: str = Form("summary"),
+    ai_source: str = Form("system"),
+    style_source: str = Form("preset"),
+    style_max_length: str = Form(""),
+    style_tone: str = Form(""),
+    style_include_hashtags: str = Form("false"),
+    style_include_link: str = Form("false"),
+    style_custom_prompt: str = Form(""),
+):
+    VALID_TYPES = {"original", "synthetic"}
+    channels = get_content_channels()
+    for i, ch in enumerate(channels):
+        if ch["id"] == ch_id:
+            channels[i] = {
+                **ch,  # preserve api_key, enabled, etc.
+                "name": name.strip(),
+                "require_api_key": require_api_key.lower() != "false",
+                "max_items_per_fetch": max(1, min(max_items_per_fetch, 100)),
+                "ai_mode": ai_mode if ai_mode in ("off", "rewrite", "synthetic", "debate") else "off",
+                "ai_config_id": ai_config_id.strip() or "",
+                "target_language": target_language.strip() or "",
+                "payload_mode": payload_mode,
+                "payload_fields": _parse_comma_list(payload_fields),
+                "payload_template": payload_template,
+                "filter_categories_mode": filter_categories_mode,
+                "filter_categories": _parse_comma_list(filter_categories),
+                "filter_sources_mode": filter_sources_mode,
+                "filter_sources": _parse_comma_list(filter_sources),
+                "filter_article_types_mode": filter_article_types_mode,
+                "filter_article_types": _parse_comma_list(filter_article_types, VALID_TYPES),
+                "platform": platform if platform in ("twitter", "facebook", "blog", "telegram", "custom") else "custom",
+                "content_mode": content_mode if content_mode in ("rewrite", "synthetic", "newsletter", "long_article", "debate") else "rewrite",
+                "output_format": output_format if output_format in ("summary", "thread", "breaking", "listicle", "hot_take", "deep_dive", "quote_highlight", "carousel") else "summary",
+                "ai_source": ai_source if ai_source in ("system", "client") else "system",
+                "style_source": style_source if style_source in ("preset", "custom", "client") else "preset",
+                "style": {
+                    k: v for k, v in {
+                        "max_length": int(style_max_length) if style_max_length.strip().isdigit() else None,
+                        "tone": style_tone.strip() or None,
+                        "include_hashtags": style_include_hashtags.lower() == "true",
+                        "include_link": style_include_link.lower() == "true",
+                        "custom_prompt": style_custom_prompt.strip() or None,
+                    }.items() if v is not None
+                },
+            }
+            break
+    save_content_channels(channels)
+    logger.info(f"Content channel updated: {ch_id}")
+    return templates.TemplateResponse("partials/settings_channels.html", _channels_ctx(request, success=f"Channel '{name}' updated"))
+
+
+@router.delete("/channels/{ch_id}", response_class=HTMLResponse)
+async def channel_delete(request: Request, ch_id: str):
+    channels = [ch for ch in get_content_channels() if ch["id"] != ch_id]
+    save_content_channels(channels)
+    logger.info(f"Content channel deleted: {ch_id}")
+    return templates.TemplateResponse("partials/settings_channels.html", _channels_ctx(request, success=f"Channel '{ch_id}' deleted"))

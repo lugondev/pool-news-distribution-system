@@ -204,6 +204,11 @@
         Telegram
         <span class="tab-indicator" id="tab-telegram-dot"></span>
       </button>
+      <button class="tab" id="tab-channels"
+              onclick="switchTab('channels')">
+        Channels
+        <span class="tab-indicator" id="tab-channels-dot"></span>
+      </button>
     </div>
 
     <div class="tab-content">
@@ -234,11 +239,18 @@
            hx-swap="innerHTML">
         <div class="panel-inner"><p style="color:var(--muted);font-size:12px">Loading Telegram settings...</p></div>
       </div>
+
+      <div id="tab-panel-channels" style="display:none"
+           hx-get="/partials/settings-channels"
+           hx-trigger="revealed once"
+           hx-swap="innerHTML">
+        <div class="panel-inner"><p style="color:var(--muted);font-size:12px">Loading channels...</p></div>
+      </div>
     </div>
   </div>
 
   <script>
-    var tabNames = ['general', 'ai', 'webhook', 'telegram'];
+    var tabNames = ['general', 'ai', 'webhook', 'telegram', 'channels'];
     function switchTab(name) {
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
       document.getElementById('tab-' + name).classList.add('active');

@@ -1,0 +1,846 @@
+<script>
+function toggleChannelEdit(id) {
+  var form = document.getElementById('ch-edit-' + id);
+  form.style.display = form.style.display === 'none' ? '' : 'none';
+}
+function toggleChannelAddForm() {
+  var form = document.getElementById('ch-add-form');
+  if (form) form.style.display = form.style.display === 'none' ? '' : 'none';
+}
+function fetchChannelStats(id) {
+  var el = document.getElementById('ch-stats-' + id);
+  var btn = event.target;
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  el.style.display = '';
+  el.style.background = 'var(--border)';
+  el.style.color = '#94a3b8';
+  el.style.border = '1px solid #3a3d4e';
+  el.innerHTML = '⏳ Fetching stats...';
+
+  fetch('/api/channels/' + id + '/stats')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      btn.disabled = false;
+      btn.textContent = 'Stats';
+      el.style.background = '#10403b';
+      el.style.color = '#34d399';
+      el.style.border = '1px solid #065f46';
+      
+      var html = '<div style="font-size:11px;line-height:1.8">';
+      html += '<strong style="color:#34d399">Pull Stats</strong><br>';
+      html += 'Total pulls: <b>' + (data.total_pulls || 0) + '</b>';
+      html += ' · Articles delivered: <b>' + (data.total_articles_delivered || 0) + '</b>';
+      html += ' · Clients: <b>' + (data.total_clients || 0) + '</b>';
+      
+      if (data.clients && data.clients.length > 0) {
+        html += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(52,211,153,0.2)">';
+        html += '<strong style="color:#6ee7b7;font-size:10px">Per-Client Breakdown:</strong><br>';
+        data.clients.forEach(function(c) {
+          var shortId = c.client_id.length > 16 ? c.client_id.substring(0, 16) + '...' : c.client_id;
+          html += '<div style="margin-top:4px;font-size:10px;color:#94a3b8">';
+          html += '<code style="color:#a78bfa">' + shortId + '</code>: ';
+          html += c.pulls + ' pulls, ' + c.articles_delivered + ' articles';
+          if (c.last_pull_at) {
+            var time = c.last_pull_at.substring(11, 19);
+            html += ' <span style="color:var(--muted)">(' + time + ')</span>';
+          }
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+      
+      html += '</div>';
+      el.innerHTML = html;
+      setTimeout(function() { el.style.display = 'none'; }, 20000);
+    })
+    .catch(function(err) {
+      btn.disabled = false;
+      btn.textContent = 'Stats';
+      el.style.background = '#3e1010';
+      el.style.color = '#f87171';
+      el.style.border = '1px solid #7f1d1d';
+      el.innerHTML = '✗ Failed: ' + err.message;
+      setTimeout(function() { el.style.display = 'none'; }, 10000);
+    });
+}
+function fetchChannelLogs(id) {
+  var el = document.getElementById('ch-logs-' + id);
+  var btn = event.target;
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  el.style.display = '';
+  el.style.background = 'var(--border)';
+  el.style.color = '#94a3b8';
+  el.style.border = '1px solid #3a3d4e';
+  el.innerHTML = '⏳ Fetching logs...';
+
+  fetch('/api/channels/' + id + '/logs?limit=50')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      btn.disabled = false;
+      btn.textContent = 'Logs';
+      el.style.background = '#1e1b2e';
+      el.style.color = '#e2e8f0';
+      el.style.border = '1px solid #3a3d4e';
+      
+      if (!data.logs || data.logs.length === 0) {
+        el.innerHTML = '<div style="color:var(--muted);text-align:center;padding:20px">No logs yet</div>';
+        return;
+      }
+      
+      var html = '<div style="margin-bottom:8px"><strong style="color:#a78bfa">Request Logs</strong> <span style="color:var(--muted)">(' + data.count + ' recent)</span></div>';
+      html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:10px">';
+      html += '<thead><tr style="border-bottom:1px solid var(--border);color:var(--muted)">';
+      html += '<th style="text-align:left;padding:4px">Time</th>';
+      html += '<th style="text-align:left;padding:4px">Client</th>';
+      html += '<th style="text-align:left;padding:4px">Endpoint</th>';
+      html += '<th style="text-align:center;padding:4px">Status</th>';
+      html += '<th style="text-align:right;padding:4px">Items</th>';
+      html += '<th style="text-align:right;padding:4px">Duration</th>';
+      html += '<th style="text-align:left;padding:4px">Auth</th>';
+      html += '<th style="text-align:left;padding:4px">Error</th>';
+      html += '</tr></thead><tbody>';
+      
+      data.logs.forEach(function(log) {
+        var statusColor = '#34d399';
+        if (log.status_code === 204) statusColor = '#fbbf24';
+        else if (log.status_code >= 400) statusColor = '#f87171';
+        
+        var time = log.requested_at ? log.requested_at.substring(11, 19) : '—';
+        var clientShort = log.client_id ? log.client_id.substring(0, 12) : '—';
+        var errorShort = log.error_msg ? (log.error_msg.length > 30 ? log.error_msg.substring(0, 30) + '...' : log.error_msg) : '—';
+        
+        html += '<tr style="border-bottom:1px solid rgba(255,255,255,0.05)">';
+        html += '<td style="padding:4px;color:var(--muted)">' + time + '</td>';
+        html += '<td style="padding:4px"><code style="font-size:9px">' + clientShort + '</code></td>';
+        html += '<td style="padding:4px;color:var(--accent)">' + log.endpoint + '</td>';
+        html += '<td style="padding:4px;text-align:center"><span style="color:' + statusColor + ';font-weight:600">' + log.status_code + '</span></td>';
+        html += '<td style="padding:4px;text-align:right">' + (log.items_count || 0) + '</td>';
+        html += '<td style="padding:4px;text-align:right;color:var(--muted)">' + (log.duration_ms || 0) + 'ms</td>';
+        html += '<td style="padding:4px;font-size:9px;color:var(--muted)">' + (log.auth_method || '—') + '</td>';
+        html += '<td style="padding:4px;color:#f87171;font-size:9px" title="' + (log.error_msg || '') + '">' + errorShort + '</td>';
+        html += '</tr>';
+      });
+      
+      html += '</tbody></table></div>';
+      el.innerHTML = html;
+      setTimeout(function() { el.style.display = 'none'; }, 30000);
+    })
+    .catch(function(err) {
+      btn.disabled = false;
+      btn.textContent = 'Logs';
+      el.style.background = '#3e1010';
+      el.style.color = '#f87171';
+      el.style.border = '1px solid #7f1d1d';
+      el.innerHTML = '✗ Failed: ' + err.message;
+      setTimeout(function() { el.style.display = 'none'; }, 10000);
+    });
+}
+function regenerateChannelKey(id) {
+  if (!confirm('Regenerate API key? The old key will stop working immediately.')) return;
+  var el = document.getElementById('ch-key-' + id);
+  fetch('/api/channels/' + id + '/regenerate-key', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.api_key) {
+        el.innerHTML = '<code style="color:var(--yellow)">' + data.api_key + '</code>';
+        setTimeout(function() {
+          el.innerHTML = '<code>' + data.api_key.substring(0, 8) + '...</code>';
+        }, 10000);
+      }
+    })
+    .catch(function(err) { alert('Failed: ' + err.message); });
+}
+function cloneChannel(id) {
+  fetch('/api/channels/' + id + '/clone-data')
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (!res.ok || !res.data) { alert('Failed to fetch channel data'); return; }
+      var data = res.data;
+      // Show add form
+      var form = document.getElementById('ch-add-form');
+      if (form) form.style.display = '';
+      // Fill all fields
+      document.getElementById('ch-add-id').value = '';
+      document.getElementById('ch-add-name').value = data.name || '';
+      document.getElementById('ch-add-enabled').checked = data.enabled !== false;
+      document.getElementById('ch-add-require-key').value = data.require_api_key === false ? 'false' : 'true';
+      document.getElementById('ch-add-max-items').value = data.max_items_per_fetch || 20;
+      document.getElementById('ch-add-platform').value = data.platform || 'custom';
+      document.getElementById('ch-add-content-mode').value = data.content_mode || 'rewrite';
+      document.getElementById('ch-add-output-format').value = data.output_format || 'summary';
+      document.getElementById('ch-add-ai-source').value = data.ai_source || 'system';
+      document.getElementById('ch-add-style-source').value = data.style_source || 'preset';
+      document.getElementById('ch-add-ai-mode').value = data.ai_mode || 'rewrite';
+      document.getElementById('ch-add-ai-config').value = data.ai_config_id || '';
+      document.getElementById('ch-add-target-lang').value = data.target_language || '';
+      document.getElementById('ch-add-filter-cat-mode').value = data.filter_categories_mode || 'all';
+      document.getElementById('ch-add-filter-cat').value = (data.filter_categories || []).join(', ');
+      document.getElementById('ch-add-filter-src-mode').value = data.filter_sources_mode || 'all';
+      document.getElementById('ch-add-filter-src').value = (data.filter_sources || []).join(', ');
+      document.getElementById('ch-add-filter-type-mode').value = data.filter_article_types_mode || 'all';
+      document.getElementById('ch-add-filter-types').value = (data.filter_article_types || []).join(', ');
+      // Payload mode
+      var payloadModeEl = document.getElementById('ch-add-mode');
+      if (payloadModeEl) {
+        payloadModeEl.value = data.payload_mode || 'full';
+        togglePayloadMode('ch-add');
+      }
+      // Payload fields (name-based, no ID)
+      var payloadFieldsEl = document.querySelector('#ch-add-fields-cfg input[name="payload_fields"]');
+      if (payloadFieldsEl && data.payload_fields) {
+        payloadFieldsEl.value = data.payload_fields.join(', ');
+      }
+      // Payload template (name-based, no ID)
+      var payloadTplEl = document.querySelector('#ch-add-tpl-cfg textarea[name="payload_template"]');
+      if (payloadTplEl && data.payload_template) {
+        payloadTplEl.value = data.payload_template;
+      }
+      // Style fields
+      if (data.style) {
+        if (data.style.tone) document.getElementById('ch-add-style-tone').value = data.style.tone;
+        if (data.style.max_length) document.getElementById('ch-add-style-max-length').value = data.style.max_length;
+        if (data.style.custom_prompt) document.getElementById('ch-add-style-custom-prompt').value = data.style.custom_prompt;
+      }
+      // Scroll to form
+      form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    })
+    .catch(function(err) { alert('Clone failed: ' + err.message); });
+}
+
+</script>
+
+<div class="panel-inner">
+  <h3>Content Channels</h3>
+  <p class="desc">
+    Pull-based API endpoints — external services poll for new articles instead of receiving pushes.
+    Each channel exposes a <b>GET</b> feed endpoint with API key authentication.
+    Articles are filtered and formatted per channel configuration.
+    <br><br>
+    <span style="color:var(--green);font-weight:600">⚡ Optimized:</span> AI Processing + Style Transform merged into <b>ONE AI call</b> to save API quota.
+  </p>
+
+  {% if success %}
+  <div class="alert alert-success">{{ success }}</div>
+  {% endif %}
+  {% if error %}
+  <div class="alert alert-error">{{ error }}</div>
+  {% endif %}
+
+  <!-- Global Channel Config -->
+  <p class="section-title" style="margin-top:4px">🌐 Global Config</p>
+  <div class="wh-card" style="margin-bottom:16px;background:linear-gradient(135deg, rgba(99,102,241,0.03) 0%, rgba(99,102,241,0.01) 100%)">
+    <form hx-post="/channels/global-config" hx-target="#tab-panel-channels" hx-swap="innerHTML">
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:6px">
+          <span>🔑 Global API Key</span>
+          <span style="font-size:9px;background:rgba(99,102,241,0.15);color:var(--accent);padding:2px 6px;border-radius:3px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">Shared</span>
+        </label>
+        <div style="display:flex;gap:6px;align-items:stretch">
+          <input type="text" name="global_api_key" value="{{ channels_config.global_api_key or '' }}"
+                 placeholder="Set once, works on all channels" style="flex:1;font-family:'SF Mono','Fira Code',monospace;font-size:12px">
+          <button type="button" class="btn btn-outline btn-sm" style="white-space:nowrap;padding:8px 12px"
+                  onclick="this.previousElementSibling.value = Array.from(crypto.getRandomValues(new Uint8Array(24)), b => b.toString(16).padStart(2,'0')).join(''); this.textContent='✓ Generated'; setTimeout(() => this.textContent='Generate', 2000)">
+            Generate
+          </button>
+        </div>
+        <span class="hint" style="display:flex;align-items:start;gap:6px;margin-top:4px">
+          <span style="color:var(--yellow);font-size:12px">ℹ️</span>
+          <span>If set, this key works on all channels that require API key auth. Per-channel keys override when set.</span>
+        </span>
+      </div>
+      <button type="submit" class="btn btn-primary" style="margin-top:8px">💾 Save Global Config</button>
+    </form>
+  </div>
+
+  <!-- Channel list -->
+  <p class="section-title" style="margin-top:4px">Channels ({{ channels|length }})</p>
+
+  {% for ch in channels %}
+  <div class="wh-card" id="ch-{{ ch.id }}">
+    <div class="wh-header">
+      <div class="wh-info">
+        <span class="wh-name">{{ ch.name }}</span>
+        <span class="wh-id">{{ ch.id }}</span>
+        {% if ch.enabled %}
+          <span class="toggle-status toggle-on" style="font-size:10px">ON</span>
+        {% else %}
+          <span class="toggle-status toggle-off" style="font-size:10px">OFF</span>
+        {% endif %}
+      </div>
+      <div class="wh-actions">
+        <button class="btn btn-sm btn-test" onclick="fetchChannelStats('{{ ch.id }}')">Stats</button>
+        <button class="btn btn-sm" style="background:rgba(147,51,234,0.1);color:#a78bfa;border:1px solid rgba(147,51,234,0.3)" 
+                onclick="fetchChannelLogs('{{ ch.id }}')">Logs</button>
+        <button class="btn btn-sm" style="background:rgba(99,102,241,0.1);color:var(--accent);border:1px solid rgba(99,102,241,0.3)" 
+                onclick="cloneChannel('{{ ch.id }}')">Clone</button>
+        <button class="btn btn-sm btn-toggle"
+                hx-post="/channels/{{ ch.id }}/toggle"
+                hx-target="#tab-panel-channels" hx-swap="innerHTML">
+          {% if ch.enabled %}Disable{% else %}Enable{% endif %}
+        </button>
+        <button class="btn btn-sm btn-edit" onclick="toggleChannelEdit('{{ ch.id }}')">Edit</button>
+        <button class="btn btn-sm btn-danger"
+                hx-delete="/channels/{{ ch.id }}"
+                hx-target="#tab-panel-channels" hx-swap="innerHTML"
+                hx-confirm="Delete channel '{{ ch.name }}'?">
+          Del
+        </button>
+      </div>
+    </div>
+    <div class="wh-url">GET /api/channels/{{ ch.id }}/feed</div>
+    <div class="wh-meta">
+      {% if ch.require_api_key is not defined or ch.require_api_key %}
+      Key: <span id="ch-key-{{ ch.id }}"><code>{{ ch.api_key[:8] if ch.api_key else '—' }}...</code></span>
+      <button class="btn btn-sm" style="padding:1px 6px;font-size:10px;margin-left:2px;background:transparent;color:var(--accent);border:1px solid var(--accent)" onclick="regenerateChannelKey('{{ ch.id }}')">Regenerate</button>
+      {% else %}
+      <span style="color:var(--yellow)">⚠ Public — no API key required</span>
+      {% endif %}
+      · Max: <b>{{ ch.max_items_per_fetch or 20 }}</b>
+      · Payload: <b>{{ ch.payload_mode or 'full' }}</b>{% if ch.payload_mode == 'fields' and ch.payload_fields %} ({{ ch.payload_fields|join(', ') }}){% endif %}
+      {% set cat_mode = ch.filter_categories_mode or 'all' %}{% set src_mode = ch.filter_sources_mode or 'all' %}
+      {% if cat_mode != 'all' and ch.filter_categories %} · Cat {{ cat_mode }}: <b>{{ ch.filter_categories|join(', ') }}</b>{% endif %}
+      {% if src_mode != 'all' and ch.filter_sources %} · Src {{ src_mode }}: <b>{{ ch.filter_sources|join(', ') }}</b>{% endif %}
+      {% if ch.target_language %} · Lang: <b>{{ ch.target_language }}</b>{% endif %}
+      {% set type_mode = ch.filter_article_types_mode or 'all' %}
+      {% if type_mode != 'all' and ch.filter_article_types %} · Type {{ type_mode }}: <b>{{ ch.filter_article_types|join(', ') }}</b>{% endif %}
+      {% set ai_mode = ch.ai_mode or 'off' %}
+      · AI: <b style="color:{% if ai_mode=='rewrite' %}var(--accent){% elif ai_mode=='synthetic' %}var(--green){% elif ai_mode=='debate' %}var(--yellow){% else %}var(--muted){% endif %}">{{ ai_mode }}</b>
+      {% set plat = ch.platform or 'custom' %}
+      {% if plat != 'custom' %} · Platform: <b style="color:var(--accent)">{{ plat }}</b>{% endif %}
+      {% set ofmt = ch.output_format or 'summary' %}
+      {% if ofmt != 'summary' %} · Format: <b>{{ ofmt }}</b>{% endif %}
+      {% if ch.ai_source == 'client' %} · <span style="color:var(--yellow)">Client AI</span>{% endif %}
+    </div>
+
+    <!-- Stats result (initially hidden) -->
+    <div id="ch-stats-{{ ch.id }}" class="test-result" style="display:none;margin-top:8px;padding:8px;border-radius:4px;font-size:12px"></div>
+
+    <!-- Logs panel (initially hidden) -->
+    <div id="ch-logs-{{ ch.id }}" class="test-result" style="display:none;margin-top:8px;padding:12px;border-radius:4px;font-size:11px;max-height:500px;overflow-y:auto"></div>
+
+    <!-- Inline edit form (hidden by default) -->
+    <form class="wh-edit-form" id="ch-edit-{{ ch.id }}" style="display:none"
+          hx-put="/channels/{{ ch.id }}"
+          hx-target="#tab-panel-channels" hx-swap="innerHTML">
+      <div class="form-row-2">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" name="name" value="{{ ch.name }}" required>
+        </div>
+        <div class="form-group">
+          <label>Max items per fetch</label>
+          <input type="number" name="max_items_per_fetch" value="{{ ch.max_items_per_fetch or 20 }}" min="1" max="100">
+        </div>
+      </div>
+      <div class="form-row-2">
+        <div class="form-group">
+          <label>Require API Key</label>
+          <select name="require_api_key">
+            <option value="true" {{ 'selected' if ch.require_api_key is not defined or ch.require_api_key }}>Yes — require X-API-Key header</option>
+            <option value="false" {{ 'selected' if ch.require_api_key is defined and not ch.require_api_key }}>No — public access</option>
+          </select>
+        </div>
+        <div class="form-group"></div>
+      </div>
+      <!-- AI Processing -->
+      <div class="filter-section" style="margin-top:10px;padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:6px">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">AI Processing</div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>AI Mode <span style="color:var(--muted);font-weight:400;font-size:11px">(on-demand processing)</span></label>
+            <select name="ai_mode" onchange="toggleAiModeFields(this)">
+              <option value="off"       {{ 'selected' if (ch.ai_mode or 'off') == 'off' }}>Off — raw article, no AI</option>
+              <option value="rewrite"   {{ 'selected' if ch.ai_mode == 'rewrite' }}>Rewrite — AI rewrite 1 article on request</option>
+              <option value="synthetic" {{ 'selected' if ch.ai_mode == 'synthetic' }}>Synthetic — collect 3-10 articles → synthesize</option>
+              <option value="debate"    {{ 'selected' if ch.ai_mode == 'debate' }}>Debate — collect 3-10 articles → debate</option>
+            </select>
+            <small style="color:var(--muted);font-size:10px;margin-top:4px;display:block">
+              {% if (ch.ai_mode or 'off') == 'synthetic' or ch.ai_mode == 'debate' %}
+              ⚠️ Requires ≥3 undelivered articles. Returns 204 if insufficient data.
+              {% elif ch.ai_mode == 'rewrite' %}
+              ℹ️ Processes 1 article per request with AI rewrite.
+              {% else %}
+              ℹ️ Returns raw articles without AI processing.
+              {% endif %}
+            </small>
+          </div>
+          <div class="form-group" id="ai-cfg-row-ch-edit-{{ ch.id }}" style="{{ 'display:none' if (ch.ai_mode or 'off') == 'off' else '' }}">
+            <label>AI Config</label>
+            <select name="ai_config_id">
+              <option value="">— Built-in (global settings) —</option>
+              {% for c in ai_configs %}
+              <option value="{{ c.id }}" {{ 'selected' if ch.ai_config_id == c.id }}>{{ c.name }}{% if c.is_default %} (default){% endif %} — {{ c.tone or 'general' }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="form-row-2" id="ai-lang-row-ch-edit-{{ ch.id }}" style="{{ 'display:none' if (ch.ai_mode or 'off') == 'off' else '' }}">
+          <div class="form-group">
+            <label>Target Language</label>
+            <select name="target_language">
+              <option value="" {{ 'selected' if not ch.target_language }}>— Origin language only —</option>
+              <option value="en" {{ 'selected' if ch.target_language == 'en' }}>English (en)</option>
+              <option value="vi" {{ 'selected' if ch.target_language == 'vi' }}>Vietnamese (vi)</option>
+              <option value="ja" {{ 'selected' if ch.target_language == 'ja' }}>Japanese (ja)</option>
+              <option value="ko" {{ 'selected' if ch.target_language == 'ko' }}>Korean (ko)</option>
+              <option value="zh" {{ 'selected' if ch.target_language == 'zh' }}>Chinese (zh)</option>
+              <option value="fr" {{ 'selected' if ch.target_language == 'fr' }}>French (fr)</option>
+              <option value="de" {{ 'selected' if ch.target_language == 'de' }}>German (de)</option>
+              <option value="es" {{ 'selected' if ch.target_language == 'es' }}>Spanish (es)</option>
+            </select>
+          </div>
+          <div class="form-group"></div>
+        </div>
+      </div>
+      <!-- Style Transform -->
+      <div class="filter-section" style="margin-top:10px;padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:6px">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">
+          Output Style
+          <span style="font-size:9px;background:rgba(34,197,94,0.15);color:var(--green);padding:2px 6px;border-radius:3px;font-weight:600;margin-left:6px">MERGED WITH AI</span>
+        </div>
+        <small style="color:var(--muted);font-size:10px;display:block;margin-bottom:8px">
+          ⚡ AI processing + style formatting in ONE call
+        </small>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Platform Preset</label>
+            <select name="platform" onchange="updatePlatformHint(this, 'ch-edit-{{ ch.id }}')">
+              <option value="custom" {{ 'selected' if (ch.platform or 'custom') == 'custom' }}>Custom</option>
+              <option value="twitter" {{ 'selected' if ch.platform == 'twitter' }}>Twitter/X</option>
+              <option value="facebook" {{ 'selected' if ch.platform == 'facebook' }}>Facebook</option>
+              <option value="blog" {{ 'selected' if ch.platform == 'blog' }}>Blog</option>
+              <option value="telegram" {{ 'selected' if ch.platform == 'telegram' }}>Telegram</option>
+            </select>
+            <small id="ch-edit-{{ ch.id }}-platform-hint" style="color:var(--muted);font-size:9px;display:block;margin-top:2px">
+              {% if ch.platform == 'twitter' %}280 chars, casual, hashtags{% elif ch.platform == 'facebook' %}2000 chars, engaging{% elif ch.platform == 'blog' %}5000 chars, formal{% elif ch.platform == 'telegram' %}4096 chars, concise{% else %}Custom settings{% endif %}
+            </small>
+          </div>
+          <div class="form-group">
+            <label>Output Format</label>
+            <select name="output_format">
+              <option value="summary" {{ 'selected' if (ch.output_format or 'summary') == 'summary' }}>Summary</option>
+              <option value="thread" {{ 'selected' if ch.output_format == 'thread' }}>Thread (1/N)</option>
+              <option value="breaking" {{ 'selected' if ch.output_format == 'breaking' }}>Breaking News</option>
+              <option value="listicle" {{ 'selected' if ch.output_format == 'listicle' }}>Listicle</option>
+              <option value="hot_take" {{ 'selected' if ch.output_format == 'hot_take' }}>Hot Take</option>
+              <option value="deep_dive" {{ 'selected' if ch.output_format == 'deep_dive' }}>Deep Dive</option>
+              <option value="quote_highlight" {{ 'selected' if ch.output_format == 'quote_highlight' }}>Quote Highlight</option>
+              <option value="carousel" {{ 'selected' if ch.output_format == 'carousel' }}>Carousel</option>
+            </select>
+          </div>
+        </div>
+        <!-- Advanced Style Options (collapsible) -->
+        <details style="margin-top:8px">
+          <summary style="cursor:pointer;color:var(--accent);font-size:11px;font-weight:600;padding:4px 0">▸ Advanced Style Options</summary>
+          <div style="margin-top:8px;padding:8px;background:rgba(0,0,0,0.2);border-radius:4px">
+            <input type="hidden" name="content_mode" value="{{ ch.content_mode or 'rewrite' }}">
+            <div class="form-row-2">
+              <div class="form-group">
+                <label>Max Length <span class="hint">overrides preset</span></label>
+                <input type="number" name="style_max_length" value="{{ ch.style.max_length if ch.style and ch.style.max_length else '' }}" placeholder="e.g. 280">
+              </div>
+              <div class="form-group">
+                <label>Tone Override</label>
+                <select name="style_tone">
+                  <option value="" {{ 'selected' if not (ch.style and ch.style.tone) }}>— Preset default —</option>
+                  <option value="formal" {{ 'selected' if ch.style and ch.style.tone == 'formal' }}>Formal</option>
+                  <option value="casual" {{ 'selected' if ch.style and ch.style.tone == 'casual' }}>Casual</option>
+                  <option value="general" {{ 'selected' if ch.style and ch.style.tone == 'general' }}>General</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row-2">
+              <div class="form-group" style="display:flex;gap:16px;align-items:center;padding-top:8px">
+                <label style="display:flex;align-items:center;gap:4px">
+                  <input type="checkbox" name="style_include_hashtags" value="true" {{ 'checked' if ch.style and ch.style.include_hashtags }} style="width:auto"> Hashtags
+                </label>
+                <label style="display:flex;align-items:center;gap:4px">
+                  <input type="checkbox" name="style_include_link" value="true" {{ 'checked' if ch.style and ch.style.include_link }} style="width:auto"> Link
+                </label>
+              </div>
+              <div class="form-group">
+                <label>AI/Style Source</label>
+                <select name="ai_source">
+                  <option value="system" {{ 'selected' if (ch.ai_source or 'system') == 'system' }}>System</option>
+                  <option value="client" {{ 'selected' if ch.ai_source == 'client' }}>Client (via headers)</option>
+                </select>
+                <input type="hidden" name="style_source" value="{{ ch.style_source or 'preset' }}">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Custom Style Prompt</label>
+              <textarea name="style_custom_prompt" rows="2" placeholder="e.g. Write like a sarcastic tech blogger...">{{ ch.style.custom_prompt if ch.style and ch.style.custom_prompt else '' }}</textarea>
+            </div>
+          </div>
+        </details>
+      </div>
+      {% with prefix="ch-edit-" + ch.id, current_mode=ch.payload_mode or 'full', current_fields=ch.payload_fields or [], current_template=ch.payload_template or '' %}
+        {% include "partials/payload_config.html" %}
+      {% endwith %}
+      <div class="filter-section" style="margin-top:10px;padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:6px">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Content Filters</div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Categories</label>
+            <select name="filter_categories_mode" onchange="toggleFilterInput(this,'ch-fc-wrap-{{ ch.id }}')">
+              <option value="all" {{ 'selected' if (ch.filter_categories_mode or 'all') == 'all' }}>All categories</option>
+              <option value="include" {{ 'selected' if ch.filter_categories_mode == 'include' }}>Include only</option>
+              <option value="exclude" {{ 'selected' if ch.filter_categories_mode == 'exclude' }}>Exclude</option>
+            </select>
+          </div>
+          <div class="form-group" id="ch-fc-wrap-{{ ch.id }}" style="display:{{ 'none' if (ch.filter_categories_mode or 'all') == 'all' else '' }}">
+            <label>Category list</label>
+            <input type="text" id="ch-fc-{{ ch.id }}" name="filter_categories" value="{{ ch.filter_categories|join(', ') if ch.filter_categories else '' }}" placeholder="tech, finance, world" autocomplete="off" data-filter-type="category">
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Sources</label>
+            <select name="filter_sources_mode" onchange="toggleFilterInput(this,'ch-fs-wrap-{{ ch.id }}')">
+              <option value="all" {{ 'selected' if (ch.filter_sources_mode or 'all') == 'all' }}>All sources</option>
+              <option value="include" {{ 'selected' if ch.filter_sources_mode == 'include' }}>Include only</option>
+              <option value="exclude" {{ 'selected' if ch.filter_sources_mode == 'exclude' }}>Exclude</option>
+            </select>
+          </div>
+          <div class="form-group" id="ch-fs-wrap-{{ ch.id }}" style="display:{{ 'none' if (ch.filter_sources_mode or 'all') == 'all' else '' }}">
+            <label>Source IDs</label>
+            <input type="text" id="ch-fs-{{ ch.id }}" name="filter_sources" value="{{ ch.filter_sources|join(', ') if ch.filter_sources else '' }}" placeholder="techcrunch, reuters" autocomplete="off" data-filter-type="source">
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Article Types</label>
+            <select name="filter_article_types_mode" onchange="toggleFilterInput(this,'ch-ft-wrap-{{ ch.id }}')">
+              <option value="all" {{ 'selected' if (ch.filter_article_types_mode or 'all') == 'all' }}>All types</option>
+              <option value="include" {{ 'selected' if ch.filter_article_types_mode == 'include' }}>Include only</option>
+              <option value="exclude" {{ 'selected' if ch.filter_article_types_mode == 'exclude' }}>Exclude</option>
+            </select>
+          </div>
+          <div class="form-group" id="ch-ft-wrap-{{ ch.id }}" style="display:{{ 'none' if (ch.filter_article_types_mode or 'all') == 'all' else '' }}">
+            <label>Types <span class="hint">original, synthetic</span></label>
+            <input type="text" name="filter_article_types" value="{{ ch.filter_article_types|join(', ') if ch.filter_article_types else '' }}" placeholder="original, synthetic">
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button type="submit" class="btn btn-sm btn-save">Save</button>
+        <button type="button" class="btn btn-sm btn-cancel" onclick="toggleChannelEdit('{{ ch.id }}')">Cancel</button>
+      </div>
+    </form>
+  </div>
+  {% endfor %}
+
+  {% if not channels %}
+  <div class="empty-state" style="margin-bottom:16px">No content channels configured.</div>
+  {% endif %}
+
+  <!-- Add button -->
+  {% if channels %}
+  <div style="margin-top:16px">
+    <button class="btn btn-outline" onclick="toggleChannelAddForm()">+ Add Channel</button>
+  </div>
+  {% endif %}
+
+  <!-- Add new channel -->
+  <div class="wh-add" id="ch-add-form" style="{{ 'display:none' if channels else '' }}">
+    <p class="section-title">Add Channel</p>
+    <form hx-post="/channels/add" hx-target="#tab-panel-channels" hx-swap="innerHTML">
+      <div class="form-row-2">
+        <div class="form-group">
+          <label>ID <span class="hint">— unique slug</span></label>
+          <input type="text" id="ch-add-id" name="id" placeholder="e.g. mobile-app-feed" required>
+        </div>
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" id="ch-add-name" name="name" placeholder="e.g. Mobile App Feed" required>
+        </div>
+      </div>
+      <div class="form-row-2">
+        <div class="form-group">
+          <label>Max items per fetch <span class="hint">1–100</span></label>
+          <input type="number" id="ch-add-max-items" name="max_items_per_fetch" value="20" min="1" max="100">
+        </div>
+        <div class="form-group">
+          <label>Require API Key</label>
+          <select id="ch-add-require-key" name="require_api_key">
+            <option value="true" selected>Yes — require X-API-Key header</option>
+            <option value="false">No — public access</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group" style="margin-top:8px">
+        <label style="display:flex;align-items:center;gap:6px">
+          <input type="checkbox" id="ch-add-enabled" name="enabled" value="true" checked style="width:auto;margin:0">
+          <span>Enabled</span>
+        </label>
+      </div>
+      <!-- AI Processing -->
+      <div class="filter-section" style="margin-top:10px;padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:6px">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">AI Processing</div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>AI Mode <span style="color:var(--muted);font-weight:400;font-size:11px">(on-demand processing)</span></label>
+            <select id="ch-add-ai-mode" name="ai_mode" onchange="toggleAiModeFields(this)">
+              <option value="off" selected>Off — raw article, no AI</option>
+              <option value="rewrite">Rewrite — AI rewrite 1 article on request</option>
+              <option value="synthetic">Synthetic — collect 3-10 articles → synthesize</option>
+              <option value="debate">Debate — collect 3-10 articles → debate</option>
+            </select>
+            <small style="color:var(--muted);font-size:10px;margin-top:4px;display:block">
+              ℹ️ AI processes articles when client requests, not pre-generated.
+            </small>
+          </div>
+          <div class="form-group" id="ai-cfg-row-ch-add" style="display:none">
+            <label>AI Config</label>
+            <select id="ch-add-ai-config" name="ai_config_id">
+              <option value="">— Built-in (global settings) —</option>
+              {% for c in ai_configs %}
+              <option value="{{ c.id }}">{{ c.name }}{% if c.is_default %} (default){% endif %} — {{ c.tone or 'general' }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="form-row-2" id="ai-lang-row-ch-add" style="display:none">
+          <div class="form-group">
+            <label>Target Language</label>
+            <select id="ch-add-target-lang" name="target_language">
+              <option value="" selected>— Origin language only —</option>
+              <option value="en">English (en)</option>
+              <option value="vi">Vietnamese (vi)</option>
+              <option value="ja">Japanese (ja)</option>
+              <option value="ko">Korean (ko)</option>
+              <option value="zh">Chinese (zh)</option>
+              <option value="fr">French (fr)</option>
+              <option value="de">German (de)</option>
+              <option value="es">Spanish (es)</option>
+            </select>
+          </div>
+          <div class="form-group"></div>
+        </div>
+        </div>
+      </div>
+      <!-- Style Transform -->
+      <div class="filter-section" style="margin-top:10px;padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:6px">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">
+          Output Style
+          <span style="font-size:9px;background:rgba(34,197,94,0.15);color:var(--green);padding:2px 6px;border-radius:3px;font-weight:600;margin-left:6px">MERGED WITH AI</span>
+        </div>
+        <small style="color:var(--muted);font-size:10px;display:block;margin-bottom:8px">
+          ⚡ AI processing + style formatting in ONE call
+        </small>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Platform Preset</label>
+            <select id="ch-add-platform" name="platform" onchange="updatePlatformHint(this, 'ch-add')">
+              <option value="custom" selected>Custom</option>
+              <option value="twitter">Twitter/X</option>
+              <option value="facebook">Facebook</option>
+              <option value="blog">Blog</option>
+              <option value="telegram">Telegram</option>
+            </select>
+            <small id="ch-add-platform-hint" style="color:var(--muted);font-size:9px;display:block;margin-top:2px">Custom settings</small>
+          </div>
+          <div class="form-group">
+            <label>Output Format</label>
+            <select id="ch-add-output-format" name="output_format">
+              <option value="summary" selected>Summary</option>
+              <option value="thread">Thread (1/N)</option>
+              <option value="breaking">Breaking News</option>
+              <option value="listicle">Listicle</option>
+              <option value="hot_take">Hot Take</option>
+              <option value="deep_dive">Deep Dive</option>
+              <option value="quote_highlight">Quote Highlight</option>
+              <option value="carousel">Carousel</option>
+            </select>
+          </div>
+        </div>
+        <!-- Advanced Style Options (collapsible) -->
+        <details style="margin-top:8px">
+          <summary style="cursor:pointer;color:var(--accent);font-size:11px;font-weight:600;padding:4px 0">▸ Advanced Style Options</summary>
+          <div style="margin-top:8px;padding:8px;background:rgba(0,0,0,0.2);border-radius:4px">
+            <input type="hidden" id="ch-add-content-mode" name="content_mode" value="rewrite">
+            <div class="form-row-2">
+              <div class="form-group">
+                <label>Max Length <span class="hint">overrides preset</span></label>
+                <input type="number" id="ch-add-style-max-length" name="style_max_length" placeholder="e.g. 280">
+              </div>
+              <div class="form-group">
+                <label>Tone Override</label>
+                <select id="ch-add-style-tone" name="style_tone">
+                  <option value="" selected>— Preset default —</option>
+                  <option value="formal">Formal</option>
+                  <option value="casual">Casual</option>
+                  <option value="general">General</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row-2">
+              <div class="form-group" style="display:flex;gap:16px;align-items:center;padding-top:8px">
+                <label style="display:flex;align-items:center;gap:4px">
+                  <input type="checkbox" name="style_include_hashtags" value="true" style="width:auto"> Hashtags
+                </label>
+                <label style="display:flex;align-items:center;gap:4px">
+                  <input type="checkbox" name="style_include_link" value="true" style="width:auto"> Link
+                </label>
+              </div>
+              <div class="form-group">
+                <label>AI/Style Source</label>
+                <select id="ch-add-ai-source" name="ai_source">
+                  <option value="system" selected>System</option>
+                  <option value="client">Client (via headers)</option>
+                </select>
+                <input type="hidden" id="ch-add-style-source" name="style_source" value="preset">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Custom Style Prompt</label>
+              <textarea id="ch-add-style-custom-prompt" name="style_custom_prompt" rows="2" placeholder="e.g. Write like a sarcastic tech blogger..."></textarea>
+            </div>
+          </div>
+        </details>
+      </div>
+      {% with prefix="ch-add", current_mode="full", current_fields=[], current_template="" %}
+        {% include "partials/payload_config.html" %}
+      {% endwith %}
+      <div class="filter-section" style="margin-top:10px;padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:6px">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Content Filters</div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Categories</label>
+            <select id="ch-add-filter-cat-mode" name="filter_categories_mode" onchange="toggleFilterInput(this,'ch-add-fc-wrap')">
+              <option value="all" selected>All categories</option>
+              <option value="include">Include only</option>
+              <option value="exclude">Exclude</option>
+            </select>
+          </div>
+          <div class="form-group" id="ch-add-fc-wrap" style="display:none">
+            <label>Category list</label>
+            <input type="text" id="ch-add-filter-cat" name="filter_categories" placeholder="tech, finance, world" autocomplete="off" data-filter-type="category">
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Sources</label>
+            <select id="ch-add-filter-src-mode" name="filter_sources_mode" onchange="toggleFilterInput(this,'ch-add-fs-wrap')">
+              <option value="all" selected>All sources</option>
+              <option value="include">Include only</option>
+              <option value="exclude">Exclude</option>
+            </select>
+          </div>
+          <div class="form-group" id="ch-add-fs-wrap" style="display:none">
+            <label>Source IDs</label>
+            <input type="text" id="ch-add-filter-src" name="filter_sources" placeholder="techcrunch, reuters" autocomplete="off" data-filter-type="source">
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Article Types</label>
+            <select id="ch-add-filter-type-mode" name="filter_article_types_mode" onchange="toggleFilterInput(this,'ch-add-ft-wrap')">
+              <option value="all" selected>All types</option>
+              <option value="include">Include only</option>
+              <option value="exclude">Exclude</option>
+            </select>
+          </div>
+          <div class="form-group" id="ch-add-ft-wrap" style="display:none">
+            <label>Types <span class="hint">original, synthetic</span></label>
+            <input type="text" id="ch-add-filter-types" name="filter_article_types" placeholder="original, synthetic">
+          </div>
+        </div>
+      </div>
+      <div class="form-actions" style="margin-top:10px">
+        <button type="submit" class="btn btn-primary">Add Channel</button>
+        {% if channels %}
+        <button type="button" class="btn btn-cancel" onclick="toggleChannelAddForm()">Cancel</button>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+
+  <hr class="divider">
+
+  <!-- Usage instructions -->
+  <p class="section-title">API Usage</p>
+  <div class="payload-box">
+    <span class="comment"># Fetch new articles from a channel</span><br>
+    curl -H <span class="str">"X-API-Key: YOUR_API_KEY"</span> \<br>
+    &nbsp;&nbsp;-H <span class="str">"X-Client-ID: my-bot-1"</span> \<br>
+    &nbsp;&nbsp;<span class="str">"http://localhost:8000/api/channels/{id}/feed"</span><br><br>
+    <span class="comment"># Pick ONE article to post now (never repeats)</span><br>
+    curl -H <span class="str">"X-API-Key: YOUR_API_KEY"</span> \<br>
+    &nbsp;&nbsp;-H <span class="str">"X-Client-ID: my-bot-1"</span> \<br>
+    &nbsp;&nbsp;<span class="str">"http://localhost:8000/api/channels/{id}/next"</span><br><br>
+    <span class="comment"># With query parameters</span><br>
+    curl -H <span class="str">"X-API-Key: YOUR_API_KEY"</span> \<br>
+    &nbsp;&nbsp;-H <span class="str">"X-Client-ID: my-bot-1"</span> \<br>
+    &nbsp;&nbsp;<span class="str">"http://localhost:8000/api/channels/{id}/feed?limit=10"</span><br><br>
+    <span class="comment"># Acknowledge received articles (advance cursor)</span><br>
+    curl -X POST -H <span class="str">"X-API-Key: YOUR_API_KEY"</span> \<br>
+    &nbsp;&nbsp;-H <span class="str">"X-Client-ID: my-bot-1"</span> \<br>
+    &nbsp;&nbsp;-H <span class="str">"Content-Type: application/json"</span> \<br>
+    &nbsp;&nbsp;-d <span class="str">'{"cursor": "2025-01-15T12:00:00Z"}'</span> \<br>
+    &nbsp;&nbsp;<span class="str">"http://localhost:8000/api/channels/{id}/ack"</span>
+  </div>
+
+  <hr class="divider">
+
+  <p class="section-title">Response Format</p>
+  <div class="payload-box">
+    <span class="comment">// GET /api/channels/{id}/feed</span><br>
+    {<br>
+    &nbsp;&nbsp;<span class="key">"channel_id"</span>: <span class="str">"mobile-app-feed"</span>,<br>
+    &nbsp;&nbsp;<span class="key">"items"</span>: [<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;{<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"id"</span>: <span class="str">"a1b2c3d4..."</span>,<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"title"</span>: <span class="str">"Article title"</span>,<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="key">"url"</span>: <span class="str">"https://..."</span>,<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="comment">// ... (depends on payload_mode)</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;}<br>
+    &nbsp;&nbsp;],<br>
+    &nbsp;&nbsp;<span class="key">"count"</span>: <span class="key">1</span>,<br>
+    &nbsp;&nbsp;<span class="key">"has_more"</span>: <span class="key">false</span><br>
+    }
+  </div>
+
+</div>
+
+<script>
+  (function() {
+    var dot = document.getElementById('tab-channels-dot');
+    if (dot) {
+      var hasEnabled = {{ 'true' if channels|selectattr('enabled')|list else 'false' }};
+      dot.className = 'tab-indicator ' + (hasEnabled ? 'on' : 'off');
+    }
+  })();
+
+  // Reuse shared functions from webhook partial if already loaded
+  if (typeof togglePayloadMode === 'undefined') {
+    function togglePayloadMode(prefix) {
+      var mode = document.getElementById(prefix + '-mode').value;
+      var fc = document.getElementById(prefix + '-fields-cfg');
+      var tc = document.getElementById(prefix + '-tpl-cfg');
+      if (fc) fc.style.display = mode === 'fields' ? '' : 'none';
+      if (tc) tc.style.display = mode === 'template' ? '' : 'none';
+    }
+  }
+  if (typeof toggleAiModeFields === 'undefined') {
+    function toggleAiModeFields(sel) {
+      var form = sel.closest('form');
+      if (!form) return;
+      var mode = sel.value;
+      var cfgRow = form.querySelector('[id^="ai-cfg-row-"]');
+      if (cfgRow) cfgRow.style.display = mode === 'off' ? 'none' : '';
+      var langRow = form.querySelector('[id^="ai-lang-row-"]');
+      if (langRow) langRow.style.display = mode === 'off' ? 'none' : '';
+    }
+  }
+  if (typeof toggleFilterInput === 'undefined') {
+    function toggleFilterInput(sel, wrapperId) {
+      var w = document.getElementById(wrapperId);
+      if (w) w.style.display = sel.value === 'all' ? 'none' : '';
+    }
+  }
+
+  if (typeof loadFilterOptions === 'function') loadFilterOptions();
+</script>

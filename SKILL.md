@@ -677,6 +677,198 @@ curl -s -X POST $API/telegram/{ch_id}/test | jq .
 
 Sends a test message to the channel. Returns `{"ok": true}` on success.
 
+## Content Channels (Pull-based API)
+
+Content channels are pull-based alternatives to webhooks. External services (Twitter bots, Facebook pages, blog publishers) poll for articles on their own schedule.
+
+### Authentication
+
+Channels support a **three-tier API key system**:
+
+1. **Global API key** — shared across all channels (set once in Settings UI → Channels → Global Config)
+2. **Per-channel API key** — overrides global key if set
+3. **Public access** — `require_api_key: false` disables auth entirely
+
+Auth priority: per-channel key → global key → skip if `require_api_key=false`.
+
+All consumer endpoints require `X-API-Key` header (if auth enabled) and `X-Client-ID` header for tracking.
+
+### List channels
+
+```bash
+curl -s $API/channels | jq .
+```
+
+### Get single channel
+
+```bash
+curl -s $API/channels/{channel_id} | jq .
+```
+
+### Create a channel
+
+```bash
+curl -s -X POST $API/channels \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "twitter_bot",
+    "name": "Twitter Bot Feed",
+    "enabled": true,
+    "require_api_key": true,
+    "max_items_per_fetch": 20,
+    "platform": "twitter",
+    "content_mode": "rewrite",
+    "output_format": "summary",
+    "ai_source": "system",
+    "style_source": "preset",
+    "payload_mode": "full",
+    "filter_categories_mode": "all",
+    "filter_sources_mode": "all",
+    "filter_article_types_mode": "all",
+    "ai_mode": "rewrite",
+    "target_language": "en"
+  }' | jq .
+```
+
+**Channel-specific fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `require_api_key` | bool | `true` | Require API key auth (false = public) |
+| `max_items_per_fetch` | int | 20 | Max articles per `/feed` call |
+| `platform` | string | `custom` | Platform preset: `twitter`, `facebook`, `blog`, `telegram`, `custom` |
+| `content_mode` | string | `rewrite` | Content source: `rewrite`, `synthetic`, `newsletter`, `long_article`, `debate` |
+| `output_format` | string | `summary` | Presentation: `summary`, `thread`, `breaking`, `listicle`, `hot_take`, `deep_dive`, `quote_highlight`, `carousel` |
+| `ai_source` | string | `system` | AI credentials: `system` (server config) or `client` (via headers) |
+| `style_source` | string | `preset` | Style config: `preset` (platform defaults), `custom` (channel config), `client` (query param) |
+| `style` | object | `{}` | Custom style config (tone, max_length, custom_prompt) |
+
+Channels also support all webhook filter fields: `filter_categories_mode`, `filter_categories`, `filter_sources_mode`, `filter_sources`, `filter_article_types_mode`, `filter_article_types`, `ai_mode`, `ai_config_id`, `target_language`, `payload_mode`, `payload_fields`, `payload_template`.
+
+### Update a channel
+
+```bash
+curl -s -X PUT $API/channels/{channel_id} \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Updated Name","max_items_per_fetch":50}' | jq .
+```
+
+Partial update — only send fields to change.
+
+### Toggle channel
+
+```bash
+curl -s -X POST $API/channels/{channel_id}/toggle | jq .
+```
+
+### Delete a channel
+
+```bash
+curl -s -X DELETE $API/channels/{channel_id} | jq .
+```
+
+### Regenerate API key
+
+```bash
+curl -s -X POST $API/channels/{channel_id}/regenerate-key | jq .
+```
+
+Returns new `api_key`. Old key stops working immediately.
+
+### Clone channel config
+
+```bash
+curl -s $API/channels/{channel_id}/clone-data | jq .
+```
+
+Returns all channel config (except `id` and `api_key`) with " (Copy)" appended to name. Use this to quickly duplicate channel settings when creating a new channel.
+
+### Pull articles (feed)
+
+```bash
+curl -s -H "X-API-Key: YOUR_KEY" -H "X-Client-ID: bot-1" \
+  "$API/channels/{channel_id}/feed?limit=10&auto_ack=false" | jq .
+```
+
+Query params:
+- `limit` (default 20, max from channel config): Max articles to return
+- `auto_ack` (default false): Auto-advance cursor after fetch
+- `since` (optional): Unix timestamp — only articles after this time
+- `style_prompt` (optional): Override style (if `style_source=client`)
+
+Returns `{"articles": [...], "cursor": 1234567890.123, "count": 10}`.
+
+**Client-provided AI** (if `ai_source=client`):
+```bash
+curl -s -H "X-API-Key: YOUR_KEY" -H "X-Client-ID: bot-1" \
+  -H "X-AI-API-Key: sk-..." -H "X-AI-Base-URL: https://api.openai.com/v1" \
+  -H "X-AI-Model: gpt-4o" \
+  "$API/channels/{channel_id}/feed" | jq .
+```
+
+### Pull next article (single)
+
+```bash
+curl -s -H "X-API-Key: YOUR_KEY" -H "X-Client-ID: bot-1" \
+  "$API/channels/{channel_id}/next" | jq .
+```
+
+Returns one article that hasn't been delivered to this client yet. Returns 204 when no articles available.
+
+### Acknowledge articles (advance cursor)
+
+```bash
+curl -s -X POST $API/channels/{channel_id}/ack \
+  -H "X-API-Key: YOUR_KEY" -H "X-Client-ID: bot-1" \
+  -H "Content-Type: application/json" \
+  -d '{"cursor": 1234567890.123}' | jq .
+```
+
+Advances client cursor to the given timestamp. Articles before this cursor won't be returned in future `/feed` or `/next` calls.
+
+### Reset cursor (re-fetch from start)
+
+```bash
+curl -s -X POST $API/channels/{channel_id}/reset-cursor \
+  -H "X-API-Key: YOUR_KEY" -H "X-Client-ID: bot-1" | jq .
+```
+
+Resets cursor to 0 and clears delivered set. Next `/feed` or `/next` will return articles from the beginning.
+
+### Get pull stats
+
+```bash
+curl -s -H "X-Client-ID: bot-1" \
+  "$API/channels/{channel_id}/stats" | jq .
+```
+
+Returns `{"total_pulls": 42, "total_items_delivered": 156, "last_pull_at": "..."}`.
+
+No API key required for stats endpoint.
+
+### Channel API logs
+
+All channel consumer endpoints (`/feed`, `/next`, `/ack`, `/reset-cursor`, `/stats`) are logged to SQLite with client tracking.
+
+```bash
+# View recent channel API calls
+sqlite3 data/stats.db "SELECT * FROM channel_logs ORDER BY requested_at DESC LIMIT 20;"
+
+# Auth method breakdown
+sqlite3 data/stats.db "SELECT auth_method, COUNT(*) FROM channel_logs GROUP BY auth_method;"
+
+# Per-client activity
+sqlite3 data/stats.db "SELECT client_id, endpoint, COUNT(*) as calls FROM channel_logs GROUP BY client_id, endpoint;"
+
+# Error rate by endpoint
+sqlite3 data/stats.db "SELECT endpoint, status_code, COUNT(*) FROM channel_logs GROUP BY endpoint, status_code;"
+
+# Average response time by endpoint
+sqlite3 data/stats.db "SELECT endpoint, AVG(duration_ms) as avg_ms FROM channel_logs GROUP BY endpoint;"
+```
+
+**Log fields:** `id`, `channel_id`, `client_id`, `endpoint`, `method`, `status_code`, `auth_method` (`per_channel_key`, `global_key`, or `public`), `items_count`, `requested_at`, `duration_ms`, `error_msg`.
+
 ## Payload Configuration
 
 Both webhooks and Telegram channels support 3 payload modes:
@@ -1033,3 +1225,16 @@ redis-cli DEL news:dedup:simhashes
 | POST | `/api/schedules/{id}/toggle` | Toggle schedule enabled/disabled |
 | DELETE | `/api/schedules/{id}` | Delete schedule |
 | POST | `/api/schedules/{id}/trigger` | Manually trigger schedule execution |
+| GET | `/api/channels` | List content channels |
+| GET | `/api/channels/{id}` | Get single channel |
+| POST | `/api/channels` | Create content channel |
+| PUT | `/api/channels/{id}` | Update channel (partial) |
+| POST | `/api/channels/{id}/toggle` | Toggle channel enabled/disabled |
+| DELETE | `/api/channels/{id}` | Delete channel |
+| POST | `/api/channels/{id}/regenerate-key` | Regenerate channel API key |
+| GET | `/api/channels/{id}/clone-data` | Clone channel config (for duplication) |
+| GET | `/api/channels/{id}/feed` | Pull articles (requires X-API-Key, X-Client-ID) |
+| GET | `/api/channels/{id}/next` | Pull next single article (requires X-API-Key, X-Client-ID) |
+| POST | `/api/channels/{id}/ack` | Acknowledge articles, advance cursor (requires X-API-Key, X-Client-ID) |
+| POST | `/api/channels/{id}/reset-cursor` | Reset cursor to start (requires X-API-Key, X-Client-ID) |
+| GET | `/api/channels/{id}/stats` | Get pull stats (requires X-Client-ID) |

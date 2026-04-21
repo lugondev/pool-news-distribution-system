@@ -105,6 +105,23 @@ async def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_tg_sent ON telegram_logs(sent_at);
             CREATE INDEX IF NOT EXISTS idx_tg_channel ON telegram_logs(channel_id);
 
+            CREATE TABLE IF NOT EXISTS channel_logs (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel_id   TEXT NOT NULL,
+                client_id    TEXT NOT NULL,
+                endpoint     TEXT NOT NULL,
+                method       TEXT NOT NULL,
+                status_code  INTEGER,
+                auth_method  TEXT,
+                items_count  INTEGER DEFAULT 0,
+                requested_at TEXT NOT NULL,
+                duration_ms  INTEGER DEFAULT 0,
+                error_msg    TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_ch_channel ON channel_logs(channel_id);
+            CREATE INDEX IF NOT EXISTS idx_ch_client ON channel_logs(client_id);
+            CREATE INDEX IF NOT EXISTS idx_ch_requested ON channel_logs(requested_at);
+
             CREATE TABLE IF NOT EXISTS system_logs (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 event_type  TEXT NOT NULL,
@@ -230,6 +247,40 @@ async def log_telegram(
                 datetime.now(timezone.utc).isoformat(),
                 status_code,
                 int(success),
+                error_msg,
+            ),
+        )
+        await db.commit()
+
+
+async def log_channel_request(
+    channel_id: str,
+    client_id: str,
+    endpoint: str,
+    method: str,
+    status_code: int,
+    auth_method: str,  # "per_channel_key", "global_key", "public"
+    items_count: int = 0,
+    duration_ms: int = 0,
+    error_msg: str | None = None,
+) -> None:
+    """Log channel API request with client tracking and auth method."""
+    async with _db() as db:
+        await db.execute(
+            """INSERT INTO channel_logs
+               (channel_id, client_id, endpoint, method, status_code, auth_method,
+                items_count, requested_at, duration_ms, error_msg)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                channel_id,
+                client_id,
+                endpoint,
+                method,
+                status_code,
+                auth_method,
+                items_count,
+                datetime.now(timezone.utc).isoformat(),
+                duration_ms,
                 error_msg,
             ),
         )

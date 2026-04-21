@@ -79,3 +79,23 @@ def save_telegram_channels(channels: list[dict]) -> None:
     cfg = read_settings()
     cfg.setdefault("telegram", {})["channels"] = channels
     write_settings(cfg)
+
+
+def get_content_channels() -> list[dict]:
+    return read_settings().get("channels", [])
+
+
+def save_content_channels(channels: list[dict]) -> None:
+    cfg = read_settings()
+    cfg["channels"] = channels
+    write_settings(cfg)
+
+
+def get_channels_config() -> dict:
+    return read_settings().get("channels_config", {})
+
+
+def save_channels_config(channels_config: dict) -> None:
+    cfg = read_settings()
+    cfg["channels_config"] = channels_config
+    write_settings(cfg)
