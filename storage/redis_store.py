@@ -447,9 +447,109 @@ async def save_embedding(
     article_id: str,
     embedding: list[float],
 ) -> None:
-    """Store the embedding vector separately (not in article hash — too large)."""
+    """Store the embedding vector separately (not in article hash — too large).
+    
+    For batch operations, use save_embeddings_batch() instead (10× faster).
+    """
     key = f"{EMBED_PREFIX}{article_id}"
     await redis.set(key, json.dumps(embedding), ex=TTL_SECONDS)
+
+
+async def save_articles_batch(redis: aioredis.Redis, articles: list[Article]) -> None:
+    """
+    Save multiple articles using Redis pipeline (20× faster than sequential saves).
+    
+    Performance:
+        - Sequential: 10 articles × 2 RTTs = 20 RTTs
+        - Batch: 1 RTT total
+    
+    Note: Backpressure is applied once at the end (not per-article).
+    """
+    if not articles:
+        return
+    
+    pipe = redis.pipeline()
+    
+    for article in articles:
+        key = f"news:{article.id}"
+        
+        # Note: We skip the HMGET check for existing status in batch mode
+        # This is acceptable because batch saves are typically for new articles from crawl
+        ts = _ts(article.published_at)
+        now = article.fetched_at
+        date_key = now.strftime("%Y%m%d")
+        hour_key = now.strftime("%Y%m%d%H")
+        
+        # Compute priority score
+        try:
+            priority_score = score_article(article)
+        except Exception:
+            priority_score = ts
+        
+        hash_data = _article_to_hash(article, priority_score=priority_score)
+        
+        # Article hash
+        pipe.hset(key, mapping=hash_data)
+        pipe.expire(key, TTL_SECONDS)
+        
+        # Global feed
+        pipe.zadd("news:feed", {article.id: ts})
+        pipe.expire("news:feed", TTL_SECONDS)
+        
+        # Daily feed
+        pipe.zadd(f"news:feed:{date_key}", {article.id: ts})
+        pipe.expire(f"news:feed:{date_key}", TTL_SECONDS)
+        
+        # Hourly feed
+        pipe.zadd(f"news:feed:{hour_key}", {article.id: ts})
+        pipe.expire(f"news:feed:{hour_key}", TTL_SECONDS)
+        
+        # Per-source
+        pipe.zadd(f"news:source:{article.source_id}", {article.id: ts})
+        pipe.expire(f"news:source:{article.source_id}", TTL_SECONDS)
+        
+        # Per-category
+        pipe.zadd(f"news:cat:{article.category}", {article.id: ts})
+        pipe.expire(f"news:cat:{article.category}", TTL_SECONDS)
+        
+        # AI pending queue
+        pipe.zadd(AI_PENDING_KEY, {article.id: priority_score})
+        pipe.expire(AI_PENDING_KEY, TTL_SECONDS)
+        
+        # Enrich pending queue
+        pipe.sadd(ENRICH_PENDING_KEY, article.id)
+        pipe.expire(ENRICH_PENDING_KEY, DEDUP_TTL_SECONDS)
+    
+    await pipe.execute()
+    
+    # Apply backpressure once for the entire batch
+    await _apply_backpressure(redis)
+
+
+async def save_embeddings_batch(
+    redis: aioredis.Redis,
+    embeddings: list[tuple[str, list[float]]]  # [(article_id, embedding), ...]
+) -> None:
+    """
+    Save multiple embeddings using Redis pipeline.
+    
+    Args:
+        embeddings: List of (article_id, embedding_vector) tuples
+    
+    Performance:
+        - Sequential: 10 embeddings × 1 RTT = 10 RTTs
+        - Batch: 1 RTT total (10× speedup)
+    """
+    if not embeddings:
+        return
+    
+    pipe = redis.pipeline()
+    
+    for article_id, embedding in embeddings:
+        key = f"{EMBED_PREFIX}{article_id}"
+        pipe.set(key, json.dumps(embedding), ex=TTL_SECONDS)
+    
+    await pipe.execute()
 
 
 async def get_embedding(

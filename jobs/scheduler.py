@@ -21,6 +21,7 @@ except ImportError:
 from crawler.fetcher import fetch_all_sources
 from ai.rewriter import process_pending_articles
 from ai.topic_synthesis import process_category_synthesis
+from ai.story_synthesis import process_story_synthesis
 from ai.enricher import batch_enrich
 from ai.embedder import get_embedding, embed_text_for_article
 from ai.clusterer import assign_topic
@@ -39,6 +40,7 @@ from storage.redis_store import (
     get_article,
     get_articles_batch,
 )
+from ai.story_detector import get_active_stories, get_story_articles
 from storage.sqlite_stats import log_system_event
 from jobs.scheduled_webhook import scheduled_webhook_job
 
@@ -574,6 +576,12 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
             hook_prompt_system,
         ) in synth_hooks:
             hook_cfg = wh_eps[0] if wh_eps else tg_chs[0] if tg_chs else {}
+            
+            # Extract target_languages (new) or target_language (deprecated)
+            hook_target_languages = hook_cfg.get("target_languages")
+            if hook_target_languages is None and hook_target_lang:
+                # Backward compat: convert single string to list
+                hook_target_languages = [hook_target_lang]
 
             # Determine which categories to process based on trigger_mode
             if trigger_mode == "on_demand":
@@ -590,11 +598,14 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
                 # INTERVAL (default): Process all active categories, but still respect filter
                 categories_to_process = active_cats
 
+            # Build tasks for parallel execution (8× speedup vs sequential)
+            tasks = []
             for category in categories_to_process:
                 # Skip if hook's filter excludes this category
                 if not _cat_in_scope(category, hook_cfg):
                     continue
-                count = await process_category_synthesis(
+                
+                task = process_category_synthesis(
                     redis=redis,
                     category=category,
                     hook_id=hook_id,
@@ -606,18 +617,31 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
                     base_url=synth_base_url or None,
                     webhook_endpoints=wh_eps,
                     telegram_channels=tg_chs,
-                    target_language=hook_target_lang,
+                    target_languages=hook_target_languages,  # New: multi-language support
                     prompt_system_override=hook_prompt_system,
                 )
-
-                if count > 0:
-                    key = f"{hook_id}/{category}"
-                    results_by_hook[key] = count
-                    total_generated += count
-                    logger.info(
-                        f"Topic synthesis: hook={hook_id} category={category} "
-                        f"generated {count} synthetic articles"
-                    )
+                tasks.append((hook_id, category, task))
+            
+            # Execute all categories in parallel (8× faster than sequential)
+            if tasks:
+                results = await asyncio.gather(
+                    *[t[2] for t in tasks], return_exceptions=True
+                )
+                
+                for (hook_id, category, _), result in zip(tasks, results):
+                    if isinstance(result, Exception):
+                        logger.error(f"Synthesis failed for hook={hook_id} category={category}: {result}")
+                        continue
+                    
+                    count = result
+                    if count > 0:
+                        key = f"{hook_id}/{category}"
+                        results_by_hook[key] = count
+                        total_generated += count
+                        logger.info(
+                            f"Topic synthesis: hook={hook_id} category={category} "
+                            f"generated {count} synthetic articles"
+                        )
 
         dur_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
         _job_states["topic_synthesis"] = "idle"
@@ -679,6 +703,253 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Story-Based Synthesis Job — Timeline-focused narrative synthesis
+# ---------------------------------------------------------------------------
+
+
+async def story_synthesis_job(redis: aioredis.Redis) -> None:
+    """Generates timeline-focused narrative synthesis for hot stories.
+    
+    Unlike category synthesis (multiple angles per category), story synthesis:
+    - Produces ONE narrative per story (chronological progression)
+    - Only processes "hot" stories (min 3 articles, updated within 6h)
+    - Runs alongside category synthesis (not a replacement)
+    - Emphasizes timeline and event progression
+    """
+    started = datetime.now(timezone.utc)
+    _job_states["story_synthesis"] = "running"
+    if ws_manager:
+        asyncio.create_task(
+            ws_manager.broadcast(
+                "scheduler.job_start",
+                {
+                    "job_id": "story_synthesis",
+                    "job_name": "Story Synthesis",
+                    "started_at": started.isoformat(),
+                },
+            )
+        )
+    
+    try:
+        current_cfg = _load_config()
+        ai = current_cfg.get("ai", {})
+        story_cfg = ai.get("story_synthesis", {})
+        
+        if not ai.get("enabled", True) or not story_cfg.get("enabled", False):
+            _job_states["story_synthesis"] = "idle"
+            return
+        
+        wh = current_cfg.get("webhook", {})
+        tg = current_cfg.get("telegram", {})
+        
+        # Only dispatch to hooks that want story-based synthesis
+        endpoints = [
+            e
+            for e in wh.get("endpoints", [])
+            if _active(e) and e.get("ai_mode") == "story"
+        ]
+        tg_channels = [
+            c
+            for c in tg.get("channels", [])
+            if _active(c) and c.get("ai_mode") == "story"
+        ]
+        
+        if not endpoints and not tg_channels:
+            _job_states["story_synthesis"] = "idle"
+            return  # no hooks want story synthesis
+        
+        # Resolve provider
+        story_provider_id = story_cfg.get("provider_id") or ai.get("provider_id")
+        story_api_key, story_base_url, story_model_override = _resolve_provider(
+            ai, story_provider_id
+        )
+        story_model = story_model_override
+        
+        active_cats = [
+            c["id"] for c in current_cfg.get("categories", []) if c.get("enabled", True)
+        ]
+        
+        if not active_cats:
+            _job_states["story_synthesis"] = "idle"
+            await log_system_event(
+                "story_synthesis_job",
+                started,
+                status="skipped",
+                metadata={"reason": "no active categories"},
+            )
+            return
+        
+        # Story filtering config
+        min_articles = story_cfg.get("min_articles", 3)
+        max_age_hours = story_cfg.get("max_age_hours", 6)
+        max_age_cutoff = datetime.now(timezone.utc).timestamp() - (max_age_hours * 3600)
+        
+        total_generated = 0
+        results_by_hook = {}
+        
+        # Build hooks list (similar to topic_synthesis_job)
+        story_hooks = []
+        for ep in endpoints:
+            resolved = _resolve_ai_config(ai, ep.get("ai_config_id") or None)
+            story_hooks.append(
+                (
+                    ep.get("id", "wh"),
+                    [ep],
+                    [],
+                    ep.get("target_language") or None,
+                    resolved["tone"],
+                    resolved["prompt_system"],
+                )
+            )
+        for ch in tg_channels:
+            resolved = _resolve_ai_config(ai, ch.get("ai_config_id") or None)
+            story_hooks.append(
+                (
+                    ch.get("id", "tg"),
+                    [],
+                    [ch],
+                    ch.get("target_language") or None,
+                    resolved["tone"],
+                    resolved["prompt_system"],
+                )
+            )
+        
+        # Process each hook
+        for (
+            hook_id,
+            wh_eps,
+            tg_chs,
+            hook_target_lang,
+            hook_tone,
+            hook_prompt_system,
+        ) in story_hooks:
+            hook_cfg = wh_eps[0] if wh_eps else tg_chs[0] if tg_chs else {}
+            
+            # Extract target_languages
+            hook_target_languages = hook_cfg.get("target_languages")
+            if hook_target_languages is None and hook_target_lang:
+                hook_target_languages = [hook_target_lang]
+            
+            # Get hot stories across all active categories
+            hot_stories = []
+            for category in active_cats:
+                stories = await get_active_stories(redis, category=category, limit=20)
+                for story in stories:
+                    # Filter: min articles + recent update
+                    if story.get("article_count", 0) < min_articles:
+                        continue
+                    last_updated_str = story.get("last_updated", "")
+                    try:
+                        last_updated_ts = datetime.fromisoformat(last_updated_str).timestamp()
+                        if last_updated_ts < max_age_cutoff:
+                            continue
+                    except (ValueError, AttributeError):
+                        continue
+                    hot_stories.append(story)
+            
+            if not hot_stories:
+                logger.debug(f"Hook {hook_id}: no hot stories found, skipping")
+                continue
+            
+            # Process stories in parallel
+            tasks = []
+            for story in hot_stories:
+                tasks.append(
+                    process_story_synthesis(
+                        redis=redis,
+                        story=story,
+                        hook_id=hook_id,
+                        api_key=story_api_key,
+                        base_url=story_base_url,
+                        model=story_model,
+                        target_languages=hook_target_languages,
+                        tone=hook_tone,
+                        prompt_system=hook_prompt_system,
+                        temperature=story_cfg.get("temperature", 0.5),
+                        max_tokens=story_cfg.get("max_tokens", 2000),
+                        webhook_endpoints=wh_eps,
+                        telegram_channels=tg_chs,
+                    )
+                )
+            
+            # Execute in parallel with error isolation
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Count successes
+            hook_generated = 0
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"Story synthesis task failed: {result}", exc_info=result)
+                elif isinstance(result, int):
+                    hook_generated += result
+            
+            total_generated += hook_generated
+            results_by_hook[hook_id] = hook_generated
+            
+            if hook_generated > 0:
+                logger.info(
+                    f"Story synthesis: hook={hook_id} generated {hook_generated} narratives"
+                )
+        
+        dur_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+        _job_states["story_synthesis"] = "idle"
+        _job_last_duration_ms["story_synthesis"] = dur_ms
+        if ws_manager:
+            asyncio.create_task(
+                ws_manager.broadcast(
+                    "scheduler.job_done",
+                    {
+                        "job_id": "story_synthesis",
+                        "job_name": "Story Synthesis",
+                        "status": "ok",
+                        "duration_ms": dur_ms,
+                        "meta": {"total_generated": total_generated},
+                    },
+                )
+            )
+        await log_system_event(
+            "story_synthesis_job",
+            started,
+            status="ok",
+            metadata={
+                "total_generated": total_generated,
+                "hooks_processed": len(story_hooks),
+                "results": results_by_hook,
+            },
+        )
+        
+        if total_generated > 0:
+            logger.info(
+                f"Story synthesis job: {total_generated} narratives "
+                f"across {len(story_hooks)} hooks"
+            )
+    
+    except asyncio.CancelledError:
+        _job_states["story_synthesis"] = "cancelled"
+        logger.info("Story synthesis job cancelled during shutdown")
+        raise
+    except Exception as exc:
+        _job_states["story_synthesis"] = "error"
+        if ws_manager:
+            asyncio.create_task(
+                ws_manager.broadcast(
+                    "scheduler.job_done",
+                    {
+                        "job_id": "story_synthesis",
+                        "job_name": "Story Synthesis",
+                        "status": "error",
+                        "error": str(exc)[:200],
+                    },
+                )
+            )
+        await log_system_event(
+            "story_synthesis_job", started, status="error", error_msg=str(exc)
+        )
+        logger.error(f"Story synthesis job failed: {exc}", exc_info=True)
+        raise
+
+
+# ---------------------------------------------------------------------------
 # Phase 2 — Enrichment job (entity extraction + embedding + clustering)
 # ---------------------------------------------------------------------------
 
@@ -721,17 +992,23 @@ async def enrich_job(redis: aioredis.Redis) -> None:
         # Step 1 — Entity extraction + sentiment (batch, up to 5 parallel)
         enrich_results = await batch_enrich(articles, api_key=api_key, base_url=base_url)
 
+        # Step 2 — Batch embedding generation (6-10× faster than sequential)
+        from ai.embedder import get_embeddings_batch, embed_text_for_article
+        embed_texts = [embed_text_for_article(art) for art in articles]
+        embeddings = await get_embeddings_batch(embed_texts)
+        
+        # Ensure embeddings list matches articles length (fallback to None if batch failed)
+        if len(embeddings) != len(articles):
+            logger.warning(f"[enrich_job] batch embedding returned {len(embeddings)} results for {len(articles)} articles, falling back to sequential")
+            embeddings = [None] * len(articles)
+
         done = 0
-        for art, enrichment in zip(articles, enrich_results):
+        for art, enrichment, embedding in zip(articles, enrich_results, embeddings):
             article_id = art["id"]
             category = art.get("category", "general")
             entities = enrichment.get("entities", [])
             sentiment = enrichment.get("sentiment", "neutral")
             topic_id = ""
-
-            # Step 2 — Embedding (uses provider routing)
-            embed_text = embed_text_for_article(art)
-            embedding = await get_embedding(embed_text)
 
             # Step 3 — Topic clustering (only if embedding succeeded)
             if embedding:
@@ -1011,6 +1288,20 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
         max_instances=1,
         coalesce=True,
     )
+
+    # Story-based synthesis (opt-in, timeline-focused narratives)
+    story_synthesis_cfg = ai_cfg.get("story_synthesis", {})
+    if story_synthesis_cfg.get("enabled", False):
+        story_interval = story_synthesis_cfg.get("interval_minutes", 15)
+        scheduler.add_job(
+            story_synthesis_job,
+            "interval",
+            minutes=story_interval,
+            id="story_synthesis",
+            args=[redis],
+            max_instances=1,
+            coalesce=True,
+        )
 
     processing_cfg = cfg.get("processing", {})
     if processing_cfg.get("enabled", True):

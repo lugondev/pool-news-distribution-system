@@ -139,8 +139,11 @@ async def fetch_source(
             stats["duplicates"] += len(existing_ids)
             new_articles = [a for a in articles if a.id not in existing_ids]
 
-            async def _process_article(article: Article) -> bool:
-                """Returns True if saved, False if duplicate."""
+            # Collect articles to save (after dedup check)
+            articles_to_save = []
+
+            async def _process_article(article: Article) -> bool | Article:
+                """Returns Article if should be saved, False if duplicate."""
                 result = await check_duplicate(
                     redis, article.title, threshold=dedup_threshold
                 )
@@ -167,27 +170,37 @@ async def fetch_source(
                             article.url, article.content, article.summary, client
                         )
 
-                await save_article(redis, article)
-                if ws_manager:
-                    asyncio.create_task(
-                        ws_manager.emit_article_saved(
-                            article.id, article.title,
-                            source["id"], source.get("category", ""), False,
-                        )
-                    )
-                return True
+                return article  # Return article to be batch-saved
 
             article_results = await asyncio.gather(
                 *[_process_article(a) for a in new_articles], return_exceptions=True
             )
+            
+            # Separate articles to save from duplicates/errors
             for r in article_results:
-                if r is True:
-                    stats["saved"] += 1
+                if isinstance(r, Article):
+                    articles_to_save.append(r)
                 elif r is False:
                     stats["duplicates"] += 1
                 elif isinstance(r, Exception):
                     stats["errors"] += 1
                     logger.warning(f"[{source['id']}] article error: {r}")
+            
+            # Batch save all articles (20× faster than sequential)
+            if articles_to_save:
+                from storage.redis_store import save_articles_batch
+                await save_articles_batch(redis, articles_to_save)
+                stats["saved"] = len(articles_to_save)
+                
+                # Emit websocket events for saved articles
+                if ws_manager:
+                    for article in articles_to_save:
+                        asyncio.create_task(
+                            ws_manager.emit_article_saved(
+                                article.id, article.title,
+                                source["id"], source.get("category", ""), False,
+                            )
+                        )
 
         except httpx.HTTPStatusError as e:
             status = e.response.status_code

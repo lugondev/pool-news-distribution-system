@@ -27,18 +27,33 @@ logger = logging.getLogger(__name__)
 
 
 def _build_synth_lang_spec(
-    target_language: str | None,
+    target_languages: list[str] | str | None,
     length_guidance: str,
 ) -> tuple[list[str], str]:
     """Build output language list and JSON fields spec for the synthesis prompt.
 
     Returns (output_languages, output_fields_spec).
-    output_languages: e.g. ["en"] or ["en", "zh"]
+    output_languages: e.g. ["en"] or ["en", "zh", "vi"]
     output_fields_spec: indented field lines to inject into the prompt JSON template
+    
+    Args:
+        target_languages: List of language codes (e.g. ["vi", "ja"]) or single string (backward compat)
+        length_guidance: Length instruction for content field
     """
-    langs = ["en"]
-    if target_language and target_language.lower() != "en":
-        langs.append(target_language.lower())
+    # Normalize input to list
+    if target_languages is None:
+        langs = ["en"]
+    elif isinstance(target_languages, str):
+        # Backward compatibility: single string → list
+        langs = ["en"]
+        if target_languages.lower() != "en":
+            langs.append(target_languages.lower())
+    else:
+        # Multi-language mode
+        langs = ["en"] if "en" not in target_languages else []
+        langs.extend([lang.lower() for lang in target_languages if lang.lower() != "en"])
+        if not langs:
+            langs = ["en"]  # Fallback
 
     lines = []
     for lang in langs:
@@ -144,12 +159,17 @@ async def synthesize_topic_articles(
     base_url: str | None = None,
     max_tokens: int = 2000,
     temperature: float = 0.5,
-    target_language: str | None = None,
+    target_language: str | None = None,  # Deprecated: use target_languages
+    target_languages: list[str] | None = None,  # New: multi-language support
     prompt_system_override: str | None = None,
 ) -> list[dict]:
     """
     Analyze multiple articles from same category and generate 1-8 synthetic summaries.
     AI autonomously decides the output count based on content diversity.
+
+    Args:
+        target_language: (Deprecated) Single language code for backward compatibility
+        target_languages: List of language codes (e.g. ["vi", "ja", "ko"])
 
     Returns: List of synthetic article dicts (length determined by AI).
     """
@@ -187,7 +207,9 @@ async def synthesize_topic_articles(
         length_guidance = "approximately 200-300 characters"
 
     # Build output language spec (en always present, plus target if configured)
-    output_languages, output_fields_spec = _build_synth_lang_spec(target_language, length_guidance)
+    # Priority: target_languages (new) > target_language (deprecated)
+    langs_input = target_languages if target_languages is not None else target_language
+    output_languages, output_fields_spec = _build_synth_lang_spec(langs_input, length_guidance)
 
     # Prepare article metadata
     time_span = _calculate_time_span(articles)
@@ -482,7 +504,8 @@ async def process_category_synthesis(
     base_url: str | None = None,
     webhook_endpoints: list[dict] | None = None,
     telegram_channels: list[dict] | None = None,
-    target_language: str | None = None,
+    target_language: str | None = None,  # Deprecated: use target_languages
+    target_languages: list[str] | None = None,  # New: multi-language support
     prompt_system_override: str | None = None,
 ) -> int:
     """
@@ -492,6 +515,10 @@ async def process_category_synthesis(
     Per-hook tracking (news:synth:used:{hook_id}:{category}) ensures the same
     source articles are never synthesized twice for the same hook, and that
     each hook independently accumulates fresh batches.
+    
+    Args:
+        target_language: (Deprecated) Single language code for backward compatibility
+        target_languages: List of language codes (e.g. ["vi", "ja", "ko"])
     """
     articles = await _get_unseen_articles(redis, category, hook_id, max_articles)
 
@@ -515,7 +542,8 @@ async def process_category_synthesis(
             tone=tone,
             api_key=api_key,
             base_url=base_url,
-            target_language=target_language,
+            target_language=target_language,  # Backward compat
+            target_languages=target_languages,  # New param
             prompt_system_override=prompt_system_override,
         )
     except Exception as e:
