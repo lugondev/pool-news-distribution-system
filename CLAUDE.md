@@ -35,7 +35,8 @@ The system is a pipeline: **RSS feeds → SimHash dedup → Redis → AI batch �
 3. **Topic synthesis job** (default every 10 min, optional): groups articles by category → AI analyzes content diversity → generates 1-8 synthetic summaries with different angles → saves to Redis. AI autonomously decides output count. **Supports two trigger modes:**
    - `trigger_mode: interval` — process all active categories on schedule (wastes quota on unused categories)
    - `trigger_mode: on_demand` — only process categories with enabled synthetic webhooks (recommended)
-4. **Scheduled webhook job** (default every 1 min): checks SQLite for due webhook schedules (cron-based) → fetches articles by filter → **respects ai_mode** → dispatches to configured endpoints. Articles are filtered based on endpoint's ai_mode:
+4. **Debate job** (default every 30 min, optional): multi-agent AI debate on stories with enough articles → 4 agents (optimist, pessimist, analyst, skeptic) debate different perspectives → generates balanced analysis → dispatches to webhooks + Telegram. **Only runs when debate.enabled=true and ai_mode="debate" hooks exist.** Model inherited from selected AI provider.
+5. **Scheduled webhook job** (default every 1 min): checks SQLite for due webhook schedules (cron-based) → fetches articles by filter → **respects ai_mode** → dispatches to configured endpoints. Articles are filtered based on endpoint's ai_mode:
    - `ai_mode: off` — dispatch all articles (default)
    - `ai_mode: rewrite` — only dispatch articles with ai_status="done"
    - `ai_mode: synthetic` — only dispatch synthetic articles (type="synthetic")
@@ -53,15 +54,16 @@ The system is a pipeline: **RSS feeds → SimHash dedup → Redis → AI batch �
 
 - **Article ID**: SHA256 of `source_id:url` (first 16 chars hex)
 - **Deduplication**: 64-bit SimHash on normalized titles; Hamming distance ≤ 3 = duplicate
-- **AI config**: All AI settings (api_key, base_url, model, tone) in `settings.yaml`, managed via Settings UI. Three tones: `formal`, `casual`, `general`. Test button verifies connectivity.
+- **AI config**: All AI settings managed via Settings UI → stored in `settings.yaml`. AI providers hold credentials (api_key, base_url, model). Each feature (rewrite, synthesis, debate) can select its own provider or inherit from global AI config. Three tones: `formal`, `casual`, `general`. Test button verifies connectivity.
 - **Retry logic**: `tenacity` with exponential backoff for AI (max 3 attempts, 2–10s) and webhooks (3 attempts, 5s delay)
 - **Payload modes**: Each webhook/Telegram channel configures `payload_mode`: `full` (all data), `fields` (pick specific), `template` (Jinja2 custom)
 - **Article type filtering**: Webhooks/Telegram can filter by article type (`original` from RSS, `synthetic` from AI). Modes: `all` (default), `include`, `exclude`
-- **AI mode filter**: All dispatch paths (ai_job, synthesis_job, scheduled_webhook_job) respect the `ai_mode` setting:
+- **AI mode filter**: All dispatch paths (ai_job, synthesis_job, debate_job, scheduled_webhook_job) respect the `ai_mode` setting:
   - `off` — raw articles, no AI processing
   - `rewrite` — one-to-one AI summaries, only dispatches ai_status="done"
   - `synthetic` — multi-article synthesis, only dispatches type="synthetic"
-  - `debate` — multi-agent debate, only dispatches type="debate"
+  - `debate` — multi-agent debate (4 perspectives), only dispatches type="debate"
+- **Debate mode**: Configurable via Settings UI → AI → Multi-Agent Debate. Toggle on/off, select AI provider (inherits from global if empty), set interval (5-120 min, default 30). Model is inherited from the selected provider. Requires webhooks/channels with `ai_mode: debate`.
 - **Webhook scheduling**: Cron-based scheduled webhook triggers managed via UI. SQLite stores schedules, APScheduler executes every minute. Scheduled webhooks respect ai_mode filters.
 - **Synthesis trigger modes**: `interval` (process all categories on schedule) vs `on_demand` (only categories with enabled synthetic hooks). On-demand mode prevents wasting API quota on unused categories.
 - **Age-based skip**: Articles older than category-specific thresholds (busy: 15min, moderate: 20min, quiet: 30min) are skipped during AI processing to save API quota. Configurable via `settings.yaml`. See `docs/AGE_SKIP_EXPLAINED.md` for details.
@@ -69,7 +71,7 @@ The system is a pipeline: **RSS feeds → SimHash dedup → Redis → AI batch �
 
 ## Configuration
 
-- `config/settings.yaml` — all tunable parameters (AI api_key/base_url/model/tone, crawl interval, batch sizes, webhook URLs, timeouts)
+- `config/settings.yaml` — all tunable parameters (AI providers, crawl interval, batch sizes, webhook URLs, timeouts, debate config)
 - `config/sources.yaml` — RSS source definitions (39 feeds: EN, VI, JA, KO across US/EU/ME/Asia)
 
 To add a new RSS source, add an entry to `config/sources.yaml` and restart.

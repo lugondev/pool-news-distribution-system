@@ -74,6 +74,16 @@ async def toggle_ai_synthesis():
     return {"ok": True, "enabled": synthesis["enabled"]}
 
 
+@router.post("/settings/ai/debate/toggle")
+async def toggle_ai_debate():
+    cfg = read_settings()
+    debate = cfg.setdefault("debate", {})
+    debate["enabled"] = not debate.get("enabled", False)
+    write_settings(cfg)
+    logger.info(f"API: Debate mode toggled → {'on' if debate['enabled'] else 'off'}")
+    return {"ok": True, "enabled": debate["enabled"]}
+
+
 # ── AI Providers ──────────────────────────────────────────────────────────────
 
 

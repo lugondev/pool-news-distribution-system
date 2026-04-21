@@ -187,6 +187,14 @@ curl -s -X POST $API/settings/ai/synthesis/toggle | jq .
 
 Topic synthesis groups articles by category and generates 1-8 synthetic summaries per category batch.
 
+### Toggle debate mode on/off
+
+```bash
+curl -s -X POST $API/settings/ai/debate/toggle | jq .
+```
+
+Debate mode runs multi-agent AI debates (4 perspectives) on stories with enough articles. Configurable via Settings UI → AI → Multi-Agent Debate.
+
 ## AI Providers
 
 Providers hold API credentials (api_key, base_url, model). Multiple providers can be configured.
@@ -1168,6 +1176,7 @@ redis-cli DEL news:dedup:simhashes
 | PUT | `/api/settings/ai` | Update AI config |
 | POST | `/api/settings/ai/toggle` | Toggle AI summary on/off |
 | POST | `/api/settings/ai/synthesis/toggle` | Toggle topic synthesis on/off |
+| POST | `/api/settings/ai/debate/toggle` | Toggle debate mode on/off |
 | GET | `/api/providers` | List AI providers (api_key masked) |
 | GET | `/api/providers/{id}` | Get provider (full api_key) |
 | POST | `/api/providers` | Add provider |
