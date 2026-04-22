@@ -49,8 +49,11 @@ def _make_article_id(source_id: str, url: str) -> str:
 
 
 def _strip_html(text: str) -> str:
-    if not text:
+    if not text or not text.strip():
         return ""
+    # Avoid BeautifulSoup warning when text looks like a filename
+    if len(text) < 2 or (len(text) < 100 and '/' in text and '<' not in text):
+        return text.strip()
     soup = BeautifulSoup(text, "lxml")
     return re.sub(r"\s+", " ", soup.get_text()).strip()
 

@@ -451,6 +451,11 @@ async def channel_feed(
 
                 # Process batch
                 result_art = await processor(batch, ch, redis)
+                if result_art is None:
+                    # Synthesis/debate produced no valid results, skip this batch
+                    logger.warning(f"Channel {ch_id}: {ai_mode} produced no results for batch {batch_idx}")
+                    continue
+                
                 payload = build_payload(result_art, ch)
                 if isinstance(payload, str):
                     articles_out.append({"content": payload, "id": result_art.get("id"), "published_at": result_art.get("published_at", "")})
@@ -670,6 +675,8 @@ async def channel_next(
             
             batch = filtered[:10]  # Take up to 10 articles
             article_out = await process_synthetic(batch, ch, redis)
+            if article_out is None:
+                raise HTTPException(204, "Synthesis produced no valid results")
             source_ids = [a["id"] for a in batch]
 
         elif ai_mode == "debate":
@@ -679,6 +686,8 @@ async def channel_next(
             
             batch = filtered[:10]  # Take up to 10 articles
             article_out = await process_debate(batch, ch, redis)
+            if article_out is None:
+                raise HTTPException(204, "Debate generation produced no valid results")
             source_ids = [a["id"] for a in batch]
 
         else:

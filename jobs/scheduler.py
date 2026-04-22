@@ -166,7 +166,7 @@ async def crawl_job(redis: aioredis.Redis) -> None:
                 },
             )
         )
-    
+
     try:
         current_cfg = _load_config()
         crawler = current_cfg.get("crawler", {})
@@ -577,7 +577,7 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
             hook_prompt_system,
         ) in synth_hooks:
             hook_cfg = wh_eps[0] if wh_eps else tg_chs[0] if tg_chs else {}
-            
+
             # Extract target_languages (new) or target_language (deprecated)
             hook_target_languages = hook_cfg.get("target_languages")
             if hook_target_languages is None and hook_target_lang:
@@ -605,7 +605,7 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
                 # Skip if hook's filter excludes this category
                 if not _cat_in_scope(category, hook_cfg):
                     continue
-                
+
                 task = process_category_synthesis(
                     redis=redis,
                     category=category,
@@ -622,18 +622,20 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
                     prompt_system_override=hook_prompt_system,
                 )
                 tasks.append((hook_id, category, task))
-            
+
             # Execute all categories in parallel (8× faster than sequential)
             if tasks:
                 results = await asyncio.gather(
                     *[t[2] for t in tasks], return_exceptions=True
                 )
-                
+
                 for (hook_id, category, _), result in zip(tasks, results):
                     if isinstance(result, Exception):
-                        logger.error(f"Synthesis failed for hook={hook_id} category={category}: {result}")
+                        logger.error(
+                            f"Synthesis failed for hook={hook_id} category={category}: {result}"
+                        )
                         continue
-                    
+
                     count = result
                     if count > 0:
                         key = f"{hook_id}/{category}"
@@ -710,7 +712,7 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
 
 async def story_synthesis_job(redis: aioredis.Redis) -> None:
     """Generates timeline-focused narrative synthesis for hot stories.
-    
+
     Unlike category synthesis (multiple angles per category), story synthesis:
     - Produces ONE narrative per story (chronological progression)
     - Only processes "hot" stories (min 3 articles, updated within 6h)
@@ -730,19 +732,19 @@ async def story_synthesis_job(redis: aioredis.Redis) -> None:
                 },
             )
         )
-    
+
     try:
         current_cfg = _load_config()
         ai = current_cfg.get("ai", {})
         story_cfg = ai.get("story_synthesis", {})
-        
+
         if not ai.get("enabled", True) or not story_cfg.get("enabled", False):
             _job_states["story_synthesis"] = "idle"
             return
-        
+
         wh = current_cfg.get("webhook", {})
         tg = current_cfg.get("telegram", {})
-        
+
         # Only dispatch to hooks that want story-based synthesis
         endpoints = [
             e
@@ -754,22 +756,22 @@ async def story_synthesis_job(redis: aioredis.Redis) -> None:
             for c in tg.get("channels", [])
             if _active(c) and c.get("ai_mode") == "story"
         ]
-        
+
         if not endpoints and not tg_channels:
             _job_states["story_synthesis"] = "idle"
             return  # no hooks want story synthesis
-        
+
         # Resolve provider
         story_provider_id = story_cfg.get("provider_id") or ai.get("provider_id")
         story_api_key, story_base_url, story_model_override = _resolve_provider(
             ai, story_provider_id
         )
         story_model = story_model_override
-        
+
         active_cats = [
             c["id"] for c in current_cfg.get("categories", []) if c.get("enabled", True)
         ]
-        
+
         if not active_cats:
             _job_states["story_synthesis"] = "idle"
             await log_system_event(
@@ -779,15 +781,15 @@ async def story_synthesis_job(redis: aioredis.Redis) -> None:
                 metadata={"reason": "no active categories"},
             )
             return
-        
+
         # Story filtering config
         min_articles = story_cfg.get("min_articles", 3)
         max_age_hours = story_cfg.get("max_age_hours", 6)
         max_age_cutoff = datetime.now(timezone.utc).timestamp() - (max_age_hours * 3600)
-        
+
         total_generated = 0
         results_by_hook = {}
-        
+
         # Build hooks list (similar to topic_synthesis_job)
         story_hooks = []
         for ep in endpoints:
@@ -814,7 +816,7 @@ async def story_synthesis_job(redis: aioredis.Redis) -> None:
                     resolved["prompt_system"],
                 )
             )
-        
+
         # Process each hook
         for (
             hook_id,
@@ -825,12 +827,12 @@ async def story_synthesis_job(redis: aioredis.Redis) -> None:
             hook_prompt_system,
         ) in story_hooks:
             hook_cfg = wh_eps[0] if wh_eps else tg_chs[0] if tg_chs else {}
-            
+
             # Extract target_languages
             hook_target_languages = hook_cfg.get("target_languages")
             if hook_target_languages is None and hook_target_lang:
                 hook_target_languages = [hook_target_lang]
-            
+
             # Get hot stories across all active categories
             hot_stories = []
             for category in active_cats:
@@ -841,17 +843,19 @@ async def story_synthesis_job(redis: aioredis.Redis) -> None:
                         continue
                     last_updated_str = story.get("last_updated", "")
                     try:
-                        last_updated_ts = datetime.fromisoformat(last_updated_str).timestamp()
+                        last_updated_ts = datetime.fromisoformat(
+                            last_updated_str
+                        ).timestamp()
                         if last_updated_ts < max_age_cutoff:
                             continue
                     except (ValueError, AttributeError):
                         continue
                     hot_stories.append(story)
-            
+
             if not hot_stories:
                 logger.debug(f"Hook {hook_id}: no hot stories found, skipping")
                 continue
-            
+
             # Process stories in parallel
             tasks = []
             for story in hot_stories:
@@ -872,26 +876,28 @@ async def story_synthesis_job(redis: aioredis.Redis) -> None:
                         telegram_channels=tg_chs,
                     )
                 )
-            
+
             # Execute in parallel with error isolation
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
             # Count successes
             hook_generated = 0
             for result in results:
                 if isinstance(result, Exception):
-                    logger.error(f"Story synthesis task failed: {result}", exc_info=result)
+                    logger.error(
+                        f"Story synthesis task failed: {result}", exc_info=result
+                    )
                 elif isinstance(result, int):
                     hook_generated += result
-            
+
             total_generated += hook_generated
             results_by_hook[hook_id] = hook_generated
-            
+
             if hook_generated > 0:
                 logger.info(
                     f"Story synthesis: hook={hook_id} generated {hook_generated} narratives"
                 )
-        
+
         dur_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
         _job_states["story_synthesis"] = "idle"
         _job_last_duration_ms["story_synthesis"] = dur_ms
@@ -918,13 +924,13 @@ async def story_synthesis_job(redis: aioredis.Redis) -> None:
                 "results": results_by_hook,
             },
         )
-        
+
         if total_generated > 0:
             logger.info(
                 f"Story synthesis job: {total_generated} narratives "
                 f"across {len(story_hooks)} hooks"
             )
-    
+
     except asyncio.CancelledError:
         _job_states["story_synthesis"] = "cancelled"
         logger.info("Story synthesis job cancelled during shutdown")
@@ -972,7 +978,9 @@ async def enrich_job(redis: aioredis.Redis) -> None:
             return
 
         ai_cfg = cfg.get("ai", {})
-        api_key, base_url, _ = _resolve_provider(ai_cfg)
+        # Use enrichment-specific provider if set, otherwise fall back to default AI provider
+        enrichment_provider_id = processing_cfg.get("provider_id")
+        api_key, base_url, _ = _resolve_provider(ai_cfg, enrichment_provider_id)
         batch_size = processing_cfg.get("enrich_batch_size", 10)
         cluster_threshold = float(processing_cfg.get("cluster_threshold", 0.75))
 
@@ -991,16 +999,21 @@ async def enrich_job(redis: aioredis.Redis) -> None:
         logger.info(f"=== Enrich job: processing {len(articles)} articles ===")
 
         # Step 1 — Entity extraction + sentiment (batch, up to 5 parallel)
-        enrich_results = await batch_enrich(articles, api_key=api_key, base_url=base_url)
+        enrich_results = await batch_enrich(
+            articles, api_key=api_key, base_url=base_url
+        )
 
         # Step 2 — Batch embedding generation (6-10× faster than sequential)
         from ai.embedder import get_embeddings_batch, embed_text_for_article
+
         embed_texts = [embed_text_for_article(art) for art in articles]
         embeddings = await get_embeddings_batch(embed_texts)
-        
+
         # Ensure embeddings list matches articles length (fallback to None if batch failed)
         if len(embeddings) != len(articles):
-            logger.warning(f"[enrich_job] batch embedding returned {len(embeddings)} results for {len(articles)} articles, falling back to sequential")
+            logger.warning(
+                f"[enrich_job] batch embedding returned {len(embeddings)} results for {len(articles)} articles, falling back to sequential"
+            )
             embeddings = [None] * len(articles)
 
         done = 0
@@ -1035,13 +1048,17 @@ async def enrich_job(redis: aioredis.Redis) -> None:
             art["entities"] = entities
             art["sentiment"] = sentiment
             art["topic_id"] = topic_id
-            await save_article_enrichment(redis, article_id, entities, sentiment, topic_id)
+            await save_article_enrichment(
+                redis, article_id, entities, sentiment, topic_id
+            )
 
             # Step 5 — Index to Weaviate (vector store for RAG)
             if embedding:
                 indexed = await index_article(art, embedding)
                 if not indexed:
-                    logger.debug(f"[enrich_job] Weaviate indexing skipped for {article_id}")
+                    logger.debug(
+                        f"[enrich_job] Weaviate indexing skipped for {article_id}"
+                    )
 
             # Step 6 — Assign to story cluster
             try:
@@ -1063,14 +1080,16 @@ async def enrich_job(redis: aioredis.Redis) -> None:
         dur_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
         _job_states["enrich"] = "idle"
         _job_last_duration_ms["enrich"] = dur_ms
-        logger.info(f"Enrich job: {done}/{len(articles)} articles enriched in {dur_ms}ms")
+        logger.info(
+            f"Enrich job: {done}/{len(articles)} articles enriched in {dur_ms}ms"
+        )
         await log_system_event(
             "enrich_job",
             started,
             status="ok",
             metadata={"processed": done, "duration_ms": dur_ms},
         )
-    
+
     except asyncio.CancelledError:
         _job_states["enrich"] = "cancelled"
         logger.info("Enrich job cancelled during shutdown")
@@ -1078,7 +1097,9 @@ async def enrich_job(redis: aioredis.Redis) -> None:
     except Exception as exc:
         _job_states["enrich"] = "error"
         logger.error(f"Enrich job failed: {exc}")
-        await log_system_event("enrich_job", started, status="error", error_msg=str(exc))
+        await log_system_event(
+            "enrich_job", started, status="error", error_msg=str(exc)
+        )
         raise
 
 

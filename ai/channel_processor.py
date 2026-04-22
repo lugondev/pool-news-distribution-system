@@ -263,7 +263,7 @@ async def process_synthetic(
     articles: list[dict[str, Any]],
     channel: dict[str, Any],
     redis,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     """
     Process multiple articles into synthetic summary.
     
@@ -273,7 +273,7 @@ async def process_synthetic(
         redis: Redis connection
         
     Returns:
-        Synthetic article dict
+        Synthetic article dict, or None if synthesis produces no valid results
     """
     if len(articles) < 2:
         raise ValueError("Need at least 2 articles for synthesis")
@@ -312,7 +312,8 @@ async def process_synthetic(
         )
         
         if not results:
-            raise ValueError("Synthesis produced no results")
+            logger.warning(f"Channel {channel['id']}: synthesis produced no valid results for {category}")
+            return None
         
         # Take first result
         synthetic = results[0]
@@ -341,7 +342,7 @@ async def process_debate(
     articles: list[dict[str, Any]],
     channel: dict[str, Any],
     redis,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     """
     Process multiple articles into debate format.
     
@@ -351,7 +352,7 @@ async def process_debate(
         redis: Redis connection
         
     Returns:
-        Debate article dict
+        Debate article dict, or None if debate generation produces no valid results
     """
     if len(articles) < 2:
         raise ValueError("Need at least 2 articles for debate")
@@ -390,7 +391,8 @@ async def process_debate(
         )
         
         if not results:
-            raise ValueError("Debate generation produced no results")
+            logger.warning(f"Channel {channel['id']}: debate generation produced no valid results for {category}")
+            return None
         
         # Take first result and mark as debate
         debate = results[0]

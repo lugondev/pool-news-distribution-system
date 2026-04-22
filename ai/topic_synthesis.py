@@ -15,12 +15,21 @@ import hashlib
 from datetime import datetime, timezone
 
 from openai import AsyncOpenAI, RateLimitError
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_not_exception_type
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_not_exception_type,
+)
 
 import redis.asyncio as aioredis
 from ai.rewriter import get_openai_client, TONE_PROMPTS, _load_ai_config, LANG_NAMES
 from storage.config_cache import cached_yaml  # noqa: F401 — available for future use
-from ai.provider_utils import build_response_format, parse_ai_json, SCHEMA_TOPIC_SYNTHESIS
+from ai.provider_utils import (
+    build_response_format,
+    parse_ai_json,
+    SCHEMA_TOPIC_SYNTHESIS,
+)
 from webhook.dispatcher import enqueue_dispatch
 
 logger = logging.getLogger(__name__)
@@ -35,7 +44,7 @@ def _build_synth_lang_spec(
     Returns (output_languages, output_fields_spec).
     output_languages: e.g. ["en"] or ["en", "zh", "vi"]
     output_fields_spec: indented field lines to inject into the prompt JSON template
-    
+
     Args:
         target_languages: List of language codes (e.g. ["vi", "ja"]) or single string (backward compat)
         length_guidance: Length instruction for content field
@@ -51,7 +60,9 @@ def _build_synth_lang_spec(
     else:
         # Multi-language mode
         langs = ["en"] if "en" not in target_languages else []
-        langs.extend([lang.lower() for lang in target_languages if lang.lower() != "en"])
+        langs.extend(
+            [lang.lower() for lang in target_languages if lang.lower() != "en"]
+        )
         if not langs:
             langs = ["en"]  # Fallback
 
@@ -59,7 +70,9 @@ def _build_synth_lang_spec(
     for lang in langs:
         lang_name = LANG_NAMES.get(lang, lang.upper())
         lines.append(f'      "title_{lang}": "{lang_name} title (max 100 chars)",')
-        lines.append(f'      "content_{lang}": "{lang_name} summary (3-4 sentences, {length_guidance})",')  # noqa: E501
+        lines.append(
+            f'      "content_{lang}": "{lang_name} summary (3-4 sentences, {length_guidance})",'
+        )  # noqa: E501
 
     return langs, "\n".join(lines)
 
@@ -79,7 +92,7 @@ Your task:
 2. Generate between 1 and 8 summaries, where EACH summary must:
    - Cover a unique angle that is NOT covered by other summaries
    - Provide standalone value (not generic rehash)
-   - Be 3-4 sentences in each required language
+   - Be 3-4 complete sentences in each required language (MINIMUM 50 characters per language)
    - Include a clear, descriptive title
 
 Decision guidelines:
@@ -102,7 +115,12 @@ Output format (JSON only, no other text):
   ]
 }}
 
-IMPORTANT: Each summary text must be {length_guidance}.
+CRITICAL LENGTH REQUIREMENTS:
+- Each content field MUST be {length_guidance}
+- Each content field MUST contain at least 3-4 complete sentences
+- MINIMUM 50 characters per language field - summaries shorter than this will be rejected
+- Do NOT use fragments, bullet points, or incomplete sentences
+- Write full, coherent summaries with proper context and detail
 """
 
 
@@ -151,7 +169,7 @@ def _count_unique_sources(articles: list[dict]) -> int:
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
-    retry=retry_if_not_exception_type(RateLimitError)
+    retry=retry_if_not_exception_type(RateLimitError),
 )
 async def synthesize_topic_articles(
     articles: list[dict],
@@ -185,6 +203,7 @@ async def synthesize_topic_articles(
 
     # Load timeout from settings
     from dashboard.config_io import cached_yaml
+
     cfg = cached_yaml("config/settings.yaml")
     timeout = cfg.get("channels_config", {}).get("ai_timeout_seconds", 60)
 
@@ -192,8 +211,10 @@ async def synthesize_topic_articles(
     ai_cfg = _load_ai_config()
     resolved_base_url = base_url or ai_cfg.get("base_url", "https://api.openai.com/v1")
     resolved_model = model or ai_cfg.get("model", "")
-    
-    client = get_openai_client(api_key=api_key, base_url=resolved_base_url, timeout=timeout)
+
+    client = get_openai_client(
+        api_key=api_key, base_url=resolved_base_url, timeout=timeout
+    )
 
     # Build tone instruction — per-hook override takes priority, then global prompt_system, then tone
     custom_system = (ai_cfg.get("prompt_system") or "").strip()
@@ -213,7 +234,9 @@ async def synthesize_topic_articles(
     # Build output language spec (en always present, plus target if configured)
     # Priority: target_languages (new) > target_language (deprecated)
     langs_input = target_languages if target_languages is not None else target_language
-    output_languages, output_fields_spec = _build_synth_lang_spec(langs_input, length_guidance)
+    output_languages, output_fields_spec = _build_synth_lang_spec(
+        langs_input, length_guidance
+    )
 
     # Prepare article metadata
     time_span = _calculate_time_span(articles)
@@ -259,7 +282,9 @@ async def synthesize_topic_articles(
         model=resolved_model,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=max_tokens,
-        response_format=build_response_format(resolved_base_url, "topic_synthesis", SCHEMA_TOPIC_SYNTHESIS),
+        response_format=build_response_format(
+            resolved_base_url, "topic_synthesis", SCHEMA_TOPIC_SYNTHESIS
+        ),
         temperature=temperature,
     )
 
@@ -307,8 +332,19 @@ async def synthesize_topic_articles(
             )
             continue
 
-        if any(len(summary.get(f"content_{lang}", "")) < 50 for lang in output_languages):
-            logger.warning(f"Skipping summary #{idx}: content too short")
+        # Check length for each language and provide detailed feedback
+        too_short = []
+        for lang in output_languages:
+            content = summary.get(f"content_{lang}", "")
+            content_len = len(content)
+            if content_len < 50:
+                too_short.append(f"{lang}={content_len}chars")
+
+        if too_short:
+            logger.warning(
+                f"Skipping summary #{idx}: content too short ({', '.join(too_short)}, "
+                f"minimum 50 chars required). Title: {summary.get('title_en', 'N/A')[:50]}"
+            )
             continue
 
         synth_id = f"{base_synth_id}_{idx}"
@@ -335,6 +371,15 @@ async def synthesize_topic_articles(
         synth["title_target"] = synth.get(f"title_{_target}", "") if _target else ""
 
         synthetic_articles.append(synth)
+
+    # Log summary of acceptance vs rejection
+    accepted_count = len(synthetic_articles)
+    rejected_count = len(summaries) - accepted_count
+    if rejected_count > 0:
+        logger.warning(
+            f"Synthesis quality check: {accepted_count}/{len(summaries)} summaries accepted, "
+            f"{rejected_count} rejected (too short). Model: {resolved_model}"
+        )
 
     return synthetic_articles
 
@@ -453,7 +498,8 @@ async def _get_unseen_articles(
     used_ids = {_d(m) for m in used_raw}
     synth_ids = {_d(m) for m in synth_raw}
     unseen_ids = [
-        rid for r in candidate_raw
+        rid
+        for r in candidate_raw
         if (rid := _d(r)) not in used_ids and rid not in synth_ids
     ][:max_articles]
 
@@ -492,7 +538,9 @@ async def _mark_articles_used(
         pipe.zadd(used_key, {aid: now_ts})
     # Prune entries older than the max-age window
     pipe.zremrangebyscore(used_key, 0, cutoff)
-    pipe.expire(used_key, SYNTH_MAX_AGE_SECONDS + 3600)  # slight buffer over article TTL
+    pipe.expire(
+        used_key, SYNTH_MAX_AGE_SECONDS + 3600
+    )  # slight buffer over article TTL
     await pipe.execute()
 
 
@@ -519,7 +567,7 @@ async def process_category_synthesis(
     Per-hook tracking (news:synth:used:{hook_id}:{category}) ensures the same
     source articles are never synthesized twice for the same hook, and that
     each hook independently accumulates fresh batches.
-    
+
     Args:
         target_language: (Deprecated) Single language code for backward compatibility
         target_languages: List of language codes (e.g. ["vi", "ja", "ko"])

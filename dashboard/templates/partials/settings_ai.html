@@ -383,6 +383,91 @@
       </span>
     </div>
 
+    <hr class="divider" style="margin:24px 0">
+    
+    <p class="section-title">
+      Article Enrichment
+      <span class="hint">— entity extraction + sentiment analysis for articles</span>
+    </p>
+    
+    <div style="background:rgba(251,191,36,.08);border:1px solid var(--yellow);border-radius:8px;padding:14px;margin-bottom:16px;font-size:12px">
+      <div style="font-weight:600;margin-bottom:6px;color:var(--yellow)">⚙️ Advanced Feature</div>
+      <div style="line-height:1.5;color:var(--text)">
+        Enrichment extracts <b>entities</b> (people, organizations, countries, products, technologies) and <b>sentiment</b> (positive/negative/neutral) from articles.
+        This data powers:
+        <ul style="margin:8px 0 0 20px;padding:0">
+          <li>Topic clustering (group related articles)</li>
+          <li>Story detection (identify major news events)</li>
+          <li>Trend analysis</li>
+          <li>Weaviate indexing (vector search)</li>
+        </ul>
+      </div>
+      <div style="margin-top:8px;padding:8px;background:rgba(239,68,68,.1);border-left:3px solid var(--red);font-size:11px">
+        <b>⚠️ Note:</b> Each article processed = 1 AI API call (~200 tokens). If you don't use topic clustering or story detection, <b>keep this disabled</b> to save API quota.
+      </div>
+    </div>
+    
+    <div class="toggle-row" style="margin-bottom:16px">
+      <input type="hidden" name="enrichment_enabled" value="off">
+      <input type="checkbox" name="enrichment_enabled" value="on" id="enrichment-enabled"
+             {% if processing and processing.enabled %}checked{% endif %}
+             style="accent-color:var(--accent)"
+             onchange="document.getElementById('enrichment-settings').style.display=this.checked?'':'none'">
+      <label for="enrichment-enabled" class="toggle-label">Enable article enrichment</label>
+      {% if processing and processing.enabled %}
+        <span class="toggle-status toggle-on">ACTIVE</span>
+      {% else %}
+        <span class="toggle-status toggle-off">DISABLED</span>
+      {% endif %}
+    </div>
+    
+    <div id="enrichment-settings" style="display:{% if processing and processing.enabled %}''{% else %}none{% endif %};padding-left:20px;border-left:2px solid var(--border)">
+      {% if providers %}
+      <div class="form-row-2" style="margin-bottom:14px">
+        <div class="form-group" style="margin-bottom:0">
+          <label>Provider <span class="hint">— AI provider for entity extraction</span></label>
+          <select name="enrichment_provider_id" style="width:100%">
+            <option value="">— inherit from AI Summary —</option>
+            {% for p in providers %}
+            <option value="{{ p.id }}" {% if processing and processing.provider_id == p.id %}selected{% endif %}>
+              {{ p.name }} — {{ p.base_url }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      {% else %}
+      <input type="hidden" name="enrichment_provider_id" value="">
+      {% endif %}
+
+      <div class="form-row-2" style="margin-bottom:0">
+        <div class="form-group">
+          <label>Batch Size <span class="hint">— articles per batch</span></label>
+          <input type="number" name="enrichment_batch_size" 
+                 value="{{ processing.enrich_batch_size if processing else 30 }}" 
+                 min="5" max="100">
+          <div style="font-size:10px;color:var(--muted);margin-top:4px">
+            How many articles to process in each batch (default: 30)
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Interval <span class="hint">min</span></label>
+          <input type="number" name="enrichment_interval" 
+                 value="{{ processing.enrich_interval_minutes if processing else 5 }}" 
+                 min="1" max="60">
+          <div style="font-size:10px;color:var(--muted);margin-top:4px">
+            How often to run enrichment job (default: 5 min)
+          </div>
+        </div>
+      </div>
+      
+      <div style="font-size:11px;color:var(--muted);margin-top:12px;padding:10px;background:var(--panel);border-radius:6px">
+        <b>Example output:</b><br>
+        <code style="font-size:10px">{"entities": ["OpenAI", "Microsoft", "Sam Altman"], "sentiment": "positive"}</code><br>
+        Enrichment runs in background after articles are crawled. Check <code>/logs</code> for processing stats.
+      </div>
+    </div>
+
     <div class="form-actions">
       <button type="submit" class="btn btn-primary">Save Settings</button>
     </div>

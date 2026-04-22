@@ -20,17 +20,23 @@ LOG_PAGE_SIZE = 15
 
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
-    return templates.TemplateResponse("settings.html", {"request": request, "active_page": "settings"})
+    return templates.TemplateResponse(
+        "settings.html", {"request": request, "active_page": "settings"}
+    )
 
 
 @router.get("/logs", response_class=HTMLResponse)
 async def logs_page(request: Request):
-    return templates.TemplateResponse("logs.html", {"request": request, "active_page": "logs"})
+    return templates.TemplateResponse(
+        "logs.html", {"request": request, "active_page": "logs"}
+    )
 
 
 @router.get("/social-articles", response_class=HTMLResponse)
 async def social_articles_page(request: Request):
-    return templates.TemplateResponse("social_articles.html", {"request": request, "active_page": "social_articles"})
+    return templates.TemplateResponse(
+        "social_articles.html", {"request": request, "active_page": "social_articles"}
+    )
 
 
 # ── General settings ──────────────────────────────────────────────────────────
@@ -60,7 +66,11 @@ async def settings_general_update(
     logger.info(f"General settings updated: timezone={tz_name}")
     return templates.TemplateResponse(
         "partials/settings_general.html",
-        {"request": request, "app_cfg": cfg.get("app", {}), "success": "Settings saved."},
+        {
+            "request": request,
+            "app_cfg": cfg.get("app", {}),
+            "success": "Settings saved.",
+        },
     )
 
 
@@ -83,8 +93,11 @@ def _ai_partial_ctx(cfg: dict, request: Request, **extra) -> dict:
         "ai_configs": ai_cfg.get("configs", []),
         "crawler": cfg.get("crawler", {}),
         "debate": cfg.get("debate", {}),
+        "processing": cfg.get("processing", {}),
         "builtin_tone_prompts": TONE_PROMPTS,
-        "builtin_prompt_template": SUMMARIZE_PROMPT.replace("{length_guidance}", length_guidance),
+        "builtin_prompt_template": SUMMARIZE_PROMPT.replace(
+            "{length_guidance}", length_guidance
+        ),
         **extra,
     }
 
@@ -124,11 +137,19 @@ async def settings_ai_update(
     debate_enabled: str = Form("off"),
     debate_provider_id: str = Form(""),
     debate_interval: int = Form(30),
+    enrichment_enabled: str = Form("off"),
+    enrichment_provider_id: str = Form(""),
+    enrichment_batch_size: int = Form(30),
+    enrichment_interval: int = Form(5),
 ):
     delay_parts = domain_delay.replace(" ", "").split("-")
     try:
         delay_min = max(0.1, float(delay_parts[0]))
-        delay_max = max(delay_min, float(delay_parts[1])) if len(delay_parts) > 1 else delay_min + 1.0
+        delay_max = (
+            max(delay_min, float(delay_parts[1]))
+            if len(delay_parts) > 1
+            else delay_min + 1.0
+        )
     except (ValueError, IndexError):
         delay_min, delay_max = 0.5, 1.5
 
@@ -160,25 +181,45 @@ async def settings_ai_update(
             "max_tokens": 2000,
         },
     }
-    cfg.setdefault("crawler", {}).update({
-        "fetch_interval_minutes": max(1, min(crawl_interval, 60)),
-        "stagger_groups": max(1, min(stagger_groups, 10)),
-        "domain_delay_min": delay_min,
-        "domain_delay_max": delay_max,
-    })
+    cfg.setdefault("crawler", {}).update(
+        {
+            "fetch_interval_minutes": max(1, min(crawl_interval, 60)),
+            "stagger_groups": max(1, min(stagger_groups, 10)),
+            "domain_delay_min": delay_min,
+            "domain_delay_max": delay_max,
+        }
+    )
     cfg["debate"] = {
         "enabled": debate_enabled == "on",
         "provider_id": debate_provider_id.strip() or None,
         "interval_minutes": max(5, min(debate_interval, 120)),
     }
+
+    # Enrichment config
+    existing_processing = cfg.get("processing", {})
+    cfg["processing"] = {
+        "enabled": enrichment_enabled == "on",
+        "provider_id": enrichment_provider_id.strip() or None,
+        "enrich_batch_size": max(5, min(enrichment_batch_size, 100)),
+        "enrich_interval_minutes": max(1, min(enrichment_interval, 60)),
+        "embedding_model": existing_processing.get(
+            "embedding_model", "intfloat/multilingual-e5-large-instruct"
+        ),
+    }
+
     write_settings(cfg)
     logger.info(
         f"Settings updated: crawl={crawl_interval}min×{stagger_groups}groups, "
-        f"ai={ai_interval}min, synthesis={topic_synthesis_enabled}, debate={debate_enabled}"
+        f"ai={ai_interval}min, synthesis={topic_synthesis_enabled}, "
+        f"debate={debate_enabled}, enrichment={enrichment_enabled}"
     )
     return templates.TemplateResponse(
         "partials/settings_ai.html",
-        _ai_partial_ctx(cfg, request, success="Settings saved. Restart app to apply interval changes."),
+        _ai_partial_ctx(
+            cfg,
+            request,
+            success="Settings saved. Restart app to apply interval changes.",
+        ),
     )
 
 
@@ -193,7 +234,9 @@ async def settings_ai_test(request: Request):
         model=cfg.get("model"),
         tone=cfg.get("tone", "general"),
     )
-    return templates.TemplateResponse("partials/ai_test_result.html", {"request": request, "result": result})
+    return templates.TemplateResponse(
+        "partials/ai_test_result.html", {"request": request, "result": result}
+    )
 
 
 @router.get("/partials/ai-logs", response_class=HTMLResponse)

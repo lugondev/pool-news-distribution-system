@@ -33,7 +33,7 @@ services:
       start_period: 20s
 
   app:
-    build: .
+    image: 192.168.30.125:5001/news-aggregator:latest
     restart: unless-stopped
     ports:
       - "8000:8000"
