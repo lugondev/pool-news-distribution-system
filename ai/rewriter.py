@@ -285,9 +285,19 @@ async def rewrite_article(
     tokens = response.usage.total_tokens if response.usage else 0
 
     summaries: dict[str, str] = {}
-    summaries[origin_lang] = result.get(origin_lang, "")
+    
+    # Validate origin language summary exists and not empty
+    origin_summary = result.get(origin_lang, "").strip()
+    if not origin_summary:
+        raise ValueError(f"AI returned empty summary for {origin_lang}")
+    summaries[origin_lang] = origin_summary
+    
+    # Validate target language summary if requested
     if target_lang and target_lang != origin_lang:
-        summaries[target_lang] = result.get(target_lang, "")
+        target_summary = result.get(target_lang, "").strip()
+        if not target_summary:
+            raise ValueError(f"AI returned empty summary for {target_lang}")
+        summaries[target_lang] = target_summary
 
     return summaries, tokens
 

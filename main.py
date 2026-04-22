@@ -27,7 +27,8 @@ logger = logging.getLogger(__name__)
 
 # Import app sau load_dotenv để env vars có sẵn
 from dashboard.app import app as dashboard_app, get_redis
-from jobs.scheduler import get_scheduler
+from dashboard.config_io import on_settings_saved
+from jobs.scheduler import get_scheduler, reload_scheduler_jobs
 from storage.sqlite_stats import init_db
 from vector_db.weaviate_store import init_weaviate, close_weaviate
 from storage.lake_store import init_lake
@@ -67,17 +68,24 @@ async def _rebuild_dedup_set(redis: aioredis.Redis) -> None:
     titles = await pipe.execute()
 
     # Compute all hashes and add in one SADD call
+    # Error handling: skip corrupt titles to prevent startup crash
     hashes = []
+    skipped = 0
     for title_raw in titles:
-        if title_raw:
-            title = title_raw.decode() if isinstance(title_raw, bytes) else title_raw
-            hashes.append(_simhash(title))
+        try:
+            if title_raw:
+                title = title_raw.decode() if isinstance(title_raw, bytes) else title_raw
+                hashes.append(_simhash(title))
+        except Exception as e:
+            skipped += 1
+            logger.warning(f"Dedup rebuild: skipping corrupt title: {e}")
+            continue
 
     if hashes:
         await redis.sadd(DEDUP_SIMHASHES_KEY, *hashes)
         await redis.expire(DEDUP_SIMHASHES_KEY, DEDUP_TTL_SECONDS)
 
-    logger.info(f"Dedup set rebuilt: {len(hashes)} fingerprints from {len(ids)} articles")
+    logger.info(f"Dedup set rebuilt: {len(hashes)} fingerprints from {len(ids)} articles (skipped {skipped} corrupt)")
 
 
 @asynccontextmanager
@@ -108,6 +116,7 @@ async def lifespan(app: FastAPI):
         _cr = _cfg.get("crawler", {})
         _ai = _cfg.get("ai", {})
         scheduler = get_scheduler(redis)
+        on_settings_saved(reload_scheduler_jobs)
         scheduler.start()
         ci = _cr.get("fetch_interval_minutes", 3)
         sg = _cr.get("stagger_groups", 3)

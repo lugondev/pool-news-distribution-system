@@ -51,6 +51,7 @@ logger = logging.getLogger(__name__)
 _scheduler: AsyncIOScheduler | None = None
 _job_states: dict[str, str] = {}  # job_id → "idle" | "running" | "error"
 _job_last_duration_ms: dict[str, int] = {}
+_redis_ref: aioredis.Redis | None = None
 
 
 def _active(ep: dict) -> bool:
@@ -374,34 +375,43 @@ async def ai_job(redis: aioredis.Redis) -> None:
     articles = await pop_pending_ai_articles(redis, limit=ai.get("batch_size", 10))
 
     processed = 0
+    failed_articles = []  # Track failed articles for rollback
     try:
         is_first = True
         for (cfg_id, tgt_lang), group in config_groups.items():
             resolved = _resolve_ai_config(ai, cfg_id or None)
-            n = await process_pending_articles(
-                redis=redis,
-                model=model_override,
-                batch_size=ai.get("batch_size", 10),
-                max_tokens=ai.get("max_tokens_summary", 300),
-                temperature=ai.get("temperature", 0.3),
-                tone=resolved["tone"],
-                api_key=api_key or None,
-                base_url=base_url or None,
-                webhook_endpoints=group["wh"],
-                telegram_channels=group["tg"],
-                twitter_accounts=rewrite_tw if is_first else [],
-                raw_webhook_endpoints=raw_wh if is_first else [],
-                raw_telegram_channels=raw_tg if is_first else [],
-                spread_seconds=spread,
-                ai_dedup_threshold=dedup_cfg.get("ai_simhash_distance_threshold", 6),
-                pre_fetched_articles=articles,
-                config_id=cfg_id or None,
-                prompt_system_override=resolved["prompt_system"],
-                prompt_template_override=resolved["prompt_template"],
-                perform_ai_dedup=is_first,
-                target_language=tgt_lang or None,
-            )
-            processed = max(processed, n or 0)
+            try:
+                n = await process_pending_articles(
+                    redis=redis,
+                    model=model_override,
+                    batch_size=ai.get("batch_size", 10),
+                    max_tokens=ai.get("max_tokens_summary", 300),
+                    temperature=ai.get("temperature", 0.3),
+                    tone=resolved["tone"],
+                    api_key=api_key or None,
+                    base_url=base_url or None,
+                    webhook_endpoints=group["wh"],
+                    telegram_channels=group["tg"],
+                    twitter_accounts=rewrite_tw if is_first else [],
+                    raw_webhook_endpoints=raw_wh if is_first else [],
+                    raw_telegram_channels=raw_tg if is_first else [],
+                    spread_seconds=spread,
+                    ai_dedup_threshold=dedup_cfg.get("ai_simhash_distance_threshold", 6),
+                    pre_fetched_articles=articles,
+                    config_id=cfg_id or None,
+                    prompt_system_override=resolved["prompt_system"],
+                    prompt_template_override=resolved["prompt_template"],
+                    perform_ai_dedup=is_first,
+                    target_language=tgt_lang or None,
+                )
+                processed = max(processed, n or 0)
+            except Exception as group_exc:
+                # If a config group fails, track articles for potential rollback
+                logger.error(f"AI job: config group ({cfg_id}, {tgt_lang}) failed: {group_exc}")
+                if is_first and not processed:
+                    # First group failed and no articles processed yet → rollback all
+                    failed_articles = articles
+                raise  # Re-raise to trigger outer exception handler
             is_first = False
 
         if processed:
@@ -441,6 +451,20 @@ async def ai_job(redis: aioredis.Redis) -> None:
         raise
     except Exception as exc:
         _job_states["ai_rewrite"] = "error"
+        
+        # Rollback: re-add failed articles back to queue if no processing succeeded
+        if failed_articles and processed == 0:
+            try:
+                pipe = redis.pipeline()
+                for article in failed_articles:
+                    # Re-add to AI pending queue with original priority score
+                    priority_score = float(article.get("priority_score", 0))
+                    pipe.zadd(AI_PENDING_KEY, {article["id"]: priority_score})
+                await pipe.execute()
+                logger.info(f"AI job rollback: re-queued {len(failed_articles)} articles after failure")
+            except Exception as rollback_exc:
+                logger.error(f"AI job rollback failed: {rollback_exc}")
+        
         if ws_manager:
             asyncio.create_task(
                 ws_manager.broadcast(
@@ -625,9 +649,16 @@ async def topic_synthesis_job(redis: aioredis.Redis) -> None:
                 tasks.append((hook_id, category, task))
 
             # Execute all categories in parallel (8× faster than sequential)
+            # Semaphore limits concurrent AI calls to prevent API overwhelm
             if tasks:
+                sem = asyncio.Semaphore(10)  # Max 10 concurrent synthesis calls
+                
+                async def _bounded_synthesis(task):
+                    async with sem:
+                        return await task
+                
                 results = await asyncio.gather(
-                    *[t[2] for t in tasks], return_exceptions=True
+                    *[_bounded_synthesis(t[2]) for t in tasks], return_exceptions=True
                 )
 
                 for (hook_id, category, _), result in zip(tasks, results):
@@ -1005,17 +1036,26 @@ async def enrich_job(redis: aioredis.Redis) -> None:
         )
 
         # Step 2 — Batch embedding generation (6-10× faster than sequential)
-        from ai.embedder import get_embeddings_batch, embed_text_for_article
+        from ai.embedder import get_embeddings_batch, embed_text_for_article, get_embedding
 
         embed_texts = [embed_text_for_article(art) for art in articles]
         embeddings = await get_embeddings_batch(embed_texts)
 
-        # Ensure embeddings list matches articles length (fallback to None if batch failed)
+        # If batch failed, retry individually instead of losing all embeddings
         if len(embeddings) != len(articles):
             logger.warning(
-                f"[enrich_job] batch embedding returned {len(embeddings)} results for {len(articles)} articles, falling back to sequential"
+                f"[enrich_job] batch embedding returned {len(embeddings)} results for {len(articles)} articles, "
+                "falling back to individual calls"
             )
-            embeddings = [None] * len(articles)
+            embeddings = []
+            for art in articles:
+                try:
+                    embed_text = embed_text_for_article(art)
+                    embedding = await get_embedding(embed_text)
+                    embeddings.append(embedding)
+                except Exception as e:
+                    logger.warning(f"[enrich_job] individual embedding failed for {art['id']}: {e}")
+                    embeddings.append(None)
 
         done = 0
         for art, enrichment, embedding in zip(articles, enrich_results, embeddings):
@@ -1268,8 +1308,99 @@ async def newsletter_job(redis: aioredis.Redis) -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Scheduler hot-reload — called via config_io.on_settings_saved() callback
+# ---------------------------------------------------------------------------
+
+
+def _reschedule_job(job_id: str, **trigger_kwargs) -> None:
+    if _scheduler is None:
+        return
+    if _scheduler.get_job(job_id):
+        _scheduler.reschedule_job(job_id, trigger="interval", **trigger_kwargs)
+
+
+def _ensure_optional_job(job_id: str, func, enabled: bool, **trigger_kwargs) -> None:
+    """Add job if newly enabled; reschedule if interval changed; remove if disabled."""
+    if _scheduler is None or _redis_ref is None:
+        return
+    existing = _scheduler.get_job(job_id)
+    if enabled and existing:
+        _scheduler.reschedule_job(job_id, trigger="interval", **trigger_kwargs)
+    elif enabled and not existing:
+        _scheduler.add_job(
+            func, "interval", id=job_id, args=[_redis_ref],
+            max_instances=1, coalesce=True, **trigger_kwargs,
+        )
+        logger.info("Scheduler: added job '%s'", job_id)
+    elif not enabled and existing:
+        _scheduler.remove_job(job_id)
+        logger.info("Scheduler: removed job '%s'", job_id)
+
+
+def reload_scheduler_jobs() -> None:
+    """Re-read settings.yaml and sync all job intervals/presence with the scheduler."""
+    global _config_cache, _config_mtime
+    _config_cache = None  # force re-read
+    cfg = _load_config()
+
+    if _scheduler is None:
+        return
+
+    crawler_cfg = cfg.get("crawler", {})
+    ai_cfg = cfg.get("ai", {})
+    processing_cfg = cfg.get("processing", {})
+    debate_cfg = cfg.get("debate", {})
+    nl_cfg = cfg.get("newsletter", {})
+    social_cfg = cfg.get("social_article", {})
+    intelligence_cfg = cfg.get("intelligence", {})
+    story_cfg = ai_cfg.get("story_synthesis", {})
+
+    # Core jobs — always present, just reschedule
+    _reschedule_job("crawl_all", seconds=crawler_cfg.get("tick_interval_seconds", 30))
+    _reschedule_job("ai_rewrite", minutes=ai_cfg.get("interval_minutes", 2))
+    _reschedule_job(
+        "topic_synthesis",
+        minutes=ai_cfg.get("topic_synthesis", {}).get("interval_minutes", 5),
+    )
+    _reschedule_job(
+        "trend",
+        minutes=intelligence_cfg.get("trend_interval_minutes", 5),
+    )
+
+    # Optional jobs — add/remove based on enabled flag
+    _ensure_optional_job(
+        "enrich", enrich_job,
+        enabled=processing_cfg.get("enabled", True),
+        minutes=processing_cfg.get("enrich_interval_minutes", 5),
+    )
+    _ensure_optional_job(
+        "story_synthesis", story_synthesis_job,
+        enabled=story_cfg.get("enabled", False),
+        minutes=story_cfg.get("interval_minutes", 15),
+    )
+    _ensure_optional_job(
+        "debate", debate_scheduler_job,
+        enabled=debate_cfg.get("enabled", False),
+        minutes=debate_cfg.get("interval_minutes", 30),
+    )
+    _ensure_optional_job(
+        "newsletter", newsletter_job,
+        enabled=nl_cfg.get("enabled", False),
+        minutes=nl_cfg.get("interval_minutes", 360),
+    )
+    _ensure_optional_job(
+        "social_article", social_article_job,
+        enabled=social_cfg.get("enabled", False) and social_cfg.get("auto_generate", False),
+        minutes=social_cfg.get("interval_minutes", 360),
+    )
+
+    logger.info("Scheduler jobs reloaded from updated settings")
+
+
 def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
-    global _scheduler
+    global _scheduler, _redis_ref
+    _redis_ref = redis
     if _scheduler is not None:
         return _scheduler
 

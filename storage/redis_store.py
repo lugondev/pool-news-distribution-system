@@ -167,7 +167,8 @@ async def _apply_backpressure(redis: aioredis.Redis) -> None:
     to avoid a Redis round-trip on every single article save.
     """
     try:
-        _bp_cache["counter"] += 1
+        # Reset counter every 1000 to prevent overflow
+        _bp_cache["counter"] = (_bp_cache["counter"] + 1) % 1000
         # Skip ZCARD check on every save — only check every 10 saves
         if _bp_cache["counter"] % 10 != 0:
             return

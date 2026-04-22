@@ -7,11 +7,22 @@ Reads use mtime-based caching (storage.config_cache) to avoid disk I/O
 on every HTMX poll. Writes call invalidate() so the next read reloads.
 """
 
+import logging
 import os
+from collections.abc import Callable
 
 import yaml
 
 from storage.config_cache import cached_yaml, invalidate
+
+logger = logging.getLogger(__name__)
+
+_settings_saved_callbacks: list[Callable] = []
+
+
+def on_settings_saved(fn: Callable) -> None:
+    """Register a callback invoked after every write_settings() call."""
+    _settings_saved_callbacks.append(fn)
 
 _BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 SOURCES_PATH = os.path.join(_BASE_DIR, "config", "sources.yaml")
@@ -48,6 +59,11 @@ def write_settings(cfg: dict) -> None:
     with open(SETTINGS_PATH, "w") as f:
         yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
     invalidate(SETTINGS_PATH)
+    for fn in _settings_saved_callbacks:
+        try:
+            fn()
+        except Exception as exc:
+            logger.warning("settings-saved callback %s failed: %s", fn.__name__, exc)
 
 
 # ── Convenience helpers ───────────────────────────────────────────────────────
