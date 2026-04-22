@@ -1,0 +1,100 @@
+{% if logs %}
+<p style="font-size:11px;color:var(--muted);margin-bottom:10px">
+  Click a row to see the full response body returned to the client.
+</p>
+<table class="log-table">
+  <thead>
+    <tr>
+      <th style="width:20px"></th>
+      <th>Time</th>
+      <th>Channel</th>
+      <th>Client ID</th>
+      <th>Endpoint</th>
+      <th>Method</th>
+      <th>Auth</th>
+      <th>Items</th>
+      <th>Duration</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for log in logs %}
+    <tr class="log-row-toggle" onclick="toggleLogDetail('ch-detail-{{ loop.index }}', this)">
+      <td><span class="log-expand" id="arrow-ch-detail-{{ loop.index }}">&#9654;</span></td>
+      <td class="mono">{{ log.requested_at[:16].replace('T',' ') if log.requested_at else '—' }}</td>
+      <td style="font-size:11px;color:var(--accent)">{{ log.channel_id }}</td>
+      <td class="mono" style="font-size:10px;color:var(--muted)">{{ log.client_id[:12] }}...</td>
+      <td class="mono" style="font-size:11px">{{ log.endpoint }}</td>
+      <td class="mono" style="font-size:10px;color:var(--muted)">{{ log.method }}</td>
+      <td>
+        {% if log.auth_method == 'per_channel_key' %}
+          <span style="font-size:10px;background:var(--accent);color:white;padding:2px 6px;border-radius:3px">Channel Key</span>
+        {% elif log.auth_method == 'global_key' %}
+          <span style="font-size:10px;background:var(--yellow);color:var(--bg);padding:2px 6px;border-radius:3px">Global Key</span>
+        {% elif log.auth_method == 'public' %}
+          <span style="font-size:10px;background:var(--border);color:var(--muted);padding:2px 6px;border-radius:3px">Public</span>
+        {% else %}
+          <span style="font-size:10px;color:var(--muted)">{{ log.auth_method or '—' }}</span>
+        {% endif %}
+      </td>
+      <td style="text-align:center;font-size:11px">{{ log.items_count or 0 }}</td>
+      <td class="mono" style="font-size:11px;color:var(--muted)">{{ log.duration_ms }}ms</td>
+      <td>
+        {% if log.status_code and log.status_code < 400 %}
+          <span class="status-ok">{{ log.status_code }}</span>
+        {% else %}
+          <span class="status-fail">{{ log.status_code or 'ERR' }}</span>
+          {% if log.error_msg %}
+            <div style="font-size:10px;color:var(--red);margin-top:2px">{{ log.error_msg[:80] }}{% if log.error_msg|length > 80 %}...{% endif %}</div>
+          {% endif %}
+        {% endif %}
+      </td>
+    </tr>
+    <tr class="log-row-detail" id="ch-detail-{{ loop.index }}">
+      <td colspan="10" class="log-detail-cell">
+        <div class="log-detail-inner" style="grid-template-columns: 1fr">
+          <div class="log-detail-block">
+            <div class="lbl">Response Body</div>
+            {% if log.response_body %}
+              <pre style="background:var(--bg);padding:10px;border-radius:4px;overflow-x:auto;font-size:11px;line-height:1.5;color:var(--text);margin-top:6px;white-space:pre-wrap;word-wrap:break-word">{{ log.response_body }}</pre>
+            {% else %}
+              <div style="color:var(--muted);font-size:11px;margin-top:6px">No response body logged</div>
+            {% endif %}
+          </div>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if log_total_pages > 1 %}
+<div class="log-pagination">
+  <span class="info">{{ log_total }} entries</span>
+  <div class="pages">
+    <button class="page-btn" {% if log_page <= 1 %}disabled{% endif %}
+            hx-get="/partials/channel-logs?page={{ log_page - 1 }}"
+            hx-target="#channel-logs" hx-swap="innerHTML">
+      &larr;
+    </button>
+    {% for p in range(1, log_total_pages + 1) %}
+      {% if p == 1 or p == log_total_pages or (p >= log_page - 1 and p <= log_page + 1) %}
+    <button class="page-btn {% if p == log_page %}active{% endif %}"
+            hx-get="/partials/channel-logs?page={{ p }}"
+            hx-target="#channel-logs" hx-swap="innerHTML">{{ p }}</button>
+      {% elif p == 2 or p == log_total_pages - 1 %}
+    <span style="color:var(--muted);font-size:11px;padding:0 2px">...</span>
+      {% endif %}
+    {% endfor %}
+    <button class="page-btn" {% if log_page >= log_total_pages %}disabled{% endif %}
+            hx-get="/partials/channel-logs?page={{ log_page + 1 }}"
+            hx-target="#channel-logs" hx-swap="innerHTML">
+      &rarr;
+    </button>
+  </div>
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">No channel API calls yet.</div>
+{% endif%}

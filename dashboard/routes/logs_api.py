@@ -21,6 +21,7 @@ from storage.sqlite_stats import (
     get_crawl_timeline,
     get_dashboard_stats,
     get_recent_ai_logs,
+    get_recent_channel_logs,
     get_recent_webhook_logs,
     get_system_logs,
     get_system_summary,
@@ -238,6 +239,13 @@ async def list_ai_logs(page: int = 1, limit: int = LOG_PAGE_SIZE):
 async def list_webhook_logs(page: int = 1, limit: int = LOG_PAGE_SIZE):
     offset = (page - 1) * limit
     logs, total = await get_recent_webhook_logs(limit=limit, offset=offset)
+    return {"logs": logs, "total": total, "page": page, "total_pages": max(1, math.ceil(total / limit))}
+
+
+@router.get("/logs/channels")
+async def list_channel_logs(page: int = 1, limit: int = LOG_PAGE_SIZE):
+    offset = (page - 1) * limit
+    logs, total = await get_recent_channel_logs(limit=limit, offset=offset)
     return {"logs": logs, "total": total, "page": page, "total_pages": max(1, math.ceil(total / limit))}
 
 

@@ -573,11 +573,11 @@ function loadFilterOptions() {
         html += '<div><strong>Status:</strong> ' + data.status_code + ' | <strong>Time:</strong> ' + data.elapsed_ms + 'ms</div>';
         if (data.payload) {
           html += '<details style="margin-top:6px"><summary style="cursor:pointer;color:#60a5fa">📄 Payload Sent</summary>';
-          html += '<pre style="background:#1e2130;padding:8px;border-radius:4px;font-size:10px;margin-top:4px;overflow-x:auto;max-height:200px">' + escapeHtml(data.payload) + '</pre></details>';
+          html += '<pre style="background:#1e2130;padding:8px;border-radius:4px;font-size:10px;margin-top:4px;overflow-x:auto;max-height:200px;white-space:pre-wrap;word-wrap:break-word">' + escapeHtml(data.payload) + '</pre></details>';
         }
         if (data.response_body) {
           html += '<details style="margin-top:6px"><summary style="cursor:pointer;color:#60a5fa">📩 Response Body</summary>';
-          html += '<pre style="background:#1e2130;padding:8px;border-radius:4px;font-size:10px;margin-top:4px;overflow-x:auto;max-height:200px">' + escapeHtml(data.response_body) + '</pre></details>';
+          html += '<pre style="background:#1e2130;padding:8px;border-radius:4px;font-size:10px;margin-top:4px;overflow-x:auto;max-height:200px;white-space:pre-wrap;word-wrap:break-word">' + escapeHtml(data.response_body) + '</pre></details>';
         }
         html += '</div>';
         resultDiv.innerHTML = html;
@@ -598,11 +598,11 @@ function loadFilterOptions() {
         }
         if (data.payload) {
           html += '<details style="margin-top:6px"><summary style="cursor:pointer;color:#fca5a5">📄 Payload Sent</summary>';
-          html += '<pre style="background:#1e2130;padding:8px;border-radius:4px;font-size:10px;margin-top:4px;overflow-x:auto;max-height:200px">' + escapeHtml(data.payload) + '</pre></details>';
+          html += '<pre style="background:#1e2130;padding:8px;border-radius:4px;font-size:10px;margin-top:4px;overflow-x:auto;max-height:200px;white-space:pre-wrap;word-wrap:break-word">' + escapeHtml(data.payload) + '</pre></details>';
         }
         if (data.response_body) {
           html += '<details style="margin-top:6px"><summary style="cursor:pointer;color:#fca5a5">📩 Response Body</summary>';
-          html += '<pre style="background:#1e2130;padding:8px;border-radius:4px;font-size:10px;margin-top:4px;overflow-x:auto;max-height:200px">' + escapeHtml(data.response_body) + '</pre></details>';
+          html += '<pre style="background:#1e2130;padding:8px;border-radius:4px;font-size:10px;margin-top:4px;overflow-x:auto;max-height:200px;white-space:pre-wrap;word-wrap:break-word">' + escapeHtml(data.response_body) + '</pre></details>';
         }
         html += '</div>';
         resultDiv.innerHTML = html;

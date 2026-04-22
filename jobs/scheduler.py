@@ -44,6 +44,7 @@ from ai.story_detector import get_active_stories, get_story_articles
 from storage.sqlite_stats import log_system_event
 from jobs.scheduled_webhook import scheduled_webhook_job
 from jobs.social_article_job import social_article_job
+from jobs.log_cleanup import cleanup_logs_job
 
 logger = logging.getLogger(__name__)
 
@@ -1402,6 +1403,17 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
             max_instances=1,
             coalesce=True,
         )
+
+    # Log cleanup (runs every 5h, deletes logs older than 5h if ≥200 rows)
+    scheduler.add_job(
+        cleanup_logs_job,
+        "interval",
+        hours=5,
+        id="log_cleanup",
+        args=[redis],
+        max_instances=1,
+        coalesce=True,
+    )
 
     _scheduler = scheduler
     return scheduler

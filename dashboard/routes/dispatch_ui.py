@@ -21,7 +21,7 @@ from dashboard.config_io import (
 )
 from dashboard.templates_state import templates
 from dashboard.ui_helpers import enrich_logs
-from storage.sqlite_stats import get_recent_telegram_logs, get_recent_webhook_logs
+from storage.sqlite_stats import get_recent_channel_logs, get_recent_telegram_logs, get_recent_webhook_logs
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -322,6 +322,23 @@ async def telegram_logs_partial(request: Request, page: int = 1, channel_id: str
             "tg_log_page": page,
             "tg_log_total_pages": max(1, math.ceil(total / LOG_PAGE_SIZE)),
             "tg_log_total": total,
+        },
+    )
+
+
+@router.get("/partials/channel-logs", response_class=HTMLResponse)
+async def channel_logs_partial(request: Request, page: int = 1):
+    offset = (page - 1) * LOG_PAGE_SIZE
+    logs, total = await get_recent_channel_logs(limit=LOG_PAGE_SIZE, offset=offset)
+    
+    return templates.TemplateResponse(
+        "partials/channel_logs_table.html",
+        {
+            "request": request,
+            "logs": logs,
+            "log_page": page,
+            "log_total_pages": max(1, math.ceil(total / LOG_PAGE_SIZE)),
+            "log_total": total,
         },
     )
 

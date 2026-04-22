@@ -116,7 +116,8 @@ async def init_db() -> None:
                 items_count  INTEGER DEFAULT 0,
                 requested_at TEXT NOT NULL,
                 duration_ms  INTEGER DEFAULT 0,
-                error_msg    TEXT
+                error_msg    TEXT,
+                response_body TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_ch_channel ON channel_logs(channel_id);
             CREATE INDEX IF NOT EXISTS idx_ch_client ON channel_logs(client_id);
@@ -172,6 +173,12 @@ async def init_db() -> None:
                 )
             except Exception:
                 pass
+
+        # Migration: Add response_body column to channel_logs if missing
+        try:
+            await db.execute("ALTER TABLE channel_logs ADD COLUMN response_body TEXT")
+        except Exception:
+            pass  # Column already exists
 
         await db.commit()
 
@@ -263,14 +270,15 @@ async def log_channel_request(
     items_count: int = 0,
     duration_ms: int = 0,
     error_msg: str | None = None,
+    response_body: str | None = None,
 ) -> None:
-    """Log channel API request with client tracking and auth method."""
+    """Log channel API request with client tracking, auth method, and response body."""
     async with _db() as db:
         await db.execute(
             """INSERT INTO channel_logs
                (channel_id, client_id, endpoint, method, status_code, auth_method,
-                items_count, requested_at, duration_ms, error_msg)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                items_count, requested_at, duration_ms, error_msg, response_body)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 channel_id,
                 client_id,
@@ -282,6 +290,7 @@ async def log_channel_request(
                 datetime.now(timezone.utc).isoformat(),
                 duration_ms,
                 error_msg,
+                response_body,
             ),
         )
         await db.commit()
@@ -750,7 +759,33 @@ async def get_crawl_timeline(hours: int = 24) -> list[dict]:
                 ROUND(AVG(duration_ms)) as avg_duration_ms
             FROM crawl_logs
             WHERE started_at >= datetime('now', ?)
-            GROUP BY hour ORDER BY hour""",
-            (f"-{hours} hours",),
+            GROUP BY hour
+            ORDER BY hour DESC""",
+            [f"-{hours} hours"],
         )
         return [dict(r) for r in rows]
+
+
+async def get_recent_channel_logs(limit: int = 50, offset: int = 0) -> tuple[list[dict], int]:
+    """
+    Get recent channel API logs with pagination.
+    
+    Returns:
+        (logs, total_count) tuple
+    """
+    async with _db() as db:
+        db.row_factory = aiosqlite.Row
+        total_row = await db.execute_fetchall("SELECT COUNT(*) as cnt FROM channel_logs")
+        total = total_row[0]["cnt"] if total_row else 0
+        
+        rows = await db.execute_fetchall(
+            """SELECT 
+                id, channel_id, client_id, endpoint, method, 
+                status_code, auth_method, items_count, 
+                requested_at, duration_ms, error_msg, response_body
+            FROM channel_logs 
+            ORDER BY requested_at DESC 
+            LIMIT ? OFFSET ?""",
+            [limit, offset],
+        )
+        return [dict(r) for r in rows], total

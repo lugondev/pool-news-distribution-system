@@ -397,9 +397,18 @@ Returns `logs` (article_id, model, tokens_used, created_at), `total`, `page`, `t
 curl -s "$API/logs/system?page=1&limit=20" | jq .
 ```
 
-Query params: `event_type` (crawl_job, ai_job), `status` (ok, error, skipped), `since` (ISO datetime).
+Query params: `event_type` (crawl_job, ai_job, log_cleanup_job), `status` (ok, error, skipped), `since` (ISO datetime).
 
 Each entry: `id`, `event_type`, `started_at`, `finished_at`, `duration_ms`, `status`, `metadata` (job-specific JSON), `error_msg`.
+
+**Event types:**
+- `crawl_job` — RSS crawl execution
+- `ai_job` — AI rewrite batch processing
+- `topic_synthesis_job` — Multi-article synthesis
+- `debate_job` — Multi-agent debate
+- `webhook_schedule` — Scheduled webhook execution
+- `social_article_job` — Long-form article generation
+- `log_cleanup_job` — Log cleanup execution (metadata includes `total_deleted`, `cutoff`, `results` per table)
 
 ### Filter: only errors
 
@@ -428,6 +437,15 @@ curl -s $API/logs/scheduler/status | jq .
 ```
 
 Returns `{"jobs": [...]}` — current state of all APScheduler jobs (next run time, status, etc.).
+
+**Active jobs:**
+- `crawl_all` — RSS feed crawler (default every 3 min)
+- `ai_rewrite` — AI article rewriter (default every 2 min)
+- `topic_synthesis` — Multi-article synthesis (default every 10 min)
+- `debate` — Multi-agent debate (default every 30 min, opt-in)
+- `scheduled_webhook` — Cron-based webhook triggers (every 1 min)
+- `social_article` — Long-form article generator (default every 6h, opt-in)
+- `log_cleanup` — Log cleanup job (every 5h) — deletes logs older than 5h from all log tables if table has ≥200 rows
 
 ## API Request Logs
 
@@ -1189,6 +1207,27 @@ Returns `{"answer": "...", "sources": [...], "retrieved": N}`. Returns 503 if ve
 4. `curl -s "$API/logs/system/summary" | jq .` — overall job health (success/error ratio, avg duration)
 5. High `avg_duration_ms` → crawl batch is slow, reduce `sources_per_tick`
 6. Repeated `status=skipped` with `reason=no sources due` → all sources are in backoff, check crawl logs
+
+### Log cleanup monitoring
+
+Check log cleanup job execution:
+```bash
+curl -s "$API/logs/system?event_type=log_cleanup_job&limit=5" | jq .
+```
+
+View cleanup results:
+```bash
+curl -s "$API/logs/system?event_type=log_cleanup_job&limit=1" | jq '.logs[0].metadata'
+```
+
+Metadata includes:
+- `total_deleted` — total rows deleted across all tables
+- `cutoff` — timestamp cutoff (logs older than this were deleted)
+- `results` — per-table breakdown (deleted count, total rows, remaining rows, or skipped if <200 rows)
+
+**Tables cleaned:** `crawl_logs`, `webhook_logs`, `ai_logs`, `telegram_logs`, `system_logs`, `api_logs`, `channel_logs`
+
+**Cleanup policy:** Runs every 5h, deletes logs older than 5h, only if table has ≥200 rows
 
 ### API latency or errors
 

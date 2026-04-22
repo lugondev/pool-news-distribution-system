@@ -15,6 +15,7 @@ Redis keys:
 """
 
 import hashlib
+import json
 import logging
 import secrets
 import time
@@ -32,6 +33,17 @@ from webhook.payload import build_payload
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["channels"])
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _serialize_response(data: dict, max_length: int = 10000) -> str:
+    """Serialize response data to JSON string, truncated to max_length."""
+    try:
+        serialized = json.dumps(data, ensure_ascii=False)
+        return serialized[:max_length]
+    except Exception:
+        return str(data)[:max_length]
+
 
 # ── Auth helper ──────────────────────────────────────────────────────────────
 
@@ -499,6 +511,14 @@ async def channel_feed(
         # Track stats
         await _track_pull(redis, ch_id, client_id, len(articles_out))
 
+        # Prepare response
+        response_data = {
+            "articles": articles_out,
+            "count": len(articles_out),
+            "cursor": new_cursor,
+            "has_more": has_more,
+        }
+
         # Log request
         duration_ms = int((time.time() - start_time) * 1000)
         await log_channel_request(
@@ -510,14 +530,10 @@ async def channel_feed(
             auth_method=auth_method,
             items_count=len(articles_out),
             duration_ms=duration_ms,
+            response_body=_serialize_response(response_data),
         )
 
-        return {
-            "articles": articles_out,
-            "count": len(articles_out),
-            "cursor": new_cursor,
-            "has_more": has_more,
-        }
+        return response_data
     except HTTPException as e:
         duration_ms = int((time.time() - start_time) * 1000)
         await log_channel_request(
@@ -710,6 +726,9 @@ async def channel_next(
         # Track stats
         await _track_pull(redis, ch_id, client_id, 1)
 
+        # Prepare response
+        response_data = {"article": article_out}
+
         duration_ms = int((time.time() - start_time) * 1000)
         await log_channel_request(
             channel_id=ch_id,
@@ -720,9 +739,10 @@ async def channel_next(
             auth_method=auth_method,
             items_count=1,
             duration_ms=duration_ms,
+            response_body=_serialize_response(response_data),
         )
 
-        return {"article": article_out}
+        return response_data
     except HTTPException as e:
         duration_ms = int((time.time() - start_time) * 1000)
         await log_channel_request(
@@ -947,6 +967,15 @@ async def channel_stats(
                 except (ValueError, TypeError):
                     pass
 
+            response_data = {
+                "channel_id": ch_id,
+                "client_id": client_id,
+                "cursor": cursor_iso,
+                "total_pulls": int(stats.get("pull_count", 0)),
+                "total_articles_delivered": int(stats.get("articles_delivered", 0)),
+                "last_pull_at": stats.get("last_pull_at", ""),
+            }
+
             duration_ms = int((time.time() - start_time) * 1000)
             await log_channel_request(
                 channel_id=ch_id,
@@ -957,16 +986,10 @@ async def channel_stats(
                 auth_method="public",
                 items_count=0,
                 duration_ms=duration_ms,
+                response_body=_serialize_response(response_data),
             )
 
-            return {
-                "channel_id": ch_id,
-                "client_id": client_id,
-                "cursor": cursor_iso,
-                "total_pulls": int(stats.get("pull_count", 0)),
-                "total_articles_delivered": int(stats.get("articles_delivered", 0)),
-                "last_pull_at": stats.get("last_pull_at", ""),
-            }
+            return response_data
         else:
             # Aggregate stats from all clients
             keys = await redis.keys(f"channel:{ch_id}:client:*:stats")

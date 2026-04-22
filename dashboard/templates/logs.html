@@ -111,6 +111,7 @@
       <button class="tab" id="tab-ai" onclick="switchLogTab('ai')">AI Processing</button>
       <button class="tab" id="tab-webhook" onclick="switchLogTab('webhook')">Webhook Delivery</button>
       <button class="tab" id="tab-telegram" onclick="switchLogTab('telegram')">Telegram Delivery</button>
+      <button class="tab" id="tab-channel" onclick="switchLogTab('channel')">Channel API</button>
     </div>
 
     <div class="tab-content">
@@ -170,11 +171,30 @@
           </div>
         </div>
       </div>
+
+      <!-- Channel Logs panel -->
+      <div id="tab-panel-channel" style="display:none">
+        <div class="panel-inner">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+            <p class="section-title" style="margin:0">Channel API Log</p>
+            <button class="refresh-btn"
+                    hx-get="/partials/channel-logs"
+                    hx-target="#channel-logs"
+                    hx-swap="innerHTML">Refresh</button>
+          </div>
+          <div id="channel-logs"
+               hx-get="/partials/channel-logs"
+               hx-trigger="revealed once"
+               hx-swap="innerHTML">
+            <p style="color:var(--muted);font-size:12px">Loading channel logs...</p>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
   <script>
-    var logTabNames = ['ai', 'webhook', 'telegram'];
+    var logTabNames = ['ai', 'webhook', 'telegram', 'channel'];
 
     function switchLogTab(name) {
       logTabNames.forEach(function(t) {
@@ -193,6 +213,20 @@
       var active = (saved && logTabNames.indexOf(saved) !== -1) ? saved : 'ai';
       switchLogTab(active);
     })();
+
+    // Toggle log detail expand/collapse
+    function toggleLogDetail(detailId, rowElement) {
+      var detailRow = document.getElementById(detailId);
+      var arrow = document.getElementById('arrow-' + detailId);
+      
+      if (detailRow.classList.contains('open')) {
+        detailRow.classList.remove('open');
+        arrow.classList.remove('open');
+      } else {
+        detailRow.classList.add('open');
+        arrow.classList.add('open');
+      }
+    }
 
     // Copy article content to clipboard
     async function copyArticleContent(btn, articleId) {
