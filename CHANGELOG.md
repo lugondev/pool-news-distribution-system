@@ -9,6 +9,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 🔧 Maintenance & UI Improvements
+
+#### Log Cleanup Job
+**Added** automatic log cleanup to prevent unbounded SQLite growth
+
+**Features:**
+- Runs every 5 hours
+- Deletes logs older than 5 hours
+- Only cleans tables with ≥200 rows (preserves small datasets)
+- Cleans 7 tables: `crawl_logs`, `webhook_logs`, `ai_logs`, `telegram_logs`, `system_logs`, `api_logs`, `channel_logs`
+
+**Configuration:**
+```python
+# jobs/log_cleanup.py
+MIN_ROWS_THRESHOLD = 200  # Only clean if table has ≥200 rows
+CLEANUP_AGE_HOURS = 5     # Delete logs older than 5h
+```
+
+**Monitoring:**
+```bash
+# View cleanup execution logs
+curl -s "$API/logs/system?event_type=log_cleanup_job&limit=5" | jq .
+
+# View cleanup results
+curl -s "$API/logs/system?event_type=log_cleanup_job&limit=1" | jq '.logs[0].metadata'
+```
+
+**Metadata includes:**
+- `total_deleted` — Total rows deleted across all tables
+- `cutoff` — Timestamp cutoff (logs older than this were deleted)
+- `results` — Per-table breakdown (deleted count, total rows, remaining rows, or skipped if <200 rows)
+
+**Files Created:**
+- `jobs/log_cleanup.py` — Log cleanup job implementation
+
+**Files Modified:**
+- `jobs/scheduler.py` — Added `log_cleanup` job registration (runs every 5h)
+- `CLAUDE.md` — Added job #7 documentation
+- `SKILL.md` — Added log cleanup monitoring guide
+
+---
+
+#### UI Text Wrapping Fix
+**Fixed** log expand sections breaking horizontally instead of wrapping
+
+**Before:**
+```html
+<pre style="overflow-x:auto">...</pre>
+<!-- Text would scroll horizontally, breaking layout -->
+```
+
+**After:**
+```html
+<pre style="overflow-x:auto;white-space:pre-wrap;word-wrap:break-word">...</pre>
+<!-- Text wraps to next line, preserving readability -->
+```
+
+**Files Modified:**
+- `dashboard/templates/partials/channel_logs_table.html` — Response body now wraps
+- `dashboard/templates/partials/settings_webhook.html` — Payload and response body now wrap (4 locations)
+
+**Impact:** Improved readability of long JSON responses in log expand sections
+
 ---
 
 ## [2.1.0] - 2026-04-21
