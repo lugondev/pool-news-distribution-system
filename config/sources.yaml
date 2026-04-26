@@ -1135,14 +1135,6 @@ sources:
   country: global
   category: ai
   enabled: true
-- id: mit_ai
-  name: MIT Tech Review AI
-  url: https://www.technologyreview.com/topic/artificial-intelligence/feed/
-  type: rss
-  lang: en
-  country: global
-  category: ai
-  enabled: true
 - id: ign_games
   name: IGN Games
   url: https://feeds.ign.com/ign/games-all
@@ -2734,24 +2726,6 @@ sources:
   lang: en
   country: pk
   category: world
-  enabled: true
-
-# ── Blockchain / Crypto ──────────────────────────────────────────────────────
-- id: coindesk
-  name: CoinDesk
-  url: https://www.coindesk.com/arc/outboundfeeds/rss/
-  type: rss
-  lang: en
-  country: us
-  category: crypto
-  enabled: true
-- id: cointelegraph
-  name: CoinTelegraph
-  url: https://cointelegraph.com/rss
-  type: rss
-  lang: en
-  country: global
-  category: crypto
   enabled: true
 - id: decrypt_crypto
   name: Decrypt

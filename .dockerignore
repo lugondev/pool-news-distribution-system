@@ -1,8 +1,48 @@
+# ─── Local dev artifacts ─────────────────────────────────────────────────────
 .venv
+.venv-*
 __pycache__
 *.pyc
 *.pyo
+*.pyd
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# ─── Secrets / runtime state ─────────────────────────────────────────────────
 .env
+.env.local
+.env.*.local
 data/
-node_modules
+dump.rdb
+*.log
+app.log
+
+# ─── Editor / OS junk ────────────────────────────────────────────────────────
+.DS_Store
+.idea
+.vscode
+*.swp
+
+# ─── VCS ────────────────────────────────────────────────────────────────────
 .git
+.gitignore
+.github
+
+# ─── Heavy / unrelated trees ─────────────────────────────────────────────────
+node_modules
+ai-news-next-client
+cloudflare
+deploy
+tests
+docs
+# NOTE: realtime/ is required by dashboard/app.py — do NOT exclude
+
+# ─── Skip backups & docs that don't belong in the image ──────────────────────
+*.tgz
+*.tar.gz
+*.bak
+README.md
+CHANGELOG.md
+SKILL.md
+TOPIC_SYNTHESIS.md

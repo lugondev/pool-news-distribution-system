@@ -202,8 +202,8 @@ async def process_rewrite(
     # Call AI with merged prompt
     try:
         # Load timeout from settings
-        from dashboard.config_io import cached_yaml
-        cfg = cached_yaml("config/settings.yaml")
+        from dashboard.config_io import read_settings
+        cfg = read_settings()
         timeout = cfg.get("channels_config", {}).get("ai_timeout_seconds", 60)
         
         client = get_openai_client(api_key=api_key, base_url=base_url, timeout=timeout)

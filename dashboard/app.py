@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -99,6 +100,36 @@ class _APIRequestLogger(BaseHTTPMiddleware):
 
 
 app = FastAPI(title="News Aggregator Dashboard", lifespan=lifespan)
+
+# ── CORS for split frontend (Vercel UI ↔ Coolify backend) ─────────────────────
+# CORS_ALLOW_ORIGINS env var: comma-separated list of allowed origins.
+# Examples:
+#   "*"                                       — open (dev only)
+#   "https://news.example.com"                — single prod origin
+#   "https://news.example.com,https://*.vercel.app"  — prod + previews
+# Empty / unset → no CORS headers (same-origin only, e.g. embedded Jinja UI).
+_cors_origins = [o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "").split(",") if o.strip()]
+if _cors_origins:
+    # Wildcards in origins require allow_origin_regex; detect and switch.
+    if any("*" in o for o in _cors_origins):
+        regex = "|".join(o.replace(".", r"\.").replace("*", ".*") for o in _cors_origins)
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origin_regex=regex,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    else:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=_cors_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    logger.info(f"CORS enabled for: {_cors_origins}")
+
 app.add_middleware(_APIRequestLogger)
 app.include_router(api_router)
 app.include_router(sources_ui_router)

@@ -38,3 +38,6 @@ boto3==1.34.0
 
 # Twitter/X distribution
 tweepy==4.14.0
+
+# Config sync (YAML ↔ Postgres/Supabase) — used by config/sync.py
+psycopg[binary]==3.2.3

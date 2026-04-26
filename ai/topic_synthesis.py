@@ -202,9 +202,9 @@ async def synthesize_topic_articles(
         return []
 
     # Load timeout from settings
-    from dashboard.config_io import cached_yaml
+    from dashboard.config_io import read_settings
 
-    cfg = cached_yaml("config/settings.yaml")
+    cfg = read_settings()
     timeout = cfg.get("channels_config", {}).get("ai_timeout_seconds", 60)
 
     # Load AI config to get actual base_url if not provided

@@ -10,7 +10,6 @@ Routes:
 
 import logging
 
-import yaml
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
@@ -20,14 +19,11 @@ from ai.social_sim import (
     run_simulation,
 )
 from dashboard import redis_state
-from dashboard.config_io import get_categories
+from dashboard.config_io import get_categories, read_settings, read_sim_personas
 from storage.redis_store import get_latest_articles
 
 router = APIRouter(prefix="/social-sim", tags=["social-sim"])
 logger = logging.getLogger(__name__)
-
-PERSONAS_FILE = "config/sim_personas.yaml"
-
 
 class SimRunRequest(BaseModel):
     article_id: str
@@ -53,8 +49,7 @@ async def api_sim_categories():
 @router.get("/persona-types")
 async def api_persona_types():
     """Return available author and netizen persona types from config."""
-    with open(PERSONAS_FILE) as f:
-        cfg = yaml.safe_load(f) or {}
+    cfg = read_sim_personas() or {}
 
     author_types = [
         {"id": k, **{fk: fv for fk, fv in v.items() if fk in ("label", "description", "tone")}}
@@ -97,8 +92,7 @@ async def api_run_simulation(body: SimRunRequest):
         raise HTTPException(status_code=422, detail="depth must be flat, nested, or full")
 
     # Resolve AI credentials
-    with open("config/settings.yaml") as f:
-        cfg = yaml.safe_load(f)
+    cfg = read_settings()
     ai_cfg = cfg.get("ai", {})
     pid = ai_cfg.get("provider_id")
     api_key = ai_cfg.get("api_key", "")

@@ -1,0 +1,30 @@
+# Litestream — continuous SQLite replication to S3-compatible storage.
+# Reads env vars at runtime (set in docker-compose / Coolify UI).
+#
+# All credentials are pulled from env to keep this file safe to commit.
+# See .env.example for the full list.
+
+dbs:
+  - path: /app/data/stats.db
+    replicas:
+      - type: s3
+        # R2 bucket name (or any S3 bucket). Sub-path keeps backups grouped per-deploy.
+        bucket: ${LITESTREAM_BUCKET}
+        path: ${LITESTREAM_PATH:-news-aggregator/sqlite}
+        endpoint: ${LITESTREAM_ENDPOINT}
+        region: ${LITESTREAM_REGION:-auto}
+        access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+        secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+        # ── Retention ────────────────────────────────────────────────────────
+        # How long to keep snapshots before pruning. Restore is point-in-time
+        # within this window. 168h = 7 days = a good balance of safety vs cost.
+        retention: 168h
+        retention-check-interval: 1h
+        # ── Snapshot cadence ─────────────────────────────────────────────────
+        # Full snapshot every 6h (between snapshots only WAL pages are uploaded).
+        # Shorter = faster restore, more storage. 6h is the sweet spot for SQLite
+        # under a few hundred MB.
+        snapshot-interval: 6h
+        # WAL upload interval — RPO floor. 10s = lose at most ~10s of writes on
+        # a hard crash. Lower for stricter RPO; higher for fewer S3 PUT calls.
+        sync-interval: 10s

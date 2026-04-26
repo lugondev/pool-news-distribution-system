@@ -50,10 +50,19 @@ data/*.db-wal
 data/*.db-shm
 logs/
 *.log
+.remember/
+.claude/
 
-# Config (keep examples)
+# Config (keep examples) — actual configs live in Supabase or volume, never git
 config/settings.yaml
 config/sources.yaml
+config/social_agents.yaml
+config/sim_personas.yaml
+config/*.bak
+
+# Skills tooling artifacts (use ~/.agents/skills global install instead)
+skills/
+skills-lock.json
 
 # IDE
 .vscode/

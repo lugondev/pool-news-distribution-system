@@ -4,7 +4,7 @@ AI Provider Routing — resolve provider credentials based on action type.
 Actions: rewrite, synthesis, debate, newsletter, embedding
 """
 
-from dashboard.config_io import cached_yaml
+from dashboard.config_io import read_settings
 
 
 def get_provider_for_action(action: str) -> tuple[str, str, str]:
@@ -22,7 +22,7 @@ def get_provider_for_action(action: str) -> tuple[str, str, str]:
         - Requires active_provider_id to be configured
         - Raises ValueError if not configured or provider not found
     """
-    cfg = cached_yaml("config/settings.yaml")
+    cfg = read_settings()
     
     # Special handling for embedding action
     if action == "embedding":

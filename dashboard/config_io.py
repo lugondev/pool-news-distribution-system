@@ -1,19 +1,17 @@
-"""Shared YAML I/O for sources and settings config files.
+"""Public config I/O — single API, swappable backend.
 
-Single source of truth for reading and writing config/sources.yaml and
-config/settings.yaml — imported by both JSON API routes and HTML UI routes.
+All callers stay backend-agnostic. The actual storage (YAML files in the
+volume vs Postgres tables in Supabase) is selected by the CONFIG_BACKEND
+env var; see `dashboard.config_backend.get_backend()`.
 
-Reads use mtime-based caching (storage.config_cache) to avoid disk I/O
-on every HTMX poll. Writes call invalidate() so the next read reloads.
+Reads use mtime-based caching for YAML mode and TTL caching for DB mode —
+both transparent to the caller. Writes invalidate the relevant cache.
 """
 
 import logging
-import os
 from collections.abc import Callable
 
-import yaml
-
-from storage.config_cache import cached_yaml, invalidate
+from dashboard.config_backend import get_backend
 
 logger = logging.getLogger(__name__)
 
@@ -24,41 +22,25 @@ def on_settings_saved(fn: Callable) -> None:
     """Register a callback invoked after every write_settings() call."""
     _settings_saved_callbacks.append(fn)
 
-_BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-SOURCES_PATH = os.path.join(_BASE_DIR, "config", "sources.yaml")
-SETTINGS_PATH = os.path.join(_BASE_DIR, "config", "settings.yaml")
 
-
-# ── Sources ──────────────────────────────────────────────────────────────────
-
+# ─── Sources ─────────────────────────────────────────────────────────────────
 
 def read_sources() -> list[dict]:
-    return cached_yaml(SOURCES_PATH).get("sources", [])
+    return get_backend().read_sources()
 
 
 def write_sources(sources: list[dict]) -> None:
-    with open(SOURCES_PATH, "w") as f:
-        yaml.dump(
-            {"sources": sources},
-            f,
-            default_flow_style=False,
-            allow_unicode=True,
-            sort_keys=False,
-        )
-    invalidate(SOURCES_PATH)
+    get_backend().write_sources(sources)
 
 
-# ── Settings ─────────────────────────────────────────────────────────────────
-
+# ─── Settings ────────────────────────────────────────────────────────────────
 
 def read_settings() -> dict:
-    return cached_yaml(SETTINGS_PATH)
+    return get_backend().read_settings()
 
 
 def write_settings(cfg: dict) -> None:
-    with open(SETTINGS_PATH, "w") as f:
-        yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-    invalidate(SETTINGS_PATH)
+    get_backend().write_settings(cfg)
     for fn in _settings_saved_callbacks:
         try:
             fn()
@@ -66,8 +48,27 @@ def write_settings(cfg: dict) -> None:
             logger.warning("settings-saved callback %s failed: %s", fn.__name__, exc)
 
 
-# ── Convenience helpers ───────────────────────────────────────────────────────
+# ─── Social agents (used by ai/social_poster + dashboard routes) ─────────────
 
+def read_social_agents() -> list[dict]:
+    return get_backend().read_social_agents()
+
+
+def write_social_agents(agents: list[dict]) -> None:
+    get_backend().write_social_agents(agents)
+
+
+# ─── Sim personas (used by ai/social_sim + dashboard routes) ─────────────────
+
+def read_sim_personas() -> dict:
+    return get_backend().read_sim_personas()
+
+
+def write_sim_personas(personas: dict) -> None:
+    get_backend().write_sim_personas(personas)
+
+
+# ─── Convenience helpers (derived from settings) ─────────────────────────────
 
 def get_categories() -> list[dict]:
     return read_settings().get("categories", [])

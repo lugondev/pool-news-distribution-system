@@ -40,7 +40,7 @@ from datetime import datetime, timezone
 import redis.asyncio as aioredis
 
 from ai.rewriter import get_openai_client, _load_ai_config
-from storage.config_cache import cached_yaml
+from dashboard.config_io import read_social_agents
 
 logger = logging.getLogger(__name__)
 
@@ -59,12 +59,9 @@ LENGTH_WORDS = {"short": "~100 words", "medium": "~200 words", "long": "~400 wor
 
 # ── Config loading ────────────────────────────────────────────────────────────
 
-_SOCIAL_AGENTS_PATH = "config/social_agents.yaml"
-
-
 def load_social_agents() -> list[dict]:
-    """Load all agents from config/social_agents.yaml (mtime-cached)."""
-    return cached_yaml(_SOCIAL_AGENTS_PATH).get("agents", [])
+    """Load all agents from the active config backend (yaml or db)."""
+    return read_social_agents()
 
 
 def get_agent(agent_id: str) -> dict | None:

@@ -1,124 +1,133 @@
-# Social Simulation Persona Templates
-#
-# AUTHOR TYPES — persona of the main poster (1 per simulation)
-# AI will fill: name, background_detail, voice_sample
-#
-# NETIZEN TYPES — types of commenters (5-10 chosen randomly per sim)
-# AI will fill: username, personal_detail, reply_tendency
-
 author_types:
-  expert:
-    label: "Expert / Chuyên gia"
-    description: "Domain specialist with technical knowledge. Uses precise language, cites data."
-    tone: "authoritative, measured, evidence-based"
-    style: "structured paragraphs, technical terms, sometimes links/references"
-    avoid: "slang, emotion, personal anecdotes unrelated to domain"
-
-  journalist:
-    label: "Journalist / Nhà báo"
-    description: "Professional reporter. Balanced, asks questions, notes multiple sides."
-    tone: "neutral, inquisitive, factual"
-    style: "inverted pyramid structure, quotes context, ends with open question"
-    avoid: "taking sides, speculative claims, promotional language"
-
-  influencer:
-    label: "Influencer / KOL"
-    description: "Social media personality. Engagement-optimized writing, uses hooks."
-    tone: "energetic, relatable, slightly dramatic"
-    style: "short punchy sentences, emojis, rhetorical questions, call-to-action"
-    avoid: "technical jargon, nuanced caveats, long paragraphs"
-
   activist:
-    label: "Activist / Nhà hoạt động"
-    description: "Cause-driven writer. Clear values, calls for action, moral framing."
-    tone: "passionate, urgent, morally charged"
-    style: "emotional appeals, us-vs-them framing, clear demands or calls to action"
-    avoid: "balanced both-sides language, detached analysis"
-
+    tone: passionate, urgent, morally charged
+    avoid: balanced both-sides language, detached analysis
+    label: Activist / Nhà hoạt động
+    style: emotional appeals, us-vs-them framing, clear demands or calls to action
+    description: Cause-driven writer. Clear values, calls for action, moral framing.
   citizen:
-    label: "Citizen / Người dân bình thường"
-    description: "Ordinary person sharing opinion. Colloquial, personal experience."
-    tone: "candid, informal, emotionally honest"
-    style: "conversational, uses personal pronouns, sometimes off-grammar, relatable"
-    avoid: "technical language, formal structure, citing statistics"
-
+    tone: candid, informal, emotionally honest
+    avoid: technical language, formal structure, citing statistics
+    label: Citizen / Người dân bình thường
+    style: conversational, uses personal pronouns, sometimes off-grammar, relatable
+    description: Ordinary person sharing opinion. Colloquial, personal experience.
+  expert:
+    tone: authoritative, measured, evidence-based
+    avoid: slang, emotion, personal anecdotes unrelated to domain
+    label: Expert / Chuyên gia
+    style: structured paragraphs, technical terms, sometimes links/references
+    description: Domain specialist with technical knowledge. Uses precise language, cites data.
+  influencer:
+    tone: energetic, relatable, slightly dramatic
+    avoid: technical jargon, nuanced caveats, long paragraphs
+    label: Influencer / KOL
+    style: short punchy sentences, emojis, rhetorical questions, call-to-action
+    description: Social media personality. Engagement-optimized writing, uses hooks.
+  journalist:
+    tone: neutral, inquisitive, factual
+    avoid: taking sides, speculative claims, promotional language
+    label: Journalist / Nhà báo
+    style: inverted pyramid structure, quotes context, ends with open question
+    description: Professional reporter. Balanced, asks questions, notes multiple sides.
   trader:
-    label: "Trader / Nhà đầu tư"
-    description: "Finance/market focused. Views news through economic lens."
-    tone: "pragmatic, risk-aware, numbers-oriented"
-    style: "mentions prices, risk/reward, market impact, practical takeaways"
-    avoid: "political framing, emotional language, moralizing"
-
-# NETIZEN TYPES — commenters (AI picks mix based on article topic)
+    tone: pragmatic, risk-aware, numbers-oriented
+    avoid: political framing, emotional language, moralizing
+    label: Trader / Nhà đầu tư
+    style: mentions prices, risk/reward, market impact, practical takeaways
+    description: Finance/market focused. Views news through economic lens.
 netizen_types:
-  skeptic:
-    label: "Skeptic"
-    color: "#f59e0b"
-    badge: "🔍"
-    description: "Doubts everything. Asks for sources, questions motives."
-    tone: "suspicious, probing, not necessarily hostile"
-    typical_phrases: ["nguồn đâu?", "ai verify chưa?", "có vẻ bị giật tít", "cần fact-check"]
-
-  toxic:
-    label: "Toxic"
-    color: "#ef4444"
-    badge: "💢"
-    description: "Aggressive, attacks persons not ideas. Uses ALL CAPS, insults."
-    tone: "hostile, dismissive, emotional"
-    typical_phrases: ["ngu vl", "fake news điển hình", "tẩy chay thôi", "đồ phản động"]
-
-  fan_boy:
-    label: "Fanboy/Fangirl"
-    color: "#6366f1"
-    badge: "🙌"
-    description: "Agrees with everything, no independent reasoning."
-    tone: "enthusiastic, uncritical, supportive"
-    typical_phrases: ["đúng quá đi", "ủng hộ 100%", "share ngay", "hay ghê"]
-
-  fact_checker:
-    label: "Fact Checker"
-    color: "#10b981"
-    badge: "✅"
-    description: "Corrects inaccuracies politely. Cites sources, links studies."
-    tone: "calm, precise, constructive"
-    typical_phrases: ["Actually theo nghiên cứu...", "thực tế là...", "số liệu chính xác là...", "đính chính nhỏ:"]
-
-  off_topic:
-    label: "Off-topic"
-    color: "#8b5cf6"
-    badge: "💬"
-    description: "Drifts completely off-topic. Tells personal story instead."
-    tone: "casual, self-absorbed, tangentially related"
-    typical_phrases: ["nhắc tới cái này tôi nhớ hồi...", "ôi trời tiện đây hỏi...", "unrelated nhưng mà..."]
-
   emotional:
-    label: "Emotional"
-    color: "#ec4899"
-    badge: "😭"
-    description: "Pure emotional reaction. Feels before thinks."
-    tone: "raw, expressive, uses emoji heavily"
-    typical_phrases: ["😭😭😭", "sao mà buồn thế", "tức ghê", "không tin nổi"]
-
-  smart_dissenter:
-    label: "Smart Dissenter"
-    color: "#14b8a6"
-    badge: "🧠"
-    description: "Disagrees with clear logical arguments. Respectful but firm."
-    tone: "analytical, calm, challenges assumptions"
-    typical_phrases: ["có một góc nhìn khác là...", "điểm này mình không đồng ý vì...", "vấn đề không đơn giản vậy"]
-
-  lurker_speaks:
-    label: "Lurker"
-    color: "#94a3b8"
-    badge: "👤"
-    description: "Rarely comments. Opens with that disclaimer. Short but sincere."
-    tone: "tentative, genuine, brief"
-    typical_phrases: ["lần đầu comment nhưng...", "thường không hay nói nhưng cái này...", "ít khi lên tiếng lắm"]
-
+    tone: raw, expressive, uses emoji heavily
+    badge: 😭
+    color: '#ec4899'
+    label: Emotional
+    description: Pure emotional reaction. Feels before thinks.
+    typical_phrases:
+    - 😭😭😭
+    - sao mà buồn thế
+    - tức ghê
+    - không tin nổi
+  fact_checker:
+    tone: calm, precise, constructive
+    badge: ✅
+    color: '#10b981'
+    label: Fact Checker
+    description: Corrects inaccuracies politely. Cites sources, links studies.
+    typical_phrases:
+    - Actually theo nghiên cứu...
+    - thực tế là...
+    - số liệu chính xác là...
+    - 'đính chính nhỏ:'
+  fan_boy:
+    tone: enthusiastic, uncritical, supportive
+    badge: 🙌
+    color: '#6366f1'
+    label: Fanboy/Fangirl
+    description: Agrees with everything, no independent reasoning.
+    typical_phrases:
+    - đúng quá đi
+    - ủng hộ 100%
+    - share ngay
+    - hay ghê
   late_arrival:
-    label: "Late Arrival"
-    color: "#78716c"
-    badge: "🕐"
-    description: "Arrives after drama has settled. Summarizes or adds afterthought."
-    tone: "detached, reflective, sometimes ironic"
-    typical_phrases: ["đọc thread này xong mà...", "2 ngày sau vẫn còn bình luận ư", "tóm lại là..."]
+    tone: detached, reflective, sometimes ironic
+    badge: 🕐
+    color: '#78716c'
+    label: Late Arrival
+    description: Arrives after drama has settled. Summarizes or adds afterthought.
+    typical_phrases:
+    - đọc thread này xong mà...
+    - 2 ngày sau vẫn còn bình luận ư
+    - tóm lại là...
+  lurker_speaks:
+    tone: tentative, genuine, brief
+    badge: 👤
+    color: '#94a3b8'
+    label: Lurker
+    description: Rarely comments. Opens with that disclaimer. Short but sincere.
+    typical_phrases:
+    - lần đầu comment nhưng...
+    - thường không hay nói nhưng cái này...
+    - ít khi lên tiếng lắm
+  off_topic:
+    tone: casual, self-absorbed, tangentially related
+    badge: 💬
+    color: '#8b5cf6'
+    label: Off-topic
+    description: Drifts completely off-topic. Tells personal story instead.
+    typical_phrases:
+    - nhắc tới cái này tôi nhớ hồi...
+    - ôi trời tiện đây hỏi...
+    - unrelated nhưng mà...
+  skeptic:
+    tone: suspicious, probing, not necessarily hostile
+    badge: 🔍
+    color: '#f59e0b'
+    label: Skeptic
+    description: Doubts everything. Asks for sources, questions motives.
+    typical_phrases:
+    - nguồn đâu?
+    - ai verify chưa?
+    - có vẻ bị giật tít
+    - cần fact-check
+  smart_dissenter:
+    tone: analytical, calm, challenges assumptions
+    badge: 🧠
+    color: '#14b8a6'
+    label: Smart Dissenter
+    description: Disagrees with clear logical arguments. Respectful but firm.
+    typical_phrases:
+    - có một góc nhìn khác là...
+    - điểm này mình không đồng ý vì...
+    - vấn đề không đơn giản vậy
+  toxic:
+    tone: hostile, dismissive, emotional
+    badge: 💢
+    color: '#ef4444'
+    label: Toxic
+    description: Aggressive, attacks persons not ideas. Uses ALL CAPS, insults.
+    typical_phrases:
+    - ngu vl
+    - fake news điển hình
+    - tẩy chay thôi
+    - đồ phản động

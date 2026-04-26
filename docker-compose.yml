@@ -1,22 +1,121 @@
+# ─── news-aggregator stack ───────────────────────────────────────────────────
+# Coolify-ready, fully portable. Same file works on:
+#   - local dev:           `docker compose up`
+#   - Coolify:             paste this file, set env vars in UI
+#   - Fly.io / Railway:    `kompose convert` or per-service deploy
+#   - plain VPS:           `docker compose up -d`
+#
+# Heavy services (Weaviate for RAG) are gated behind profiles so the base
+# stack stays light (~250MB RAM total).
+#
+# Backup strategy:
+#   - SQLite       → Litestream (continuous, runs inside `app` container)
+#   - Redis RDB    → `redis-backup` sidecar (cron BGSAVE + s3 sync)
+#   - config/      → committed to Git (Settings UI changes show up as diffs)
+
 services:
+  # ─── Application (web + scheduler in one process) ──────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: news-aggregator:local
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      SQLITE_PATH: /app/data/stats.db
+      # CORS — comma-separated origins for the Vercel frontend.
+      # e.g. "https://news.example.com,https://*.vercel.app"
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-}
+      # Weaviate — only reachable when `--profile rag` is active
+      WEAVIATE_HOST: ${WEAVIATE_HOST:-weaviate}
+      WEAVIATE_PORT: "8080"
+      WEAVIATE_GRPC_PORT: "50051"
+      # Litestream — leave LITESTREAM_BUCKET empty to disable replication
+      LITESTREAM_BUCKET: ${LITESTREAM_BUCKET:-}
+      LITESTREAM_PATH: ${LITESTREAM_PATH:-news-aggregator/sqlite}
+      LITESTREAM_ENDPOINT: ${LITESTREAM_ENDPOINT:-}
+      LITESTREAM_REGION: ${LITESTREAM_REGION:-auto}
+      LITESTREAM_ACCESS_KEY_ID: ${LITESTREAM_ACCESS_KEY_ID:-}
+      LITESTREAM_SECRET_ACCESS_KEY: ${LITESTREAM_SECRET_ACCESS_KEY:-}
+      # Config backend — see entrypoint.sh for boot-time semantics.
+      #   yaml = app reads/writes config/*.yaml in the volume (default)
+      #   db   = app reads/writes Postgres tables directly (requires SUPABASE_DB_URL)
+      CONFIG_BACKEND: ${CONFIG_BACKEND:-yaml}
+      # Required when CONFIG_BACKEND=db or for manual `python config/sync.py` runs.
+      SUPABASE_DB_URL: ${SUPABASE_DB_URL:-}
+    volumes:
+      - app-data:/app/data
+      - app-config:/app/config        # Settings UI writes here — survives redeploys
+      - ./litestream.yml:/etc/litestream.yml:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ─── Redis (hot store, 24h TTL articles) ───────────────────────────────────
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --save 60 1 --loglevel warning
+    # AOF=everysec gives durability with negligible perf cost.
+    # save 900 1 / 300 10 / 60 10000 = standard RDB snapshot tiers.
+    command: >
+      redis-server
+        --appendonly yes
+        --appendfsync everysec
+        --save 900 1
+        --save 300 10
+        --save 60 10000
+        --loglevel warning
     volumes:
-      - ~/.news-aggregator/redis:/data
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
+      interval: 10s
       timeout: 3s
       retries: 5
 
+  # ─── Redis backup sidecar (BGSAVE + S3 sync) ───────────────────────────────
+  # Runs a tiny shell loop. See scripts/backup-redis.sh for the policy.
+  redis-backup:
+    image: amazon/aws-cli:2.15.30
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/scripts/backup-redis.sh"]
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      BACKUP_INTERVAL_SECONDS: ${REDIS_BACKUP_INTERVAL_SECONDS:-3600}
+      BACKUP_RETENTION_DAYS: ${REDIS_BACKUP_RETENTION_DAYS:-7}
+      S3_BUCKET: ${LITESTREAM_BUCKET:-}
+      S3_PREFIX: ${REDIS_BACKUP_PREFIX:-news-aggregator/redis}
+      S3_ENDPOINT: ${LITESTREAM_ENDPOINT:-}
+      AWS_ACCESS_KEY_ID: ${LITESTREAM_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${LITESTREAM_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${LITESTREAM_REGION:-auto}
+    volumes:
+      - redis-data:/data:ro
+      - ./scripts:/scripts:ro
+
+  # ─── Weaviate (vector DB for RAG features) — OPTIONAL ──────────────────────
+  # Heavy: ~300MB RAM idle. Enable with: `docker compose --profile rag up -d`
+  # Disable if not using RAG/synthesis vector features (saves ~50% of host RAM).
   weaviate:
     image: semitechnologies/weaviate:1.24.6
     restart: unless-stopped
+    profiles: ["rag"]
     ports:
-      - "8080:8080"
-      - "50051:50051"
+      - "${WEAVIATE_PORT:-8080}:8080"
+      - "${WEAVIATE_GRPC_PORT:-50051}:50051"
     environment:
       QUERY_DEFAULTS_LIMIT: 25
       AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
@@ -24,7 +123,7 @@ services:
       DEFAULT_VECTORIZER_MODULE: none
       CLUSTER_HOSTNAME: node1
     volumes:
-      - ~/.news-aggregator/weaviate:/var/lib/weaviate
+      - weaviate-data:/var/lib/weaviate
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/v1/.well-known/ready"]
       interval: 10s
@@ -32,28 +131,11 @@ services:
       retries: 6
       start_period: 20s
 
-  app:
-    image: 192.168.30.125:5001/news-aggregator:latest
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    depends_on:
-      redis:
-        condition: service_healthy
-      weaviate:
-        condition: service_healthy
-    environment:
-      REDIS_URL: redis://redis:6379/0
-      SQLITE_PATH: /app/data/stats.db
-      WEAVIATE_HOST: weaviate
-      WEAVIATE_PORT: "8080"
-      WEAVIATE_GRPC_PORT: "50051"
-    volumes:
-      # Persist SQLite DB
-      - ~/.news-aggregator/app-data:/app/data
-      # Mount config (read-write) so Settings UI can update settings.yaml
-      - ./config:/app/config
-      # Optional: mount .env if you use one
-      # - ./.env:/app/.env:ro
-
-# All data persisted under ~/.news-aggregator/ on the host (bind mounts — no Docker named volumes needed)
+# ─── Volumes ─────────────────────────────────────────────────────────────────
+# Named volumes — Docker manages location, portable across hosts.
+# Backup with: docker run --rm -v news-aggregator_app-data:/src busybox tar czf - /src > backup.tgz
+volumes:
+  app-data:
+  app-config:
+  redis-data:
+  weaviate-data:

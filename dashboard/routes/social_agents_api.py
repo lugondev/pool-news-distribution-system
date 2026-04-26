@@ -11,7 +11,6 @@ Routes:
 
 import logging
 
-import yaml
 from fastapi import APIRouter, HTTPException, Query
 
 from ai.social_poster import (
@@ -21,11 +20,10 @@ from ai.social_poster import (
     run_social_agent,
 )
 from dashboard import redis_state
+from dashboard.config_io import read_settings, write_social_agents
 
 router = APIRouter(prefix="/social-agents", tags=["social-agents"])
 logger = logging.getLogger(__name__)
-
-SOCIAL_AGENTS_FILE = "config/social_agents.yaml"
 
 
 # ── List / get agents ─────────────────────────────────────────────────────────
@@ -66,8 +64,7 @@ async def api_run_agent(agent_id: str):
     redis = redis_state.get_redis()
 
     # Resolve AI credentials from main settings
-    with open("config/settings.yaml") as f:
-        cfg = yaml.safe_load(f)
+    cfg = read_settings()
     ai_cfg = cfg.get("ai", {})
     pid = ai_cfg.get("provider_id")
     api_key = ai_cfg.get("api_key", "")
@@ -148,11 +145,5 @@ async def api_delete_agent(agent_id: str):
 
 
 def _save_agents(agents: list[dict]) -> None:
-    try:
-        with open(SOCIAL_AGENTS_FILE) as f:
-            data = yaml.safe_load(f) or {}
-    except FileNotFoundError:
-        data = {}
-    data["agents"] = agents
-    with open(SOCIAL_AGENTS_FILE, "w") as f:
-        yaml.dump(data, f, allow_unicode=True, sort_keys=False)
+    """Persist via config_io — backend (yaml or db) decides storage."""
+    write_social_agents(agents)

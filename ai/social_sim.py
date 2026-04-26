@@ -60,10 +60,10 @@ import random
 from datetime import datetime, timezone
 from typing import Literal
 
-import yaml
 import redis.asyncio as aioredis
 
 from ai.rewriter import get_openai_client, _load_ai_config
+from dashboard.config_io import read_sim_personas
 from storage.redis_keys import ARTICLE_TTL_SECONDS
 
 logger = logging.getLogger(__name__)
@@ -71,8 +71,6 @@ logger = logging.getLogger(__name__)
 SIM_TTL = ARTICLE_TTL_SECONDS * 3
 SIM_PREFIX = "social:sim:"
 SIM_RECENT_KEY = "social:sims:recent"
-
-PERSONAS_FILE = "config/sim_personas.yaml"
 
 DepthMode = Literal["flat", "nested", "full"]
 
@@ -85,8 +83,8 @@ DEPTH_COMMENT_COUNT = {"flat": 6, "nested": 9, "full": 12}
 # ── Persona loading ──────────────────────────────────────────────────────────
 
 def _load_personas() -> dict:
-    with open(PERSONAS_FILE) as f:
-        return yaml.safe_load(f) or {}
+    """Load personas from the active config backend (yaml or db)."""
+    return read_sim_personas() or {}
 
 
 def _pick_netizen_types(article_text: str, count: int) -> list[str]:
