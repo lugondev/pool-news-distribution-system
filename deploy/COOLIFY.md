@@ -29,7 +29,7 @@ Split architecture:
 
 ## Step 2 — Deploy backend on Coolify (10 min)
 
-1. Coolify → New Resource → **Docker Compose** → paste the repo URL (or upload `docker-compose.yml` + `Dockerfile`).
+1. Coolify → New Resource → **Docker Compose** → paste the repo URL (or upload `docker-compose.yaml` + `Dockerfile`).
 2. Domain: assign `api.your-domain.com` (Coolify generates Let's Encrypt cert automatically).
 3. **Environment Variables** (Settings → Environment):
    ```
