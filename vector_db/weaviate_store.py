@@ -25,9 +25,8 @@ COLLECTION_NAME = "NewsArticle"
 
 def _load_weaviate_config() -> dict:
     try:
-        with open("config/settings.yaml") as f:
-            cfg = yaml.safe_load(f)
-        return cfg.get("weaviate", {})
+        from dashboard.config_io import read_settings
+        return read_settings().get("weaviate", {})
     except Exception:
         return {}
 

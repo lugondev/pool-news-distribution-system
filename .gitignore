@@ -64,6 +64,9 @@ config/*.bak
 skills/
 skills-lock.json
 
+# MCP server config (contains API tokens — keep local only)
+.mcp.json
+
 # IDE
 .vscode/
 .idea/

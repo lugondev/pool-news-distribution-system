@@ -15,9 +15,9 @@ router = APIRouter(prefix="/rag", tags=["rag"])
 
 
 def _resolve_provider() -> tuple[str, str]:
-    """Resolve active provider's api_key and base_url from settings.yaml."""
-    with open("config/settings.yaml") as f:
-        cfg = yaml.safe_load(f)
+    """Resolve active provider's api_key and base_url via config_io backend."""
+    from dashboard.config_io import read_settings
+    cfg = read_settings()
     ai = cfg.get("ai", {})
     api_key = ai.get("api_key", "")
     base_url = ai.get("base_url", "https://api.openai.com/v1")

@@ -84,16 +84,9 @@ _sources_mtime: float = 0.0
 
 
 def _load_config() -> dict:
-    global _config_cache, _config_mtime
-    try:
-        mtime = os.path.getmtime("config/settings.yaml")
-    except OSError:
-        mtime = 0.0
-    if _config_cache is None or mtime > _config_mtime:
-        with open("config/settings.yaml") as f:
-            _config_cache = yaml.safe_load(f)
-        _config_mtime = mtime
-    return _config_cache
+    """Read full settings via config_io — backend (yaml or db) handles caching."""
+    from dashboard.config_io import read_settings
+    return read_settings()
 
 
 def _resolve_ai_config(ai_cfg: dict, config_id: str | None) -> dict:
@@ -136,17 +129,9 @@ def _resolve_provider(
 
 
 def _load_sources() -> list[dict]:
-    global _sources_cache, _sources_mtime
-    try:
-        mtime = os.path.getmtime("config/sources.yaml")
-    except OSError:
-        mtime = 0.0
-    if _sources_cache is None or mtime > _sources_mtime:
-        with open("config/sources.yaml") as f:
-            data = yaml.safe_load(f)
-        _sources_cache = data.get("sources", [])
-        _sources_mtime = mtime
-    return _sources_cache
+    """Read sources via config_io — backend (yaml or db) handles caching."""
+    from dashboard.config_io import read_sources
+    return read_sources()
 
 
 # ---------------------------------------------------------------------------

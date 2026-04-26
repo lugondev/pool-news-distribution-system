@@ -22,9 +22,8 @@ logger = logging.getLogger(__name__)
 
 
 def _load_scoring_config() -> dict:
-    with open("config/settings.yaml") as f:
-        cfg = yaml.safe_load(f)
-    return cfg.get("scoring", {})
+    from dashboard.config_io import read_settings
+    return read_settings().get("scoring", {})
 
 
 def score_article(article: Article, cfg: dict | None = None) -> float:

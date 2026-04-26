@@ -121,11 +121,9 @@ async def api_newsletter_generate(
     language: str = Query(default="English"),
 ):
     redis = redis_state.get_redis()
-    import yaml
-    from dashboard.config_io import get_categories
+    from dashboard.config_io import get_categories, read_settings
 
-    with open("config/settings.yaml") as _f:
-        _full_cfg = yaml.safe_load(_f)
+    _full_cfg = read_settings()
     ai_cfg = _full_cfg.get("ai", {})
 
     # Resolve provider credentials (mirrors scheduler._resolve_provider logic)
@@ -169,11 +167,10 @@ async def api_debates(limit: int = Query(default=10, le=20)):
 @router.post("/debates/run")
 async def api_debates_run():
     """Manually trigger the debate job — runs immediately outside the scheduler."""
-    import yaml
+    from dashboard.config_io import read_settings
     redis = redis_state.get_redis()
 
-    with open("config/settings.yaml") as _f:
-        cfg = yaml.safe_load(_f)
+    cfg = read_settings()
 
     debate_cfg = cfg.get("debate", {})
     if not debate_cfg.get("enabled", False):

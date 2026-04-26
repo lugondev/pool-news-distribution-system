@@ -168,9 +168,18 @@ dashboard_app.router.lifespan_context = lifespan
 
 
 if __name__ == "__main__":
-    with open("config/settings.yaml") as f:
-        cfg = yaml.safe_load(f)
-    dash_cfg = cfg.get("dashboard", {})
+    # Resolve dashboard host/port via config_io — respects CONFIG_BACKEND
+    # (yaml or db). This is the only place __main__ runs config-dependent
+    # code before uvicorn starts.
+    from dashboard.config_io import read_settings
+    try:
+        dash_cfg = read_settings().get("dashboard", {})
+    except Exception as exc:
+        # Backend unavailable (DB down, missing yaml) — fall back to defaults
+        # so the container at least starts and reports the underlying error
+        # via the lifespan / health endpoint.
+        logger.warning(f"read_settings failed at startup, using defaults: {exc}")
+        dash_cfg = {}
 
     port = int(os.environ.get("DEV_PORT", dash_cfg.get("port", 8000)))
     uvicorn.run(
