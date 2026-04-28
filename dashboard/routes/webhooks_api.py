@@ -16,6 +16,12 @@ from dashboard.config_io import (
     save_webhook_endpoints,
 )
 
+
+# Auth gating: all mutating endpoints require manager role.
+from fastapi import Depends as _Depends
+from auth import require_role as _require_role
+_mgr = [_Depends(_require_role("manager"))]
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -79,7 +85,7 @@ async def list_webhooks():
     return {"endpoints": get_webhook_endpoints()}
 
 
-@router.post("/webhooks", status_code=201)
+@router.post("/webhooks", status_code=201, dependencies=_mgr)
 async def add_webhook(body: WebhookIn):
     endpoints = get_webhook_endpoints()
     if any(ep["id"] == body.id for ep in endpoints):
@@ -116,7 +122,7 @@ async def add_webhook(body: WebhookIn):
     return {"ok": True, "endpoint": ep}
 
 
-@router.put("/webhooks/{wh_id}")
+@router.put("/webhooks/{wh_id}", dependencies=_mgr)
 async def update_webhook(wh_id: str, body: WebhookUpdate):
     endpoints = get_webhook_endpoints()
     target = next((ep for ep in endpoints if ep["id"] == wh_id), None)
@@ -143,7 +149,7 @@ async def update_webhook(wh_id: str, body: WebhookUpdate):
     return {"ok": True, "endpoint": target}
 
 
-@router.post("/webhooks/{wh_id}/toggle")
+@router.post("/webhooks/{wh_id}/toggle", dependencies=_mgr)
 async def toggle_webhook(wh_id: str):
     endpoints = get_webhook_endpoints()
     target = next((ep for ep in endpoints if ep["id"] == wh_id), None)
@@ -154,7 +160,7 @@ async def toggle_webhook(wh_id: str):
     return {"ok": True, "endpoint": target}
 
 
-@router.delete("/webhooks/{wh_id}")
+@router.delete("/webhooks/{wh_id}", dependencies=_mgr)
 async def delete_webhook(wh_id: str):
     endpoints = get_webhook_endpoints()
     new = [ep for ep in endpoints if ep["id"] != wh_id]
@@ -165,7 +171,7 @@ async def delete_webhook(wh_id: str):
     return {"ok": True}
 
 
-@router.post("/webhooks/{wh_id}/test")
+@router.post("/webhooks/{wh_id}/test", dependencies=_mgr)
 async def test_webhook(wh_id: str):
     """Send a real HTTP request with mock data and return detailed result."""
     from webhook.filters import passes_filter
@@ -314,7 +320,7 @@ async def list_telegram_channels():
     return {"channels": get_telegram_channels()}
 
 
-@router.post("/telegram", status_code=201)
+@router.post("/telegram", status_code=201, dependencies=_mgr)
 async def add_telegram_channel(body: TelegramChannelIn):
     channels = get_telegram_channels()
     if any(ch["id"] == body.id for ch in channels):
@@ -350,7 +356,7 @@ async def add_telegram_channel(body: TelegramChannelIn):
     return {"ok": True, "channel": ch}
 
 
-@router.put("/telegram/{ch_id}")
+@router.put("/telegram/{ch_id}", dependencies=_mgr)
 async def update_telegram_channel(ch_id: str, body: TelegramChannelUpdate):
     channels = get_telegram_channels()
     target = next((ch for ch in channels if ch["id"] == ch_id), None)
@@ -375,7 +381,7 @@ async def update_telegram_channel(ch_id: str, body: TelegramChannelUpdate):
     return {"ok": True, "channel": target}
 
 
-@router.post("/telegram/{ch_id}/toggle")
+@router.post("/telegram/{ch_id}/toggle", dependencies=_mgr)
 async def toggle_telegram_channel(ch_id: str):
     channels = get_telegram_channels()
     target = next((ch for ch in channels if ch["id"] == ch_id), None)
@@ -386,7 +392,7 @@ async def toggle_telegram_channel(ch_id: str):
     return {"ok": True, "channel": target}
 
 
-@router.delete("/telegram/{ch_id}")
+@router.delete("/telegram/{ch_id}", dependencies=_mgr)
 async def delete_telegram_channel(ch_id: str):
     channels = get_telegram_channels()
     new = [ch for ch in channels if ch["id"] != ch_id]
@@ -397,7 +403,7 @@ async def delete_telegram_channel(ch_id: str):
     return {"ok": True}
 
 
-@router.post("/telegram/{ch_id}/test")
+@router.post("/telegram/{ch_id}/test", dependencies=_mgr)
 async def test_telegram_channel(ch_id: str):
     from webhook.telegram import send_telegram
 

@@ -10,7 +10,7 @@ Routes:
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from ai.social_sim import (
@@ -18,11 +18,13 @@ from ai.social_sim import (
     get_simulation,
     run_simulation,
 )
+from auth import require_perm
 from dashboard import redis_state
 from dashboard.config_io import get_categories, read_settings, read_sim_personas
 from storage.redis_store import get_latest_articles
 
 router = APIRouter(prefix="/social-sim", tags=["social-sim"])
+_perm_sim = [Depends(require_perm("can_create_sim"))]
 logger = logging.getLogger(__name__)
 
 class SimRunRequest(BaseModel):
@@ -82,7 +84,7 @@ async def api_get_simulation(sim_id: str):
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 
-@router.post("/run")
+@router.post("/run", dependencies=_perm_sim)
 async def api_run_simulation(body: SimRunRequest):
     """Trigger a new social media conversation simulation for an article."""
     redis = redis_state.get_redis()

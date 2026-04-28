@@ -41,3 +41,6 @@ tweepy==4.14.0
 
 # Config sync (YAML ↔ Postgres/Supabase) — used by config/sync.py
 psycopg[binary]==3.2.3
+
+# Auth (argon2 password hashing)
+argon2-cffi==23.1.0

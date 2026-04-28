@@ -3,9 +3,10 @@
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from auth import require_perm, require_role
 from dashboard.config_io import read_settings, write_settings
 from dashboard.redis_state import get_redis
 from ai.social_article import (
@@ -18,6 +19,8 @@ from ai.social_article import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+_mgr = [Depends(require_role("manager"))]
+_perm_article = [Depends(require_perm("can_create_social_article"))]
 
 
 # ── Social Article Settings ──────────────────────────────────────────────────
@@ -44,7 +47,7 @@ async def get_social_article_settings():
     return cfg.get("social_article", {})
 
 
-@router.put("/settings/social-article")
+@router.put("/settings/social-article", dependencies=_mgr)
 async def update_social_article_settings(body: SocialArticleSettingsIn):
     """Update social article configuration."""
     cfg = read_settings()
@@ -79,7 +82,7 @@ async def update_social_article_settings(body: SocialArticleSettingsIn):
     return {"ok": True, "social_article": social}
 
 
-@router.post("/settings/social-article/toggle")
+@router.post("/settings/social-article/toggle", dependencies=_mgr)
 async def toggle_social_article():
     """Toggle social article feature on/off."""
     cfg = read_settings()
@@ -127,7 +130,7 @@ class GenerateArticleIn(BaseModel):
     save: bool = True
 
 
-@router.post("/social-article/generate")
+@router.post("/social-article/generate", dependencies=_perm_article)
 async def generate_article(body: GenerateArticleIn):
     """
     Generate a new social article from recent news.
@@ -202,7 +205,7 @@ async def get_article(article_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/social-article/{article_id}")
+@router.delete("/social-article/{article_id}", dependencies=_perm_article)
 async def delete_article(article_id: str):
     """Delete a social article."""
     redis = get_redis()
@@ -231,7 +234,7 @@ async def delete_article(article_id: str):
 # ── Quick Generate (with defaults) ────────────────────────────────────────────
 
 
-@router.post("/social-article/quick-generate")
+@router.post("/social-article/quick-generate", dependencies=_perm_article)
 async def quick_generate():
     """
     Quick generate using default settings from config.

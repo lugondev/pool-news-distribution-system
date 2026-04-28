@@ -8,6 +8,12 @@ from pydantic import BaseModel
 
 from dashboard.config_io import read_settings, write_settings
 
+
+# Auth gating: all mutating endpoints require manager role.
+from fastapi import Depends as _Depends
+from auth import require_role as _require_role
+_mgr = [_Depends(_require_role("manager"))]
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -30,7 +36,7 @@ async def get_ai_settings():
     return read_settings().get("ai", {})
 
 
-@router.put("/settings/ai")
+@router.put("/settings/ai", dependencies=_mgr)
 async def update_ai_settings(body: AISettingsIn):
     cfg = read_settings()
     ai = cfg.get("ai", {})
@@ -54,7 +60,7 @@ async def update_ai_settings(body: AISettingsIn):
     return {"ok": True, "ai": ai}
 
 
-@router.post("/settings/ai/toggle")
+@router.post("/settings/ai/toggle", dependencies=_mgr)
 async def toggle_ai_summary():
     cfg = read_settings()
     ai = cfg.setdefault("ai", {})
@@ -64,7 +70,7 @@ async def toggle_ai_summary():
     return {"ok": True, "enabled": ai["enabled"]}
 
 
-@router.post("/settings/ai/synthesis/toggle")
+@router.post("/settings/ai/synthesis/toggle", dependencies=_mgr)
 async def toggle_ai_synthesis():
     cfg = read_settings()
     synthesis = cfg.setdefault("ai", {}).setdefault("topic_synthesis", {})
@@ -74,7 +80,7 @@ async def toggle_ai_synthesis():
     return {"ok": True, "enabled": synthesis["enabled"]}
 
 
-@router.post("/settings/ai/debate/toggle")
+@router.post("/settings/ai/debate/toggle", dependencies=_mgr)
 async def toggle_ai_debate():
     cfg = read_settings()
     debate = cfg.setdefault("debate", {})
@@ -116,7 +122,7 @@ async def get_provider(provider_id: str):
     return provider
 
 
-@router.post("/providers")
+@router.post("/providers", dependencies=_mgr)
 async def create_provider(body: ProviderIn):
     cfg = read_settings()
     ai = cfg.setdefault("ai", {})
@@ -133,7 +139,7 @@ async def create_provider(body: ProviderIn):
     return {"ok": True, "id": pid}
 
 
-@router.put("/providers/{provider_id}")
+@router.put("/providers/{provider_id}", dependencies=_mgr)
 async def update_provider(provider_id: str, body: ProviderIn):
     cfg = read_settings()
     providers = cfg.get("ai", {}).get("providers", [])
@@ -149,7 +155,7 @@ async def update_provider(provider_id: str, body: ProviderIn):
     raise HTTPException(status_code=404, detail="Provider not found")
 
 
-@router.delete("/providers/{provider_id}")
+@router.delete("/providers/{provider_id}", dependencies=_mgr)
 async def delete_provider(provider_id: str):
     cfg = read_settings()
     ai = cfg.get("ai", {})
@@ -168,7 +174,7 @@ async def delete_provider(provider_id: str):
     return {"ok": True}
 
 
-@router.post("/providers/{provider_id}/test")
+@router.post("/providers/{provider_id}/test", dependencies=_mgr)
 async def test_provider(provider_id: str):
     from ai.rewriter import test_ai_connection
 
@@ -206,7 +212,7 @@ async def list_ai_configs():
     return {"configs": cfg.get("ai", {}).get("configs", [])}
 
 
-@router.post("/ai-configs", status_code=201)
+@router.post("/ai-configs", status_code=201, dependencies=_mgr)
 async def create_ai_config(body: AiConfigIn):
     cfg = read_settings()
     ai = cfg.setdefault("ai", {})
@@ -232,7 +238,7 @@ async def create_ai_config(body: AiConfigIn):
     return {"ok": True, "id": cid}
 
 
-@router.put("/ai-configs/{config_id}")
+@router.put("/ai-configs/{config_id}", dependencies=_mgr)
 async def update_ai_config(config_id: str, body: AiConfigIn):
     cfg = read_settings()
     configs = cfg.get("ai", {}).get("configs", [])
@@ -255,7 +261,7 @@ async def update_ai_config(config_id: str, body: AiConfigIn):
     return {"ok": True}
 
 
-@router.post("/ai-configs/{config_id}/set-default")
+@router.post("/ai-configs/{config_id}/set-default", dependencies=_mgr)
 async def set_default_ai_config(config_id: str):
     cfg = read_settings()
     configs = cfg.get("ai", {}).get("configs", [])
@@ -272,7 +278,7 @@ async def set_default_ai_config(config_id: str):
     return {"ok": True}
 
 
-@router.delete("/ai-configs/{config_id}")
+@router.delete("/ai-configs/{config_id}", dependencies=_mgr)
 async def delete_ai_config(config_id: str):
     cfg = read_settings()
     ai = cfg.get("ai", {})

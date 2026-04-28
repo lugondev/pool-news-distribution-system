@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -26,12 +26,18 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from dashboard import redis_state
 from dashboard.api_router import router as api_router
 from dashboard.config_io import get_categories, read_sources
+from dashboard.routes.auth_ui import router as auth_ui_router
+from dashboard.routes.users_api import page_router as users_page_router
 from dashboard.routes.dispatch_ui import router as dispatch_ui_router
 from dashboard.routes.settings_ui import router as settings_ui_router
 from dashboard.routes.sources_ui import router as sources_ui_router
 from dashboard.routes.social_agents_ui import router as social_agents_ui_router
 from dashboard.routes.social_sim_ui import router as social_sim_ui_router
 from dashboard.routes.ai_providers_ui import router as ai_providers_ui_router
+
+from auth import AuthMiddleware, init_auth_db, require_login
+from auth.deps import install_auth_exception_handlers
+from auth.setup import ensure_setup_token
 from dashboard.templates_state import templates
 from storage.redis_store import get_article, get_feed_stats, get_latest_articles
 from storage.sqlite_stats import (
@@ -66,6 +72,8 @@ def get_redis() -> aioredis.Redis:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    await init_auth_db()
+    await ensure_setup_token()
     yield
     if _redis:
         await _redis.aclose()
@@ -131,13 +139,22 @@ if _cors_origins:
     logger.info(f"CORS enabled for: {_cors_origins}")
 
 app.add_middleware(_APIRequestLogger)
-app.include_router(api_router)
-app.include_router(sources_ui_router)
-app.include_router(settings_ui_router)
-app.include_router(dispatch_ui_router)
-app.include_router(social_agents_ui_router)
-app.include_router(social_sim_ui_router)
-app.include_router(ai_providers_ui_router)
+# AuthMiddleware MUST be added AFTER other middlewares so it runs FIRST
+# (Starlette wraps middleware LIFO — last add wraps the request earliest).
+app.add_middleware(AuthMiddleware)
+install_auth_exception_handlers(app)
+
+_login = [Depends(require_login())]
+# Auth UI (login/logout/setup) is the only router exempt from login.
+app.include_router(auth_ui_router)
+app.include_router(users_page_router)  # /users page (gated to superadmin internally)
+app.include_router(api_router)  # sub-routers add their own login deps; channels_api stays mixed
+app.include_router(sources_ui_router,         dependencies=_login)
+app.include_router(settings_ui_router,        dependencies=_login)
+app.include_router(dispatch_ui_router,        dependencies=_login)
+app.include_router(social_agents_ui_router,   dependencies=_login)
+app.include_router(social_sim_ui_router,      dependencies=_login)
+app.include_router(ai_providers_ui_router,    dependencies=_login)
 
 PAGE_SIZE = 20
 
@@ -145,49 +162,49 @@ PAGE_SIZE = 20
 # ── Page routes ───────────────────────────────────────────────────────────────
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=HTMLResponse, dependencies=_login)
 async def dashboard(request: Request):
     return templates.TemplateResponse(
         "index.html", {"request": request, "active_page": "feed"}
     )
 
 
-@app.get("/pipeline", response_class=HTMLResponse)
+@app.get("/pipeline", response_class=HTMLResponse, dependencies=_login)
 async def pipeline_view(request: Request):
     return templates.TemplateResponse(
         "pipeline.html", {"request": request, "active_page": "pipeline"}
     )
 
 
-@app.get("/intelligence", response_class=HTMLResponse)
+@app.get("/intelligence", response_class=HTMLResponse, dependencies=_login)
 async def intelligence_view(request: Request):
     return templates.TemplateResponse(
         "intelligence.html", {"request": request, "active_page": "intelligence"}
     )
 
 
-@app.get("/newsletter", response_class=HTMLResponse)
+@app.get("/newsletter", response_class=HTMLResponse, dependencies=_login)
 async def newsletter_view(request: Request):
     return templates.TemplateResponse(
         "newsletter.html", {"request": request, "active_page": "newsletter"}
     )
 
 
-@app.get("/schedules", response_class=HTMLResponse)
+@app.get("/schedules", response_class=HTMLResponse, dependencies=_login)
 async def schedules_view(request: Request):
     return templates.TemplateResponse(
         "schedules.html", {"request": request, "active_page": "schedules"}
     )
 
 
-@app.get("/debates", response_class=HTMLResponse)
+@app.get("/debates", response_class=HTMLResponse, dependencies=_login)
 async def debates_view(request: Request):
     return templates.TemplateResponse(
         "debates.html", {"request": request, "active_page": "debates"}
     )
 
 
-@app.get("/rag", response_class=HTMLResponse)
+@app.get("/rag", response_class=HTMLResponse, dependencies=_login)
 async def rag_view(request: Request):
     return templates.TemplateResponse(
         "rag.html", {"request": request, "active_page": "rag"}
@@ -196,6 +213,12 @@ async def rag_view(request: Request):
 
 @app.websocket("/ws/pipeline")
 async def pipeline_ws(websocket: WebSocket):
+    # WS doesn't go through HTTP middleware/deps — check session cookie inline.
+    from auth.sessions import COOKIE_NAME, resolve_session
+    sid = websocket.cookies.get(COOKIE_NAME)
+    if not sid or not await resolve_session(sid):
+        await websocket.close(code=4401)
+        return
     await ws_manager.connect(websocket)
     try:
         while True:
@@ -204,7 +227,7 @@ async def pipeline_ws(websocket: WebSocket):
         ws_manager.disconnect(websocket)
 
 
-@app.get("/article/{article_id}", response_class=HTMLResponse)
+@app.get("/article/{article_id}", response_class=HTMLResponse, dependencies=_login)
 async def article_detail(request: Request, article_id: str):
     redis = get_redis()
     article = await get_article(redis, article_id)
@@ -245,7 +268,7 @@ async def article_detail(request: Request, article_id: str):
 # ── HTMX partials ─────────────────────────────────────────────────────────────
 
 
-@app.get("/partials/stats", response_class=HTMLResponse)
+@app.get("/partials/stats", response_class=HTMLResponse, dependencies=_login)
 async def stats_partial(request: Request):
     redis = get_redis()
     return templates.TemplateResponse(
@@ -258,7 +281,7 @@ async def stats_partial(request: Request):
     )
 
 
-@app.get("/partials/feed", response_class=HTMLResponse)
+@app.get("/partials/feed", response_class=HTMLResponse, dependencies=_login)
 async def feed_partial(
     request: Request,
     page: int = 1,

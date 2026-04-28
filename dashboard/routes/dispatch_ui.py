@@ -23,6 +23,12 @@ from dashboard.templates_state import templates
 from dashboard.ui_helpers import enrich_logs
 from storage.sqlite_stats import get_recent_channel_logs, get_recent_telegram_logs, get_recent_webhook_logs
 
+
+# Auth gating: all mutating endpoints require manager role.
+from fastapi import Depends as _Depends
+from auth import require_role as _require_role
+_mgr = [_Depends(_require_role("manager"))]
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -134,7 +140,7 @@ async def logs_webhook_partial(request: Request, page: int = 1):
     return templates.TemplateResponse("partials/webhook_logs_table.html", await _webhook_ctx(request, page=page))
 
 
-@router.post("/webhooks/add", response_class=HTMLResponse)
+@router.post("/webhooks/add", response_class=HTMLResponse, dependencies=_mgr)
 async def webhook_add(
     request: Request,
     id: str = Form(...),
@@ -177,7 +183,7 @@ async def webhook_add(
     return templates.TemplateResponse("partials/settings_webhook.html", await _webhook_ctx(request, success=f"Webhook '{name}' added"))
 
 
-@router.post("/webhooks/{wh_id}/toggle", response_class=HTMLResponse)
+@router.post("/webhooks/{wh_id}/toggle", response_class=HTMLResponse, dependencies=_mgr)
 async def webhook_toggle(request: Request, wh_id: str):
     endpoints = get_webhook_endpoints()
     for ep in endpoints:
@@ -188,7 +194,7 @@ async def webhook_toggle(request: Request, wh_id: str):
     return templates.TemplateResponse("partials/settings_webhook.html", await _webhook_ctx(request))
 
 
-@router.put("/webhooks/{wh_id}", response_class=HTMLResponse)
+@router.put("/webhooks/{wh_id}", response_class=HTMLResponse, dependencies=_mgr)
 async def webhook_update(
     request: Request,
     wh_id: str,
@@ -233,7 +239,7 @@ async def webhook_update(
     return templates.TemplateResponse("partials/settings_webhook.html", await _webhook_ctx(request, success=f"Webhook '{name}' updated"))
 
 
-@router.delete("/webhooks/{wh_id}", response_class=HTMLResponse)
+@router.delete("/webhooks/{wh_id}", response_class=HTMLResponse, dependencies=_mgr)
 async def webhook_delete(request: Request, wh_id: str):
     endpoints = [ep for ep in get_webhook_endpoints() if ep["id"] != wh_id]
     save_webhook_endpoints(endpoints)
@@ -343,7 +349,7 @@ async def channel_logs_partial(request: Request, page: int = 1):
     )
 
 
-@router.post("/telegram/test-connection", response_class=HTMLResponse)
+@router.post("/telegram/test-connection", response_class=HTMLResponse, dependencies=_mgr)
 async def telegram_test_connection(bot_token: str = Form(...), chat_id: str = Form(...)):
     from webhook.telegram import send_telegram
 
@@ -359,7 +365,7 @@ async def telegram_test_connection(bot_token: str = Form(...), chat_id: str = Fo
         return HTMLResponse(f'<span style="color:var(--red)">{e}</span>')
 
 
-@router.post("/telegram/add", response_class=HTMLResponse)
+@router.post("/telegram/add", response_class=HTMLResponse, dependencies=_mgr)
 async def telegram_add(
     request: Request,
     id: str = Form(...),
@@ -399,7 +405,7 @@ async def telegram_add(
     return templates.TemplateResponse("partials/settings_telegram.html", _telegram_ctx(request, success=f"Channel '{name}' added"))
 
 
-@router.post("/telegram/{ch_id}/toggle", response_class=HTMLResponse)
+@router.post("/telegram/{ch_id}/toggle", response_class=HTMLResponse, dependencies=_mgr)
 async def telegram_toggle(request: Request, ch_id: str):
     channels = get_telegram_channels()
     for ch in channels:
@@ -410,7 +416,7 @@ async def telegram_toggle(request: Request, ch_id: str):
     return templates.TemplateResponse("partials/settings_telegram.html", _telegram_ctx(request))
 
 
-@router.put("/telegram/{ch_id}", response_class=HTMLResponse)
+@router.put("/telegram/{ch_id}", response_class=HTMLResponse, dependencies=_mgr)
 async def telegram_update(
     request: Request,
     ch_id: str,
@@ -453,7 +459,7 @@ async def telegram_update(
     return templates.TemplateResponse("partials/settings_telegram.html", _telegram_ctx(request, success=f"Channel '{name}' updated"))
 
 
-@router.delete("/telegram/{ch_id}", response_class=HTMLResponse)
+@router.delete("/telegram/{ch_id}", response_class=HTMLResponse, dependencies=_mgr)
 async def telegram_delete(request: Request, ch_id: str):
     channels = [ch for ch in get_telegram_channels() if ch["id"] != ch_id]
     save_telegram_channels(channels)
@@ -461,7 +467,7 @@ async def telegram_delete(request: Request, ch_id: str):
     return templates.TemplateResponse("partials/settings_telegram.html", _telegram_ctx(request, success=f"Channel '{ch_id}' deleted"))
 
 
-@router.post("/telegram/{ch_id}/test", response_class=HTMLResponse)
+@router.post("/telegram/{ch_id}/test", response_class=HTMLResponse, dependencies=_mgr)
 async def telegram_test(request: Request, ch_id: str):
     from webhook.telegram import send_telegram
 
@@ -505,7 +511,7 @@ async def settings_channels_partial(request: Request):
     return templates.TemplateResponse("partials/settings_channels.html", _channels_ctx(request))
 
 
-@router.post("/channels/global-config", response_class=HTMLResponse)
+@router.post("/channels/global-config", response_class=HTMLResponse, dependencies=_mgr)
 async def channels_global_config_save(
     request: Request,
     global_api_key: str = Form(""),
@@ -519,7 +525,7 @@ async def channels_global_config_save(
     )
 
 
-@router.post("/channels/add", response_class=HTMLResponse)
+@router.post("/channels/add", response_class=HTMLResponse, dependencies=_mgr)
 async def channel_add(
     request: Request,
     id: str = Form(...),
@@ -596,7 +602,7 @@ async def channel_add(
     return templates.TemplateResponse("partials/settings_channels.html", _channels_ctx(request, success=f"Channel '{name}' added"))
 
 
-@router.post("/channels/{ch_id}/toggle", response_class=HTMLResponse)
+@router.post("/channels/{ch_id}/toggle", response_class=HTMLResponse, dependencies=_mgr)
 async def channel_toggle(request: Request, ch_id: str):
     channels = get_content_channels()
     for ch in channels:
@@ -607,7 +613,7 @@ async def channel_toggle(request: Request, ch_id: str):
     return templates.TemplateResponse("partials/settings_channels.html", _channels_ctx(request))
 
 
-@router.put("/channels/{ch_id}", response_class=HTMLResponse)
+@router.put("/channels/{ch_id}", response_class=HTMLResponse, dependencies=_mgr)
 async def channel_update(
     request: Request,
     ch_id: str,
@@ -680,7 +686,7 @@ async def channel_update(
     return templates.TemplateResponse("partials/settings_channels.html", _channels_ctx(request, success=f"Channel '{name}' updated"))
 
 
-@router.delete("/channels/{ch_id}", response_class=HTMLResponse)
+@router.delete("/channels/{ch_id}", response_class=HTMLResponse, dependencies=_mgr)
 async def channel_delete(request: Request, ch_id: str):
     channels = [ch for ch in get_content_channels() if ch["id"] != ch_id]
     save_content_channels(channels)

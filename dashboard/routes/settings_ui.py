@@ -12,6 +12,12 @@ from dashboard.templates_state import templates
 from dashboard.ui_helpers import enrich_logs
 from storage.sqlite_stats import get_recent_ai_logs
 
+
+# Auth gating: all mutating endpoints require manager role.
+from fastapi import Depends as _Depends
+from auth import require_role as _require_role
+_mgr = [_Depends(_require_role("manager"))]
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -51,7 +57,7 @@ async def settings_general_partial(request: Request):
     )
 
 
-@router.post("/settings/general", response_class=HTMLResponse)
+@router.post("/settings/general", response_class=HTMLResponse, dependencies=_mgr)
 async def settings_general_update(
     request: Request,
     tz_name: str = Form("Asia/Ho_Chi_Minh", alias="timezone"),
@@ -109,7 +115,7 @@ async def settings_ai_partial(request: Request):
     )
 
 
-@router.post("/settings/ai", response_class=HTMLResponse)
+@router.post("/settings/ai", response_class=HTMLResponse, dependencies=_mgr)
 async def settings_ai_update(
     request: Request,
     enabled: str = Form("off"),
@@ -223,7 +229,7 @@ async def settings_ai_update(
     )
 
 
-@router.post("/settings/ai/test", response_class=HTMLResponse)
+@router.post("/settings/ai/test", response_class=HTMLResponse, dependencies=_mgr)
 async def settings_ai_test(request: Request):
     from ai.rewriter import test_ai_connection
 

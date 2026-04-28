@@ -6,6 +6,12 @@ from pydantic import BaseModel
 
 from dashboard.config_io import read_settings, write_settings
 
+
+# Auth gating: all mutating endpoints require manager role.
+from fastapi import Depends as _Depends
+from auth import require_role as _require_role
+_mgr = [_Depends(_require_role("manager"))]
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -32,7 +38,7 @@ async def list_embedding_providers():
     }
 
 
-@router.post("/embedding-providers")
+@router.post("/embedding-providers", dependencies=_mgr)
 async def create_embedding_provider(body: EmbeddingProviderIn):
     """Create a new embedding provider."""
     cfg = read_settings()
@@ -63,7 +69,7 @@ async def create_embedding_provider(body: EmbeddingProviderIn):
     return {"ok": True, "provider": new_provider}
 
 
-@router.put("/embedding-providers/{provider_id}")
+@router.put("/embedding-providers/{provider_id}", dependencies=_mgr)
 async def update_embedding_provider(provider_id: str, body: EmbeddingProviderIn):
     """Update an existing embedding provider."""
     cfg = read_settings()
@@ -97,7 +103,7 @@ async def update_embedding_provider(provider_id: str, body: EmbeddingProviderIn)
     return {"ok": True, "provider": provider}
 
 
-@router.delete("/embedding-providers/{provider_id}")
+@router.delete("/embedding-providers/{provider_id}", dependencies=_mgr)
 async def delete_embedding_provider(provider_id: str):
     """Delete an embedding provider."""
     cfg = read_settings()
@@ -121,7 +127,7 @@ async def delete_embedding_provider(provider_id: str):
     return {"ok": True, "deleted": provider_id}
 
 
-@router.put("/embedding/active-provider")
+@router.put("/embedding/active-provider", dependencies=_mgr)
 async def set_active_embedding_provider(provider_id: str):
     """Set the active embedding provider."""
     cfg = read_settings()
@@ -139,7 +145,7 @@ async def set_active_embedding_provider(provider_id: str):
     return {"ok": True, "active_provider_id": provider_id}
 
 
-@router.post("/embedding-providers/{provider_id}/test")
+@router.post("/embedding-providers/{provider_id}/test", dependencies=_mgr)
 async def test_embedding_provider(provider_id: str):
     """Test an embedding provider connection."""
     cfg = read_settings()

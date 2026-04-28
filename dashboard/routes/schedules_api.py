@@ -15,6 +15,12 @@ from storage.webhook_schedules import (
     update_schedule,
 )
 
+
+# Auth gating: all mutating endpoints require manager role.
+from fastapi import Depends as _Depends
+from auth import require_role as _require_role
+_mgr = [_Depends(_require_role("manager"))]
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -79,7 +85,7 @@ async def get_schedule_by_id(schedule_id: str):
     return schedule
 
 
-@router.post("/schedules", status_code=201)
+@router.post("/schedules", status_code=201, dependencies=_mgr)
 async def add_schedule(body: ScheduleIn):
     """Create a new webhook schedule."""
     if (
@@ -117,7 +123,7 @@ async def add_schedule(body: ScheduleIn):
     return {"id": schedule_id, "message": "Schedule created"}
 
 
-@router.put("/schedules/{schedule_id}")
+@router.put("/schedules/{schedule_id}", dependencies=_mgr)
 async def update_schedule_by_id(schedule_id: str, body: ScheduleUpdate):
     """Update an existing schedule."""
     existing = await get_schedule(schedule_id)
@@ -154,7 +160,7 @@ async def update_schedule_by_id(schedule_id: str, body: ScheduleUpdate):
     return {"message": "Schedule updated"}
 
 
-@router.delete("/schedules/{schedule_id}")
+@router.delete("/schedules/{schedule_id}", dependencies=_mgr)
 async def delete_schedule_by_id(schedule_id: str):
     """Delete a schedule."""
     deleted = await delete_schedule(schedule_id)

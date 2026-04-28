@@ -11,7 +11,7 @@ Routes:
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ai.social_poster import (
     get_agent,
@@ -19,10 +19,13 @@ from ai.social_poster import (
     load_social_agents,
     run_social_agent,
 )
+from auth import require_perm, require_role
 from dashboard import redis_state
 from dashboard.config_io import read_settings, write_social_agents
 
 router = APIRouter(prefix="/social-agents", tags=["social-agents"])
+_mgr = [Depends(require_role("manager"))]
+_perm_run = [Depends(require_perm("can_run_social_agent"))]
 logger = logging.getLogger(__name__)
 
 
@@ -58,7 +61,7 @@ async def api_agent_posts(agent_id: str, limit: int = Query(default=20, le=50)):
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 
-@router.post("/{agent_id}/run")
+@router.post("/{agent_id}/run", dependencies=_perm_run)
 async def api_run_agent(agent_id: str):
     """Manually trigger an agent to generate posts right now."""
     redis = redis_state.get_redis()
@@ -100,7 +103,7 @@ async def api_run_agent(agent_id: str):
 
 # ── CRUD (simple YAML-backed) ─────────────────────────────────────────────────
 
-@router.post("")
+@router.post("", dependencies=_mgr)
 async def api_create_agent(body: dict):
     """Create a new agent. Body must contain at least: id, name, persona, platforms."""
     required = ["id", "name", "persona", "platforms"]
@@ -121,7 +124,7 @@ async def api_create_agent(body: dict):
     return {"ok": True, "agent": body}
 
 
-@router.put("/{agent_id}")
+@router.put("/{agent_id}", dependencies=_mgr)
 async def api_update_agent(agent_id: str, body: dict):
     agents = load_social_agents()
     idx = next((i for i, a in enumerate(agents) if a["id"] == agent_id), None)
@@ -134,7 +137,7 @@ async def api_update_agent(agent_id: str, body: dict):
     return {"ok": True, "agent": body}
 
 
-@router.delete("/{agent_id}")
+@router.delete("/{agent_id}", dependencies=_mgr)
 async def api_delete_agent(agent_id: str):
     agents = load_social_agents()
     new_agents = [a for a in agents if a["id"] != agent_id]

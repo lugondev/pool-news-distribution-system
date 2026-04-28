@@ -14,6 +14,12 @@ from dashboard.config_io import (
 )
 from dashboard.templates_state import templates
 
+
+# Auth gating: all mutating endpoints require manager role.
+from fastapi import Depends as _Depends
+from auth import require_role as _require_role
+_mgr = [_Depends(_require_role("manager"))]
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -33,7 +39,7 @@ async def sources_partial(request: Request):
     )
 
 
-@router.post("/sources/add", response_class=HTMLResponse)
+@router.post("/sources/add", response_class=HTMLResponse, dependencies=_mgr)
 async def source_add(
     request: Request,
     id: str = Form(...),
@@ -57,7 +63,7 @@ async def source_add(
     )
 
 
-@router.post("/sources/{source_id}/toggle", response_class=HTMLResponse)
+@router.post("/sources/{source_id}/toggle", response_class=HTMLResponse, dependencies=_mgr)
 async def source_toggle(request: Request, source_id: str):
     sources = read_sources()
     for s in sources:
@@ -68,7 +74,7 @@ async def source_toggle(request: Request, source_id: str):
     return templates.TemplateResponse("partials/sources.html", {"request": request, "sources": sources})
 
 
-@router.delete("/sources/{source_id}", response_class=HTMLResponse)
+@router.delete("/sources/{source_id}", response_class=HTMLResponse, dependencies=_mgr)
 async def source_delete(request: Request, source_id: str):
     sources = [s for s in read_sources() if s["id"] != source_id]
     write_sources(sources)
@@ -88,7 +94,7 @@ async def source_edit_form(request: Request, source_id: str):
     return templates.TemplateResponse("partials/source_edit_row.html", {"request": request, "s": source, "categories": get_categories()})
 
 
-@router.put("/sources/{source_id}", response_class=HTMLResponse)
+@router.put("/sources/{source_id}", response_class=HTMLResponse, dependencies=_mgr)
 async def source_update(
     request: Request,
     source_id: str,
@@ -123,7 +129,7 @@ async def categories_partial(request: Request):
     )
 
 
-@router.post("/categories/add", response_class=HTMLResponse)
+@router.post("/categories/add", response_class=HTMLResponse, dependencies=_mgr)
 async def category_add(request: Request, id: str = Form(...), name: str = Form(...)):
     cfg = read_settings()
     cats = cfg.get("categories", [])
@@ -141,7 +147,7 @@ async def category_add(request: Request, id: str = Form(...), name: str = Form(.
     )
 
 
-@router.post("/categories/{cat_id}/toggle", response_class=HTMLResponse)
+@router.post("/categories/{cat_id}/toggle", response_class=HTMLResponse, dependencies=_mgr)
 async def category_toggle(request: Request, cat_id: str):
     cfg = read_settings()
     cats = cfg.get("categories", [])
@@ -154,7 +160,7 @@ async def category_toggle(request: Request, cat_id: str):
     return templates.TemplateResponse("partials/categories.html", {"request": request, "categories": cats})
 
 
-@router.delete("/categories/{cat_id}", response_class=HTMLResponse)
+@router.delete("/categories/{cat_id}", response_class=HTMLResponse, dependencies=_mgr)
 async def category_delete(request: Request, cat_id: str):
     cfg = read_settings()
     cats = [c for c in cfg.get("categories", []) if c["id"] != cat_id]

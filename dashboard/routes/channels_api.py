@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from auth import require_role
 from dashboard.config_io import get_channels_config, get_content_channels, read_settings, save_content_channels
 from dashboard.redis_state import get_redis
 from storage.redis_store import get_articles_batch
@@ -33,6 +34,11 @@ from webhook.payload import build_payload
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["channels"])
+
+# Admin (CRUD) endpoints require manager role + login.
+# Consumer endpoints (/feed /next /ack /reset-cursor /stats /logs) keep their
+# own X-API-Key auth and are explicitly NOT gated by user session.
+_mgr = [Depends(require_role("manager"))]
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -150,7 +156,7 @@ class AckIn(BaseModel):
 # ── CRUD ─────────────────────────────────────────────────────────────────────
 
 
-@router.get("/channels", summary="List all channels")
+@router.get("/channels", summary="List all channels", dependencies=_mgr)
 async def list_channels():
     """Return all configured content channels (API keys are masked)."""
     channels = get_content_channels()
@@ -165,7 +171,7 @@ async def list_channels():
     return {"channels": safe}
 
 
-@router.post("/channels", status_code=201, summary="Create a channel")
+@router.post("/channels", status_code=201, summary="Create a channel", dependencies=_mgr)
 async def create_channel(body: ChannelIn):
     """Create a new content channel. Returns the channel config and generated API key."""
     channels = get_content_channels()
@@ -206,7 +212,7 @@ async def create_channel(body: ChannelIn):
     return {"ok": True, "channel": ch, "api_key": api_key}
 
 
-@router.put("/channels/{ch_id}", summary="Update a channel")
+@router.put("/channels/{ch_id}", summary="Update a channel", dependencies=_mgr)
 async def update_channel(ch_id: str, body: ChannelUpdate):
     """Partially update channel configuration. Only provided fields are changed."""
     channels = get_content_channels()
@@ -246,7 +252,7 @@ async def update_channel(ch_id: str, body: ChannelUpdate):
     return {"ok": True, "channel": {k: v for k, v in target.items() if k != "api_key"}}
 
 
-@router.post("/channels/{ch_id}/toggle", summary="Toggle channel on/off")
+@router.post("/channels/{ch_id}/toggle", summary="Toggle channel on/off", dependencies=_mgr)
 async def toggle_channel(ch_id: str):
     """Enable or disable a channel."""
     channels = get_content_channels()
@@ -258,7 +264,7 @@ async def toggle_channel(ch_id: str):
     return {"ok": True, "enabled": target["enabled"]}
 
 
-@router.post("/channels/{ch_id}/regenerate-key", summary="Regenerate API key")
+@router.post("/channels/{ch_id}/regenerate-key", summary="Regenerate API key", dependencies=_mgr)
 async def regenerate_api_key(ch_id: str):
     """Generate a new API key for the channel. The old key stops working immediately."""
     channels = get_content_channels()
@@ -272,7 +278,7 @@ async def regenerate_api_key(ch_id: str):
     return {"ok": True, "api_key": new_key}
 
 
-@router.get("/channels/{ch_id}/clone-data", summary="Get channel data for cloning")
+@router.get("/channels/{ch_id}/clone-data", summary="Get channel data for cloning", dependencies=_mgr)
 async def get_channel_clone_data(ch_id: str):
     """Return channel config (without id, api_key) for cloning into a new channel."""
     channels = get_content_channels()
@@ -288,7 +294,7 @@ async def get_channel_clone_data(ch_id: str):
     return {"ok": True, "data": clone}
 
 
-@router.delete("/channels/{ch_id}", summary="Delete a channel")
+@router.delete("/channels/{ch_id}", summary="Delete a channel", dependencies=_mgr)
 async def delete_channel(ch_id: str):
     """Delete a channel and clean up its Redis state (cursor, stats, delivered set for all clients)."""
     channels = get_content_channels()
@@ -1066,7 +1072,7 @@ async def channel_stats(
         raise
 
 
-@router.get("/channels/{ch_id}/logs", summary="Get channel request logs")
+@router.get("/channels/{ch_id}/logs", summary="Get channel request logs", dependencies=_mgr)
 async def channel_logs(
     ch_id: str,
     limit: int = Query(default=50, ge=1, le=200),

@@ -24,4 +24,20 @@
       <a href="/logs" {% if active_page == 'logs' %}class="active"{% endif %}>Logs</a>
     </div>
   </div>
+  {% set _user = (request.state.user if request and request.state else None) %}
+  {% if _user %}
+    <div class="dropdown" style="margin-left:8px;">
+      <button class="dropdown-toggle {% if active_page == 'users' %}active{% endif %}" title="{{ _user.role }}">
+        {{ _user.username }} <span style="opacity:.6;">· {{ _user.role }}</span> ▾
+      </button>
+      <div class="dropdown-menu">
+        {% if _user.has_role('superadmin') %}
+          <a href="/users" {% if active_page == 'users' %}class="active"{% endif %}>Users</a>
+        {% endif %}
+        <form method="post" action="/logout" style="margin:0;">
+          <button type="submit" class="dropdown-toggle" style="width:100%;text-align:left;padding:7px 12px;background:none;border:none;cursor:pointer;">Logout</button>
+        </form>
+      </div>
+    </div>
+  {% endif %}
 </nav>

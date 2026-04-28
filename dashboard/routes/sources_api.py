@@ -12,6 +12,12 @@ from dashboard.config_io import (
     write_sources,
 )
 
+
+# Auth gating: all mutating endpoints require manager role.
+from fastapi import Depends as _Depends
+from auth import require_role as _require_role
+_mgr = [_Depends(_require_role("manager"))]
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -39,7 +45,7 @@ async def list_sources():
     return {"sources": read_sources()}
 
 
-@router.post("/sources", status_code=201)
+@router.post("/sources", status_code=201, dependencies=_mgr)
 async def add_source(body: SourceIn):
     sources = read_sources()
     if any(s["id"] == body.id for s in sources):
@@ -59,7 +65,7 @@ async def add_source(body: SourceIn):
     return {"ok": True, "source": entry}
 
 
-@router.put("/sources/{source_id}")
+@router.put("/sources/{source_id}", dependencies=_mgr)
 async def update_source(source_id: str, body: SourceUpdate):
     sources = read_sources()
     target = next((s for s in sources if s["id"] == source_id), None)
@@ -74,7 +80,7 @@ async def update_source(source_id: str, body: SourceUpdate):
     return {"ok": True, "source": target}
 
 
-@router.post("/sources/{source_id}/toggle")
+@router.post("/sources/{source_id}/toggle", dependencies=_mgr)
 async def toggle_source(source_id: str):
     sources = read_sources()
     target = next((s for s in sources if s["id"] == source_id), None)
@@ -85,7 +91,7 @@ async def toggle_source(source_id: str):
     return {"ok": True, "source": target}
 
 
-@router.delete("/sources/{source_id}")
+@router.delete("/sources/{source_id}", dependencies=_mgr)
 async def delete_source(source_id: str):
     sources = read_sources()
     new = [s for s in sources if s["id"] != source_id]
@@ -109,7 +115,7 @@ async def list_categories():
     return {"categories": read_settings().get("categories", [])}
 
 
-@router.post("/categories", status_code=201)
+@router.post("/categories", status_code=201, dependencies=_mgr)
 async def add_category(body: CategoryIn):
     cfg = read_settings()
     cats = cfg.get("categories", [])
@@ -121,7 +127,7 @@ async def add_category(body: CategoryIn):
     return {"ok": True, "category": cats[-1]}
 
 
-@router.post("/categories/{cat_id}/toggle")
+@router.post("/categories/{cat_id}/toggle", dependencies=_mgr)
 async def toggle_category(cat_id: str):
     cfg = read_settings()
     cats = cfg.get("categories", [])
@@ -134,7 +140,7 @@ async def toggle_category(cat_id: str):
     return {"ok": True, "category": target}
 
 
-@router.delete("/categories/{cat_id}")
+@router.delete("/categories/{cat_id}", dependencies=_mgr)
 async def delete_category(cat_id: str):
     cfg = read_settings()
     cats = cfg.get("categories", [])

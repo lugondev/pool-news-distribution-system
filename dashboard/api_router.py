@@ -9,8 +9,9 @@ Routes are organized by domain:
   /api/intelligence/*              → routes/intelligence_api.py
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from auth import require_login
 from dashboard import redis_state
 from dashboard.routes import (
     ai_api,
@@ -24,23 +25,32 @@ from dashboard.routes import (
     social_article_api,
     social_sim_api,
     sources_api,
+    users_api,
     webhooks_api,
 )
 
 router = APIRouter(prefix="/api", tags=["api"])
 
-router.include_router(sources_api.router)
-router.include_router(ai_api.router)
-router.include_router(embedding_providers_api.router)
-router.include_router(webhooks_api.router)
-router.include_router(channels_api.router)
-router.include_router(schedules_api.router)
-router.include_router(logs_api.router)
-router.include_router(rag_api.router)
-router.include_router(intelligence_api.router)
-router.include_router(social_agents_api.router)
-router.include_router(social_article_api.router)
-router.include_router(social_sim_api.router)
+# All admin API requires login. Specific role/perm gating is applied per-route
+# in each sub-router (see auth deps). channels_api is excluded here because it
+# mixes admin (login required) and consumer (X-API-Key, no user auth) routes —
+# its routes opt into login individually.
+_login = [Depends(require_login())]
+
+router.include_router(sources_api.router,             dependencies=_login)
+router.include_router(ai_api.router,                  dependencies=_login)
+router.include_router(embedding_providers_api.router, dependencies=_login)
+router.include_router(webhooks_api.router,            dependencies=_login)
+router.include_router(channels_api.router)  # mixed — auth applied per-route
+router.include_router(schedules_api.router,           dependencies=_login)
+router.include_router(logs_api.router,                dependencies=_login)
+router.include_router(rag_api.router,                 dependencies=_login)
+router.include_router(intelligence_api.router,        dependencies=_login)
+router.include_router(social_agents_api.router,       dependencies=_login)
+router.include_router(social_article_api.router,      dependencies=_login)
+router.include_router(social_sim_api.router,          dependencies=_login)
+# users_api has its own per-route superadmin gate.
+router.include_router(users_api.api_router)
 
 
 def set_redis(r) -> None:

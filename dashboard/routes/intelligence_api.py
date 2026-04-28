@@ -13,17 +13,20 @@ Routes:
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
 from ai.story_detector import get_active_stories, get_story_articles
 from ai.trend_detector import get_trend_snapshot, get_trending_entities
 from ai.newsletter import get_latest_newsletter, generate_newsletter
 from ai.debate import get_recent_debates, debate_job as _run_debate_job
+from auth import require_perm
 from dashboard import redis_state
 from dashboard.config_io import get_categories
 
 router = APIRouter(prefix="/intelligence", tags=["intelligence"])
+_perm_newsletter = [Depends(require_perm("can_create_newsletter"))]
+_perm_debate     = [Depends(require_perm("can_create_debate"))]
 logger = logging.getLogger(__name__)
 
 
@@ -116,7 +119,7 @@ async def api_newsletter_view():
     return HTMLResponse(nl["html"])
 
 
-@router.post("/newsletter/generate")
+@router.post("/newsletter/generate", dependencies=_perm_newsletter)
 async def api_newsletter_generate(
     language: str = Query(default="English"),
 ):
@@ -164,7 +167,7 @@ async def api_debates(limit: int = Query(default=10, le=20)):
     return {"debates": debates, "total": len(debates)}
 
 
-@router.post("/debates/run")
+@router.post("/debates/run", dependencies=_perm_debate)
 async def api_debates_run():
     """Manually trigger the debate job — runs immediately outside the scheduler."""
     from dashboard.config_io import read_settings

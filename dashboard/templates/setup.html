@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>First-run setup · News Aggregator</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3e;
+      --text: #e2e8f0; --muted: #718096; --accent: #6366f1; --red: #ef4444;
+      --yellow: #f59e0b;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif;
+           font-size: 14px; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+            padding: 32px; width: 100%; max-width: 460px; }
+    h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+    .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+    .notice { background: rgba(245, 158, 11, 0.1); border: 1px solid var(--yellow);
+              color: var(--yellow); padding: 10px 12px; border-radius: 6px;
+              font-size: 12px; margin-bottom: 20px; line-height: 1.5; }
+    label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 6px;
+            text-transform: uppercase; letter-spacing: 0.05em; }
+    input { width: 100%; background: var(--bg); border: 1px solid var(--border);
+            color: var(--text); padding: 10px 12px; border-radius: 6px; font-size: 14px;
+            font-family: inherit; margin-bottom: 14px; }
+    input:focus { outline: none; border-color: var(--accent); }
+    button { width: 100%; background: var(--accent); color: white; border: none;
+             padding: 11px 16px; border-radius: 6px; font-size: 14px; font-weight: 500;
+             font-family: inherit; cursor: pointer; transition: opacity 0.15s; }
+    button:hover { opacity: 0.9; }
+    .error { background: rgba(239, 68, 68, 0.1); border: 1px solid var(--red);
+             color: var(--red); padding: 10px 12px; border-radius: 6px;
+             font-size: 13px; margin-bottom: 16px; }
+    .hint { color: var(--muted); font-size: 11px; margin-top: -8px; margin-bottom: 14px; }
+  </style>
+</head>
+<body>
+  <form class="card" method="post" action="/setup">
+    <h1>First-run setup</h1>
+    <p class="subtitle">Create the superadmin account</p>
+    <div class="notice">
+      Setup token was logged at startup. Find it in <code>data/setup_token.txt</code>
+      or in the container logs (search for "setup token").
+    </div>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <label for="token">Setup token</label>
+    <input id="token" name="token" type="text" required value="{{ token }}" autofocus>
+    <label for="username">Username</label>
+    <input id="username" name="username" type="text" autocomplete="username" required value="{{ username }}">
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="new-password" required>
+    <p class="hint">Min 12 characters.</p>
+    <label for="password_confirm">Confirm password</label>
+    <input id="password_confirm" name="password_confirm" type="password" autocomplete="new-password" required>
+    <button type="submit">Create superadmin</button>
+  </form>
+</body>
+</html>
