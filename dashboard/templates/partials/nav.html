@@ -27,11 +27,12 @@
   {% set _user = (request.state.user if request and request.state else None) %}
   {% if _user %}
     <div class="dropdown" style="margin-left:8px;">
-      <button class="dropdown-toggle {% if active_page == 'users' %}active{% endif %}" title="{{ _user.role }}">
+      <button class="dropdown-toggle {% if active_page in ['users', 'account'] %}active{% endif %}" title="{{ _user.role }}">
         {{ _user.username }} <span style="opacity:.6;">· {{ _user.role }}</span> ▾
       </button>
       <div class="dropdown-menu">
-        {% if _user.has_role('superadmin') %}
+        <a href="/account" {% if active_page == 'account' %}class="active"{% endif %}>Account</a>
+        {% if _user.has_role('manager') %}
           <a href="/users" {% if active_page == 'users' %}class="active"{% endif %}>Users</a>
         {% endif %}
         <form method="post" action="/logout" style="margin:0;">

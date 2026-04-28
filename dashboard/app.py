@@ -26,6 +26,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from dashboard import redis_state
 from dashboard.api_router import router as api_router
 from dashboard.config_io import get_categories, read_sources
+from dashboard.routes.account_ui import page_router as account_page_router
 from dashboard.routes.auth_ui import router as auth_ui_router
 from dashboard.routes.users_api import page_router as users_page_router
 from dashboard.routes.dispatch_ui import router as dispatch_ui_router
@@ -147,7 +148,8 @@ install_auth_exception_handlers(app)
 _login = [Depends(require_login())]
 # Auth UI (login/logout/setup) is the only router exempt from login.
 app.include_router(auth_ui_router)
-app.include_router(users_page_router)  # /users page (gated to superadmin internally)
+app.include_router(account_page_router)  # /account page (login required, set per-route)
+app.include_router(users_page_router)  # /users page (gated to manager+ internally)
 app.include_router(api_router)  # sub-routers add their own login deps; channels_api stays mixed
 app.include_router(sources_ui_router,         dependencies=_login)
 app.include_router(settings_ui_router,        dependencies=_login)

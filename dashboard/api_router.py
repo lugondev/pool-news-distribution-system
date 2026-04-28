@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends
 from auth import require_login
 from dashboard import redis_state
 from dashboard.routes import (
+    account_ui,
     ai_api,
     channels_api,
     embedding_providers_api,
@@ -49,8 +50,10 @@ router.include_router(intelligence_api.router,        dependencies=_login)
 router.include_router(social_agents_api.router,       dependencies=_login)
 router.include_router(social_article_api.router,      dependencies=_login)
 router.include_router(social_sim_api.router,          dependencies=_login)
-# users_api has its own per-route superadmin gate.
+# users_api has its own per-route manager+scope gate.
 router.include_router(users_api.api_router)
+# account_ui has its own per-route login gate (any role).
+router.include_router(account_ui.api_router)
 
 
 def set_redis(r) -> None:

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from auth.store import AuthStore, User
+from auth.store import AuthStore, Pat, User
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -88,8 +88,41 @@ class SqliteAuthStore(AuthStore):
         try:
             await conn.executescript(_SCHEMA)
             await conn.commit()
+            await self._migrate_pat_multi(conn)
         finally:
             await conn.close()
+
+    async def _migrate_pat_multi(self, conn) -> None:
+        """Phase-1 migration: PATs become multi-row per user.
+
+        Detects pre-migration shape by checking for the `name` column. SQLite
+        cannot DROP CONSTRAINT, so we recreate the table and copy rows.
+        """
+        cur = await conn.execute("PRAGMA table_info(personal_access_tokens)")
+        cols = {row[1] for row in await cur.fetchall()}
+        if "name" in cols:
+            return
+        await conn.executescript("""
+            CREATE TABLE personal_access_tokens_new (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                token_hash    TEXT NOT NULL UNIQUE,
+                name          TEXT NOT NULL DEFAULT 'default',
+                prefix        TEXT NOT NULL,
+                expires_at    TIMESTAMP,
+                last_used_at  TIMESTAMP,
+                created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO personal_access_tokens_new
+                (id, user_id, token_hash, name, prefix, last_used_at, created_at)
+            SELECT id, user_id, token_hash, 'default', prefix, last_used_at, created_at
+              FROM personal_access_tokens;
+            DROP TABLE personal_access_tokens;
+            ALTER TABLE personal_access_tokens_new RENAME TO personal_access_tokens;
+            CREATE INDEX IF NOT EXISTS pat_hash_idx ON personal_access_tokens(token_hash);
+            CREATE INDEX IF NOT EXISTS pat_user_idx ON personal_access_tokens(user_id);
+        """)
+        await conn.commit()
 
     # ── users ───────────────────────────────────────────────────────────────
     async def count_users(self) -> int:
@@ -270,30 +303,82 @@ class SqliteAuthStore(AuthStore):
             await conn.close()
 
     # ── PAT ─────────────────────────────────────────────────────────────────
-    async def upsert_pat(self, user_id: int, token_hash: str, prefix: str) -> None:
+    async def list_user_pats(self, user_id: int) -> list[Pat]:
         conn = await self._conn()
         try:
-            # Delete-then-insert so UNIQUE(user_id) and UNIQUE(token_hash) both reset.
-            await conn.execute(
-                "DELETE FROM personal_access_tokens WHERE user_id = ?", (user_id,)
+            cur = await conn.execute(
+                """SELECT id, user_id, name, prefix, expires_at, last_used_at, created_at
+                   FROM personal_access_tokens WHERE user_id = ? ORDER BY id""",
+                (user_id,),
             )
-            await conn.execute(
-                """INSERT INTO personal_access_tokens (user_id, token_hash, prefix)
-                   VALUES (?, ?, ?)""",
-                (user_id, token_hash, prefix),
+            return [
+                Pat(
+                    id=r["id"], user_id=r["user_id"], name=r["name"],
+                    prefix=r["prefix"], expires_at=r["expires_at"],
+                    last_used_at=r["last_used_at"], created_at=r["created_at"],
+                )
+                for r in await cur.fetchall()
+            ]
+        finally:
+            await conn.close()
+
+    async def create_pat(
+        self,
+        user_id: int,
+        name: str,
+        token_hash: str,
+        prefix: str,
+        expires_at: datetime | None,
+    ) -> int:
+        conn = await self._conn()
+        try:
+            cur = await conn.execute(
+                """INSERT INTO personal_access_tokens
+                       (user_id, name, token_hash, prefix, expires_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (user_id, name, token_hash, prefix,
+                 expires_at.isoformat() if expires_at else None),
             )
             await conn.commit()
+            return cur.lastrowid
+        finally:
+            await conn.close()
+
+    async def delete_pat_by_id(self, pat_id: int, user_id: int) -> bool:
+        conn = await self._conn()
+        try:
+            cur = await conn.execute(
+                "DELETE FROM personal_access_tokens WHERE id = ? AND user_id = ?",
+                (pat_id, user_id),
+            )
+            await conn.commit()
+            return (cur.rowcount or 0) > 0
+        finally:
+            await conn.close()
+
+    async def delete_expired_pats(self) -> int:
+        now = datetime.now(timezone.utc).isoformat()
+        conn = await self._conn()
+        try:
+            cur = await conn.execute(
+                "DELETE FROM personal_access_tokens WHERE expires_at IS NOT NULL AND expires_at < ?",
+                (now,),
+            )
+            await conn.commit()
+            return cur.rowcount or 0
         finally:
             await conn.close()
 
     async def get_user_by_pat_hash(self, token_hash: str) -> User | None:
+        now = datetime.now(timezone.utc).isoformat()
         conn = await self._conn()
         try:
             cur = await conn.execute(
                 """SELECT u.* FROM users u
                    JOIN personal_access_tokens p ON p.user_id = u.id
-                   WHERE p.token_hash = ?""",
-                (token_hash,),
+                   WHERE p.token_hash = ?
+                     AND (p.expires_at IS NULL OR p.expires_at > ?)""",
+                (token_hash, now),
             )
             row = await cur.fetchone()
             return _row_to_user(row) if row else None
@@ -311,7 +396,26 @@ class SqliteAuthStore(AuthStore):
         finally:
             await conn.close()
 
+    # ── back-compat single-PAT helpers ──────────────────────────────────────
+    async def upsert_pat(self, user_id: int, token_hash: str, prefix: str) -> None:
+        """Replace all PATs for user with one named 'default'. Used by legacy endpoint."""
+        conn = await self._conn()
+        try:
+            await conn.execute(
+                "DELETE FROM personal_access_tokens WHERE user_id = ?", (user_id,)
+            )
+            await conn.execute(
+                """INSERT INTO personal_access_tokens
+                       (user_id, name, token_hash, prefix)
+                   VALUES (?, 'default', ?, ?)""",
+                (user_id, token_hash, prefix),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
     async def delete_pat(self, user_id: int) -> None:
+        """Delete all PATs for user. Used by legacy revoke-all endpoint."""
         conn = await self._conn()
         try:
             await conn.execute(
@@ -322,10 +426,13 @@ class SqliteAuthStore(AuthStore):
             await conn.close()
 
     async def get_pat_meta(self, user_id: int) -> dict | None:
+        """Returns most recent PAT meta. Used by legacy meta endpoint."""
         conn = await self._conn()
         try:
             cur = await conn.execute(
-                "SELECT prefix, last_used_at, created_at FROM personal_access_tokens WHERE user_id = ?",
+                """SELECT prefix, last_used_at, created_at
+                   FROM personal_access_tokens WHERE user_id = ?
+                   ORDER BY id DESC LIMIT 1""",
                 (user_id,),
             )
             row = await cur.fetchone()

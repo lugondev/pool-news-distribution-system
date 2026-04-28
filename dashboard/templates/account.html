@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Account · News Aggregator</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3e;
+      --text: #e2e8f0; --muted: #718096; --accent: #6366f1;
+      --green: #10b981; --red: #ef4444; --yellow: #f59e0b;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; }
+    button { font-family: inherit; cursor: pointer; }
+    .main { padding: 24px; max-width: 540px; margin: 0 auto; }
+    h2 { font-size: 18px; font-weight: 600; margin-bottom: 16px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+            padding: 20px; margin-bottom: 16px; }
+    .meta { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+    label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 4px;
+            text-transform: uppercase; letter-spacing: 0.05em; }
+    input { background: var(--bg); border: 1px solid var(--border); color: var(--text);
+            padding: 10px 12px; border-radius: 6px; font-size: 14px; font-family: inherit;
+            width: 100%; margin-bottom: 14px; }
+    input:focus { outline: none; border-color: var(--accent); }
+    .btn { background: var(--accent); color: white; border: none;
+           padding: 10px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; }
+    .btn:hover { opacity: 0.9; }
+    .alert { padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; }
+    .alert.error { background: rgba(239,68,68,0.10); border: 1px solid var(--red); color: var(--red); }
+    .alert.success { background: rgba(16,185,129,0.10); border: 1px solid var(--green); color: var(--green); }
+    .hint { color: var(--muted); font-size: 11px; margin-top: -8px; margin-bottom: 14px; }
+  </style>
+</head>
+<body>
+  {% include 'partials/header.html' %}
+  <div class="main">
+    <h2>My account</h2>
+    {% set _u = request.state.user %}
+    <div class="card">
+      <div class="meta">
+        <strong>{{ _u.username }}</strong> · role: {{ _u.role }}
+        {% if _u.last_login_at %} · last login {{ _u.last_login_at }}{% endif %}
+      </div>
+      <h3 style="font-size: 14px; margin-bottom: 14px;">Change password</h3>
+      <div id="msg"></div>
+      <form id="pwd-form" onsubmit="return submitChange(event)">
+        <label for="old">Current password</label>
+        <input id="old" name="old_password" type="password" autocomplete="current-password" required>
+        <label for="new">New password</label>
+        <input id="new" name="new_password" type="password" autocomplete="new-password" minlength="12" required>
+        <p class="hint">Min 12 characters.</p>
+        <label for="confirm">Confirm new password</label>
+        <input id="confirm" type="password" autocomplete="new-password" minlength="12" required>
+        <button type="submit" class="btn">Update password</button>
+      </form>
+    </div>
+  </div>
+
+<script>
+async function submitChange(e) {
+  e.preventDefault();
+  const f = e.target;
+  const msg = document.getElementById('msg');
+  msg.innerHTML = '';
+
+  if (f.new_password.value !== f.confirm.value) {
+    msg.innerHTML = '<div class="alert error">New passwords do not match.</div>';
+    return false;
+  }
+  const res = await fetch('/api/account/change-password', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      old_password: f.old_password.value,
+      new_password: f.new_password.value,
+    }),
+  });
+  if (res.status === 204) {
+    msg.innerHTML = '<div class="alert success">Password updated.</div>';
+    f.reset();
+  } else {
+    let err;
+    try { err = (await res.json()).detail || 'Failed'; }
+    catch { err = await res.text(); }
+    msg.innerHTML = '<div class="alert error">' + err + '</div>';
+  }
+  return false;
+}
+</script>
+</body>
+</html>

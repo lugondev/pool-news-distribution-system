@@ -33,6 +33,8 @@
     .btn { background: var(--border); color: var(--text); border: none; padding: 4px 10px;
            border-radius: 4px; font-size: 12px; }
     .btn:hover { background: var(--accent); color: white; }
+    .btn.primary { background: var(--accent); color: white; }
+    .btn.primary:hover { opacity: 0.9; }
     .btn.danger { background: rgba(239,68,68,0.15); color: var(--red); }
     .btn.danger:hover { background: var(--red); color: white; }
 
@@ -51,18 +53,25 @@
     .perm-list input { width: auto; margin: 0; }
 
     dialog { background: var(--surface); color: var(--text); border: 1px solid var(--border);
-             border-radius: 12px; padding: 24px; width: 480px; max-width: 92vw; }
+             border-radius: 12px; padding: 24px; width: 560px; max-width: 92vw; }
     dialog::backdrop { background: rgba(0,0,0,0.6); }
     .dlg-buttons { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
     .pat-display { background: var(--bg); padding: 10px 12px; border-radius: 6px;
                    border: 1px dashed var(--yellow); color: var(--yellow);
                    font-family: monospace; font-size: 12px; word-break: break-all; margin: 12px 0; }
+    .pat-table th, .pat-table td { padding: 6px 8px; font-size: 12px; }
+    .pat-table .name { font-weight: 600; }
+    .pat-table code { font-family: monospace; font-size: 11px; color: var(--muted); }
+    .pat-row.expired td { opacity: 0.45; }
+    .role-note { color: var(--muted); font-size: 11px; margin-top: -8px; margin-bottom: 8px; }
   </style>
 </head>
 <body>
   {% include 'partials/header.html' %}
+  {% set _me = request.state.user %}
+  {% set _is_super = _me.has_role('superadmin') %}
   <div class="main">
-    <h2>Users</h2>
+    <h2>Users{% if not _is_super %} · creators{% endif %}</h2>
 
     <div class="card">
       <h3 style="font-size:14px;margin-bottom:12px;">Create user</h3>
@@ -78,9 +87,17 @@
           </div>
           <div>
             <label>Role</label>
-            <select name="role" required onchange="togglePermsVisibility(this.form)">
-              {% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
-            </select>
+            {% if _is_super %}
+              <select name="role" required onchange="togglePermsVisibility(this.form)">
+                {% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+              </select>
+            {% else %}
+              <select name="role" required onchange="togglePermsVisibility(this.form)" disabled>
+                <option value="creator" selected>creator</option>
+              </select>
+              <input type="hidden" name="role" value="creator">
+              <p class="role-note">Manager may only create creators.</p>
+            {% endif %}
           </div>
         </div>
         <div class="perm-block" style="display:none;">
@@ -91,7 +108,7 @@
             {% endfor %}
           </div>
         </div>
-        <button type="submit" class="btn" style="margin-top:12px;">Create</button>
+        <button type="submit" class="btn primary" style="margin-top:12px;">Create</button>
       </form>
     </div>
 
@@ -123,7 +140,7 @@
             <td>
               <div class="actions">
                 <button class="btn" onclick="editUser({{ u.id }})">Edit</button>
-                <button class="btn" onclick="rotatePAT({{ u.id }}, '{{ u.username }}')">PAT</button>
+                <button class="btn" onclick="openPats({{ u.id }}, '{{ u.username }}')">PATs</button>
                 <button class="btn danger" onclick="deleteUser({{ u.id }}, '{{ u.username }}')">Delete</button>
               </div>
             </td>
@@ -138,10 +155,15 @@
     <h3 style="font-size:15px;margin-bottom:12px;">Edit user <span id="edit-name"></span></h3>
     <form id="edit-form" onsubmit="return saveEdit(event)">
       <input type="hidden" name="id">
-      <label>Role</label>
-      <select name="role" onchange="togglePermsVisibility(this.form)">
-        {% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
-      </select>
+      {% if _is_super %}
+        <label>Role</label>
+        <select name="role" onchange="togglePermsVisibility(this.form)">
+          {% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+        </select>
+      {% else %}
+        <input type="hidden" name="role" value="creator">
+        <p class="role-note">Manager cannot change role.</p>
+      {% endif %}
       <label>Active</label>
       <select name="is_active">
         <option value="true">active</option><option value="false">disabled</option>
@@ -158,27 +180,41 @@
       </div>
       <div class="dlg-buttons">
         <button type="button" class="btn" onclick="document.getElementById('edit-dlg').close()">Cancel</button>
-        <button type="submit" class="btn">Save</button>
+        <button type="submit" class="btn primary">Save</button>
       </div>
     </form>
   </dialog>
 
   <dialog id="pat-dlg">
-    <h3 style="font-size:15px;margin-bottom:12px;">Personal Access Token <span id="pat-name"></span></h3>
+    <h3 style="font-size:15px;margin-bottom:6px;">Personal Access Tokens <span id="pat-name"></span></h3>
     <p style="color:var(--muted);font-size:12px;margin-bottom:12px;">Use as <code>Authorization: Bearer &lt;token&gt;</code>.</p>
-    <div id="pat-area"></div>
+
+    <div id="pat-new-area"></div>
+    <div id="pat-list-area"></div>
+
+    <h4 style="font-size:12px;margin-top:14px;margin-bottom:6px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;">Generate new</h4>
+    <form id="new-pat-form" onsubmit="return createNewPat(event)">
+      <div class="grid" style="grid-template-columns: 2fr 1fr; gap: 8px;">
+        <div>
+          <input name="name" placeholder="name (e.g. ci-bot)" required maxlength="64">
+        </div>
+        <div>
+          <input name="expires_in_days" type="number" min="1" max="3650" placeholder="expires in days (optional)">
+        </div>
+      </div>
+      <button type="submit" class="btn primary">Generate</button>
+    </form>
+
     <div class="dlg-buttons">
-      <button class="btn danger" onclick="revokePAT()">Revoke</button>
       <button class="btn" onclick="document.getElementById('pat-dlg').close()">Close</button>
     </div>
   </dialog>
 
 <script>
-const USERS = {{ users | map(attribute='id') | list | tojson }};
-let currentPatUserId = null;
+let currentUserId = null;
 
 function togglePermsVisibility(form) {
-  const role = form.role.value;
+  const role = (form.role && form.role.value) || 'creator';
   const block = form.querySelector('.perm-block');
   if (block) block.style.display = role === 'creator' ? 'block' : 'none';
 }
@@ -193,11 +229,12 @@ function permsFromForm(form) {
 async function createUser(e) {
   e.preventDefault();
   const f = e.target;
+  const role = f.role.value;
   const body = {
     username: f.username.value.trim(),
     password: f.password.value,
-    role: f.role.value,
-    permissions: f.role.value === 'creator' ? permsFromForm(f) : {},
+    role: role,
+    permissions: role === 'creator' ? permsFromForm(f) : {},
   };
   const res = await fetch('/api/users', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
   if (!res.ok) { alert('Create failed: ' + (await res.text())); return false; }
@@ -213,7 +250,7 @@ async function editUser(id) {
   document.getElementById('edit-name').textContent = u.username;
   const f = document.getElementById('edit-form');
   f.id.value = u.id;
-  f.role.value = u.role;
+  if (f.role && f.role.tagName === 'SELECT') f.role.value = u.role;
   f.is_active.value = String(u.is_active);
   f.password.value = '';
   f.querySelectorAll('input[name=perm]').forEach(cb => cb.checked = !!u.permissions[cb.value]);
@@ -225,11 +262,12 @@ async function saveEdit(e) {
   e.preventDefault();
   const f = e.target;
   const id = f.id.value;
+  const role = f.role ? f.role.value : 'creator';
   const body = {
-    role: f.role.value,
     is_active: f.is_active.value === 'true',
-    permissions: f.role.value === 'creator' ? permsFromForm(f) : {},
+    permissions: role === 'creator' ? permsFromForm(f) : {},
   };
+  if (f.role && f.role.tagName === 'SELECT') body.role = role;  // only when superadmin
   if (f.password.value) body.password = f.password.value;
   const res = await fetch('/api/users/' + id, {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
   if (!res.ok) { alert('Save failed: ' + (await res.text())); return false; }
@@ -243,35 +281,73 @@ async function deleteUser(id, name) {
   location.reload();
 }
 
-async function rotatePAT(id, name) {
-  currentPatUserId = id;
+// ── Multi-PAT panel ──────────────────────────────────────────────────────
+async function openPats(userId, name) {
+  currentUserId = userId;
   document.getElementById('pat-name').textContent = '· ' + name;
-  document.getElementById('pat-area').innerHTML = '<button class="btn" onclick="generatePAT()">Generate / rotate</button>';
+  document.getElementById('new-pat-form').reset();
+  document.getElementById('pat-new-area').innerHTML = '';
+  await refreshPats();
   document.getElementById('pat-dlg').showModal();
-  // Show existing meta if any
-  const meta = await (await fetch('/api/users/' + id + '/pat')).json();
-  if (meta && meta.prefix) {
-    document.getElementById('pat-area').innerHTML +=
-      '<p style="color:var(--muted);font-size:12px;margin-top:10px;">Existing token: <code>' +
-      meta.prefix + '…</code> · last used: ' + (meta.last_used_at || 'never') + '</p>';
+}
+
+async function refreshPats() {
+  const res = await fetch('/api/users/' + currentUserId + '/pats');
+  if (!res.ok) {
+    document.getElementById('pat-list-area').innerHTML =
+      '<p style="color:var(--red);font-size:12px;">Failed to load PATs.</p>';
+    return;
   }
+  const pats = await res.json();
+  if (pats.length === 0) {
+    document.getElementById('pat-list-area').innerHTML =
+      '<p style="color:var(--muted);font-size:12px;">No tokens yet.</p>';
+    return;
+  }
+  const now = new Date().toISOString();
+  const rows = pats.map(p => {
+    const expired = p.expires_at && p.expires_at < now;
+    return '<tr class="pat-row' + (expired ? ' expired' : '') + '">' +
+      '<td class="name">' + escapeHtml(p.name) + '</td>' +
+      '<td><code>' + p.prefix + '…</code></td>' +
+      '<td>' + (p.last_used_at || '—') + '</td>' +
+      '<td>' + (p.expires_at ? p.expires_at.slice(0, 10) + (expired ? ' (expired)' : '') : 'never') + '</td>' +
+      '<td><button class="btn danger" onclick="revokeOne(' + p.id + ')">Revoke</button></td>' +
+      '</tr>';
+  }).join('');
+  document.getElementById('pat-list-area').innerHTML =
+    '<table class="pat-table"><thead><tr><th>Name</th><th>Prefix</th><th>Last used</th><th>Expires</th><th></th></tr></thead><tbody>' +
+    rows + '</tbody></table>';
 }
 
-async function generatePAT() {
-  const res = await fetch('/api/users/' + currentPatUserId + '/pat', {method: 'POST'});
-  if (!res.ok) { alert('Generate failed: ' + (await res.text())); return; }
+async function createNewPat(e) {
+  e.preventDefault();
+  const f = e.target;
+  const body = {name: f.name.value.trim()};
+  const days = f.expires_in_days.value;
+  if (days) body.expires_in_days = parseInt(days, 10);
+  const res = await fetch('/api/users/' + currentUserId + '/pats', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+  });
+  if (!res.ok) { alert('Generate failed: ' + (await res.text())); return false; }
   const data = await res.json();
-  document.getElementById('pat-area').innerHTML =
+  // Show plaintext once in the dedicated area (survives refresh).
+  document.getElementById('pat-new-area').innerHTML =
     '<div class="pat-display">' + data.token + '</div>' +
-    '<p style="color:var(--yellow);font-size:11px;">' + data.warning + '</p>';
+    '<p style="color:var(--yellow);font-size:11px;margin-top:-6px;margin-bottom:10px;">' + data.warning + '</p>';
+  f.reset();
+  await refreshPats();
 }
 
-async function revokePAT() {
-  if (!currentPatUserId) return;
-  if (!confirm('Revoke this PAT?')) return;
-  const res = await fetch('/api/users/' + currentPatUserId + '/pat', {method: 'DELETE'});
+async function revokeOne(patId) {
+  if (!confirm('Revoke this token?')) return;
+  const res = await fetch('/api/users/' + currentUserId + '/pats/' + patId, {method: 'DELETE'});
   if (!res.ok && res.status !== 204) { alert('Revoke failed: ' + (await res.text())); return; }
-  document.getElementById('pat-dlg').close();
+  await refreshPats();
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 </script>
 </body>

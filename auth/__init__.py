@@ -11,12 +11,12 @@ Public surface:
     )
 """
 
-from auth.store import User, get_auth_store, init_auth_db, ROLES, PERMISSIONS
+from auth.store import Pat, User, get_auth_store, init_auth_db, ROLES, PERMISSIONS
 from auth.middleware import AuthMiddleware
 from auth.deps import require_login, require_role, require_perm
 
 __all__ = [
-    "User", "ROLES", "PERMISSIONS",
+    "User", "Pat", "ROLES", "PERMISSIONS",
     "get_auth_store", "init_auth_db",
     "require_login", "require_role", "require_perm",
     "AuthMiddleware",

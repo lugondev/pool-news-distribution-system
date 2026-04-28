@@ -69,6 +69,17 @@ async def cleanup_logs_job(redis: aioredis.Redis) -> None:
 
             await db.commit()
 
+        # Sweep expired Personal Access Tokens (separate transaction).
+        try:
+            from auth.store import get_auth_store
+            expired_pats = await get_auth_store().delete_expired_pats()
+            results["personal_access_tokens"] = {"expired_deleted": expired_pats}
+            if expired_pats:
+                logger.info(f"[log_cleanup] expired PATs deleted: {expired_pats}")
+        except Exception as ex:
+            logger.warning(f"[log_cleanup] PAT sweep failed: {ex}", exc_info=True)
+            results["personal_access_tokens"] = {"error": str(ex)}
+
         await log_system_event(
             "log_cleanup_job",
             started,

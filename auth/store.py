@@ -58,6 +58,18 @@ class User:
         return bool(self.permissions.get(name, False))
 
 
+@dataclass
+class Pat:
+    """Personal Access Token metadata. The plaintext is never stored."""
+    id: int
+    user_id: int
+    name: str
+    prefix: str
+    expires_at: str | None = None
+    last_used_at: str | None = None
+    created_at: str | None = None
+
+
 # ── Interface ────────────────────────────────────────────────────────────────
 
 class AuthStore(ABC):
@@ -108,15 +120,32 @@ class AuthStore(ABC):
     @abstractmethod
     async def delete_expired_sessions(self) -> int: ...
 
-    # personal access tokens (1 per user — replaces existing on regen)
+    # personal access tokens (multi-row per user since Phase 1)
     @abstractmethod
-    async def upsert_pat(
-        self, user_id: int, token_hash: str, prefix: str
-    ) -> None: ...
+    async def list_user_pats(self, user_id: int) -> list[Pat]: ...
+    @abstractmethod
+    async def create_pat(
+        self,
+        user_id: int,
+        name: str,
+        token_hash: str,
+        prefix: str,
+        expires_at: datetime | None,
+    ) -> int: ...
+    @abstractmethod
+    async def delete_pat_by_id(self, pat_id: int, user_id: int) -> bool: ...
+    @abstractmethod
+    async def delete_expired_pats(self) -> int: ...
     @abstractmethod
     async def get_user_by_pat_hash(self, token_hash: str) -> User | None: ...
     @abstractmethod
     async def bump_pat(self, token_hash: str) -> None: ...
+
+    # back-compat single-PAT helpers (used by legacy /api/users/{id}/pat endpoints)
+    @abstractmethod
+    async def upsert_pat(
+        self, user_id: int, token_hash: str, prefix: str
+    ) -> None: ...
     @abstractmethod
     async def delete_pat(self, user_id: int) -> None: ...
     @abstractmethod

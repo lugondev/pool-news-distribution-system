@@ -10,7 +10,7 @@ import os
 from datetime import datetime
 from typing import Any
 
-from auth.store import AuthStore, User
+from auth.store import AuthStore, Pat, User
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -105,9 +105,20 @@ class PostgresAuthStore(AuthStore):
         return await asyncio.to_thread(fn, *args, **kwargs)
 
     # ── schema ──────────────────────────────────────────────────────────────
+    _PAT_MIGRATION_SQL = """
+        ALTER TABLE personal_access_tokens
+            DROP CONSTRAINT IF EXISTS personal_access_tokens_user_id_key;
+        ALTER TABLE personal_access_tokens
+            ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT 'default';
+        ALTER TABLE personal_access_tokens
+            ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+        CREATE INDEX IF NOT EXISTS pat_user_idx ON personal_access_tokens(user_id);
+    """
+
     def _init_schema_sync(self):
         with self._conn() as conn, conn.cursor() as cur:
             cur.execute(_SCHEMA)
+            cur.execute(self._PAT_MIGRATION_SQL)
             conn.commit()
 
     async def init_schema(self) -> None:
@@ -274,19 +285,69 @@ class PostgresAuthStore(AuthStore):
     async def delete_expired_sessions(self) -> int:
         return await self._run(self._delete_expired_sessions_sync)
 
-    # ── PAT ─────────────────────────────────────────────────────────────────
-    def _upsert_pat_sync(self, user_id, token_hash, prefix):
+    # ── PAT (multi-row) ─────────────────────────────────────────────────────
+    def _list_user_pats_sync(self, user_id) -> list[Pat]:
         with self._conn() as conn, conn.cursor() as cur:
-            cur.execute("DELETE FROM personal_access_tokens WHERE user_id = %s", (user_id,))
             cur.execute(
-                """INSERT INTO personal_access_tokens (user_id, token_hash, prefix)
-                   VALUES (%s, %s, %s)""",
-                (user_id, token_hash, prefix),
+                """SELECT id, user_id, name, prefix, expires_at, last_used_at, created_at
+                   FROM personal_access_tokens WHERE user_id = %s ORDER BY id""",
+                (user_id,),
+            )
+            out = []
+            for r in cur.fetchall():
+                out.append(Pat(
+                    id=int(r[0]), user_id=int(r[1]), name=r[2], prefix=r[3],
+                    expires_at=r[4].isoformat() if r[4] else None,
+                    last_used_at=r[5].isoformat() if r[5] else None,
+                    created_at=r[6].isoformat() if r[6] else None,
+                ))
+            return out
+
+    async def list_user_pats(self, user_id: int) -> list[Pat]:
+        return await self._run(self._list_user_pats_sync, user_id)
+
+    def _create_pat_sync(self, user_id, name, token_hash, prefix, expires_at) -> int:
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO personal_access_tokens
+                       (user_id, name, token_hash, prefix, expires_at)
+                   VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+                (user_id, name, token_hash, prefix, expires_at),
+            )
+            (pid,) = cur.fetchone()
+            conn.commit()
+            return int(pid)
+
+    async def create_pat(
+        self, user_id: int, name: str, token_hash: str, prefix: str,
+        expires_at: datetime | None,
+    ) -> int:
+        return await self._run(
+            self._create_pat_sync, user_id, name, token_hash, prefix, expires_at
+        )
+
+    def _delete_pat_by_id_sync(self, pat_id, user_id) -> bool:
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM personal_access_tokens WHERE id = %s AND user_id = %s",
+                (pat_id, user_id),
             )
             conn.commit()
+            return (cur.rowcount or 0) > 0
 
-    async def upsert_pat(self, user_id: int, token_hash: str, prefix: str) -> None:
-        await self._run(self._upsert_pat_sync, user_id, token_hash, prefix)
+    async def delete_pat_by_id(self, pat_id: int, user_id: int) -> bool:
+        return await self._run(self._delete_pat_by_id_sync, pat_id, user_id)
+
+    def _delete_expired_pats_sync(self) -> int:
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM personal_access_tokens WHERE expires_at IS NOT NULL AND expires_at < now()"
+            )
+            conn.commit()
+            return cur.rowcount or 0
+
+    async def delete_expired_pats(self) -> int:
+        return await self._run(self._delete_expired_pats_sync)
 
     def _get_user_by_pat_sync(self, token_hash) -> User | None:
         cols = ", ".join(f"u.{c}" for c in _USER_COLS)
@@ -294,7 +355,8 @@ class PostgresAuthStore(AuthStore):
             cur.execute(
                 f"""SELECT {cols} FROM users u
                     JOIN personal_access_tokens p ON p.user_id = u.id
-                    WHERE p.token_hash = %s""",
+                    WHERE p.token_hash = %s
+                      AND (p.expires_at IS NULL OR p.expires_at > now())""",
                 (token_hash,),
             )
             row = cur.fetchone()
@@ -314,6 +376,21 @@ class PostgresAuthStore(AuthStore):
     async def bump_pat(self, token_hash: str) -> None:
         await self._run(self._bump_pat_sync, token_hash)
 
+    # ── back-compat single-PAT helpers ──────────────────────────────────────
+    def _upsert_pat_sync(self, user_id, token_hash, prefix):
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM personal_access_tokens WHERE user_id = %s", (user_id,))
+            cur.execute(
+                """INSERT INTO personal_access_tokens
+                       (user_id, name, token_hash, prefix)
+                   VALUES (%s, 'default', %s, %s)""",
+                (user_id, token_hash, prefix),
+            )
+            conn.commit()
+
+    async def upsert_pat(self, user_id: int, token_hash: str, prefix: str) -> None:
+        await self._run(self._upsert_pat_sync, user_id, token_hash, prefix)
+
     def _delete_pat_sync(self, user_id):
         with self._conn() as conn, conn.cursor() as cur:
             cur.execute("DELETE FROM personal_access_tokens WHERE user_id = %s", (user_id,))
@@ -325,7 +402,9 @@ class PostgresAuthStore(AuthStore):
     def _get_pat_meta_sync(self, user_id):
         with self._conn() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT prefix, last_used_at, created_at FROM personal_access_tokens WHERE user_id = %s",
+                """SELECT prefix, last_used_at, created_at
+                   FROM personal_access_tokens WHERE user_id = %s
+                   ORDER BY id DESC LIMIT 1""",
                 (user_id,),
             )
             row = cur.fetchone()
