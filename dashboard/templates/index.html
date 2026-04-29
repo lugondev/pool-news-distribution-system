@@ -296,6 +296,44 @@
     }
     .analysis-box p { font-size: 13px; color: var(--text-dim); font-style: italic; }
 
+    .modal-content-full {
+      margin: -6px 0 18px; padding: 10px 14px;
+      background: var(--surface-2); border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .modal-content-full summary {
+      cursor: pointer; font-size: 11px; color: var(--muted);
+      font-weight: 600; user-select: none; list-style: none;
+      text-transform: uppercase; letter-spacing: .05em;
+      padding: 2px 0;
+    }
+    .modal-content-full summary::-webkit-details-marker { display: none; }
+    .modal-content-full summary::before { content: '▸ '; color: var(--muted); }
+    .modal-content-full[open] summary::before { content: '▾ '; }
+    .modal-content-full summary:hover { color: var(--text-dim); }
+    .modal-content-full p {
+      margin-top: 12px; font-size: 14px; line-height: 1.65;
+      color: var(--text-dim); white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* ── Modal loading state ──────────────────────────────────────── */
+    #modal-loading {
+      position: fixed; inset: 0; background: rgba(8,10,16,0.72);
+      backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: auto; z-index: 101;
+      animation: modalFade .15s ease-out;
+    }
+    #modal-loading .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
     .ai-pill { font-size: 10px; padding: 2px 8px; border-radius: 4px;
                font-weight: 600; letter-spacing: 0.02em; }
     .ai-pill-done    { background: rgba(16,185,129,0.16); color: var(--green); }
@@ -363,10 +401,31 @@
 
   <div id="modal-container"></div>
   <script>
+    window.closeArticleModal = function() {
+      if (window.__modalXhr) { try { window.__modalXhr.abort(); } catch (_) {} }
+      var c = document.getElementById('modal-container');
+      if (c) c.innerHTML = '';
+      window.__modalLoading = false;
+      window.__modalXhr = null;
+    };
     document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape') {
-        var c = document.getElementById('modal-container');
-        if (c) c.innerHTML = '';
+      if (e.key === 'Escape') window.closeArticleModal();
+    });
+    document.body.addEventListener('htmx:beforeRequest', function(evt) {
+      var t = evt.detail.target;
+      if (!t || t.id !== 'modal-container') return;
+      if (window.__modalLoading) { evt.preventDefault(); return; }
+      window.__modalLoading = true;
+      window.__modalXhr = evt.detail.xhr;
+      t.innerHTML = '<div id="modal-loading"'
+        + ' onclick="window.closeArticleModal()">'
+        + '<div class="spinner"></div></div>';
+    });
+    document.body.addEventListener('htmx:afterRequest', function(evt) {
+      var t = evt.detail.target;
+      if (t && t.id === 'modal-container') {
+        window.__modalLoading = false;
+        window.__modalXhr = null;
       }
     });
   </script>

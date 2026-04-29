@@ -2,13 +2,13 @@
 {% set ts = article.published_at or article.created_at or article.fetched_at %}
 
 <div class="modal-backdrop"
-     onclick="document.getElementById('modal-container').innerHTML=''">
+     onclick="window.closeArticleModal()">
   <article class="modal {% if is_synthetic %}synthetic{% endif %}"
            onclick="event.stopPropagation()"
            role="dialog" aria-modal="true"
            aria-labelledby="modal-title-{{ article.id }}">
     <button class="modal-close" aria-label="Close"
-            onclick="document.getElementById('modal-container').innerHTML=''">×</button>
+            onclick="window.closeArticleModal()">×</button>
 
     {% if article.image_url %}
       <div class="modal-hero">
@@ -79,9 +79,15 @@
         {% if not article.ai_summary_vi and not article.ai_summary_en %}
           {% if article.summary %}
             <p class="raw-summary">{{ article.summary }}</p>
-          {% else %}
+          {% elif not article.content %}
             <p class="empty-summary">No summary available.</p>
           {% endif %}
+        {% endif %}
+        {% if article.content and article.content != article.summary %}
+          <details class="modal-content-full">
+            <summary>Full content</summary>
+            <p>{{ article.content }}</p>
+          </details>
         {% endif %}
       {% endif %}
     </div>
@@ -98,7 +104,7 @@
         </a>
       {% endif %}
       <button class="btn btn-ghost"
-              onclick="document.getElementById('modal-container').innerHTML=''">Close</button>
+              onclick="window.closeArticleModal()">Close</button>
     </div>
   </article>
 </div>
