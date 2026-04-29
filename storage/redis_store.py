@@ -64,6 +64,7 @@ def _article_to_hash(article: Article, priority_score: float | None = None) -> d
         "category": article.category,
         "published_at": article.published_at.isoformat(),
         "fetched_at": article.fetched_at.isoformat(),
+        "image_url": article.image_url,
         "ai_summary_vi": article.ai_summary_vi,
         "ai_summary_en": article.ai_summary_en,
         "ai_status": article.ai_status,

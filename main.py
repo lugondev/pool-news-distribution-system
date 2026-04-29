@@ -26,6 +26,8 @@ logging.getLogger("apscheduler.scheduler").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # Import app sau load_dotenv để env vars có sẵn
+from auth import init_auth_db
+from auth.setup import ensure_setup_token
 from dashboard.app import app as dashboard_app, get_redis
 from dashboard.config_io import on_settings_saved
 from jobs.scheduler import get_scheduler, reload_scheduler_jobs
@@ -95,6 +97,10 @@ async def lifespan(app: FastAPI):
     # Parallel init: SQLite and Weaviate are independent — run concurrently
     await asyncio.gather(init_db(), init_weaviate())
     logger.info("SQLite + Weaviate initialized")
+
+    # Auth schema + first-boot setup token (creates users/PAT tables on fresh DB).
+    await init_auth_db()
+    await ensure_setup_token()
 
     # Single config read — reused for lake and scheduler config below
     from storage.config_cache import cached_yaml

@@ -32,6 +32,30 @@ def fmt_dt(iso_str: str, fmt: str = "%Y-%m-%d %H:%M") -> str:
         return iso_str[:16].replace("T", " ")
 
 
+def rel_time(iso_str: str) -> str:
+    """Human-friendly relative time: '2m', '3h', '5d', then '21/03' for >1 week."""
+    if not iso_str:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        delta = int((datetime.now(timezone.utc) - dt).total_seconds())
+        if delta < 0:
+            return "just now"
+        if delta < 60:
+            return f"{delta}s"
+        if delta < 3600:
+            return f"{delta // 60}m"
+        if delta < 86400:
+            return f"{delta // 3600}h"
+        if delta < 604800:
+            return f"{delta // 86400}d"
+        return fmt_dt(iso_str, "%d/%m")
+    except Exception:
+        return ""
+
+
 def dt_lag(fetched_str: str, published_str: str) -> str:
     try:
         pub = datetime.fromisoformat(published_str)

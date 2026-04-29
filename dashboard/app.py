@@ -270,6 +270,18 @@ async def article_detail(request: Request, article_id: str):
 # ── HTMX partials ─────────────────────────────────────────────────────────────
 
 
+@app.get("/partials/article/{article_id}", response_class=HTMLResponse, dependencies=_login)
+async def article_modal_partial(request: Request, article_id: str):
+    redis = get_redis()
+    article = await get_article(redis, article_id)
+    if not article:
+        return HTMLResponse("", status_code=204)
+    return templates.TemplateResponse(
+        "partials/article_modal.html",
+        {"request": request, "article": article},
+    )
+
+
 @app.get("/partials/stats", response_class=HTMLResponse, dependencies=_login)
 async def stats_partial(request: Request):
     redis = get_redis()

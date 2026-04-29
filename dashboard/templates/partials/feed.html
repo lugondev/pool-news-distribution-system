@@ -1,193 +1,220 @@
-<!-- Article type filter bar (NEW) -->
-<div class="filter-bar" style="margin-bottom:8px">
-  <span class="filter-label">Type:</span>
-  <button class="filter-chip {% if not article_type %}active{% endif %}"
-          hx-get="/partials/feed?page=1{% if category %}&category={{ category }}{% endif %}{% if source %}&source={{ source }}{% endif %}"
-          hx-target="#feed" hx-swap="innerHTML">All Articles</button>
-  <button class="filter-chip {% if article_type == 'original' %}active{% endif %}"
-          hx-get="/partials/feed?page=1&article_type=original{% if category %}&category={{ category }}{% endif %}{% if source %}&source={{ source }}{% endif %}"
-          hx-target="#feed" hx-swap="innerHTML">📰 Original (RSS)</button>
-  <button class="filter-chip {% if article_type == 'synthetic' %}active{% endif %}"
-          hx-get="/partials/feed?page=1&article_type=synthetic{% if category %}&category={{ category }}{% endif %}{% if source %}&source={{ source }}{% endif %}"
-          hx-target="#feed" hx-swap="innerHTML">✨ Synthetic (AI)</button>
-</div>
+{# ── Sticky toolbar ─────────────────────────────────────────────── #}
+{% set base_qs = {} %}
+{% if article_type %}{% set _ = base_qs.update({'article_type': article_type}) %}{% endif %}
+{% if category %}{% set _ = base_qs.update({'category': category}) %}{% endif %}
+{% if source %}{% set _ = base_qs.update({'source': source}) %}{% endif %}
 
-<!-- Category filter bar -->
-<div class="filter-bar" style="margin-bottom:8px">
-  <span class="filter-label">Category:</span>
-  <button class="filter-chip {% if not category %}active{% endif %}"
-          hx-get="/partials/feed?page=1{% if article_type %}&article_type={{ article_type }}{% endif %}{% if source %}&source={{ source }}{% endif %}"
-          hx-target="#feed" hx-swap="innerHTML">All</button>
-  {% for c in categories %}
-  {% if c.enabled %}
-  <button class="filter-chip {% if category == c.id %}active{% endif %}"
-          hx-get="/partials/feed?page=1&category={{ c.id }}{% if article_type %}&article_type={{ article_type }}{% endif %}{% if source %}&source={{ source }}{% endif %}"
-          hx-target="#feed" hx-swap="innerHTML">{{ c.name }}</button>
-  {% endif %}
-  {% endfor %}
-</div>
+<div class="toolbar">
+  <div class="toolbar-row">
+    <div class="pill-group" role="tablist" aria-label="Article type">
+      <button class="pill {% if not article_type %}active{% endif %}"
+              hx-get="/partials/feed?page=1{% if category %}&category={{ category }}{% endif %}{% if source %}&source={{ source }}{% endif %}"
+              hx-target="#feed" hx-swap="innerHTML">All</button>
+      <button class="pill {% if article_type == 'original' %}active{% endif %}"
+              hx-get="/partials/feed?page=1&article_type=original{% if category %}&category={{ category }}{% endif %}{% if source %}&source={{ source }}{% endif %}"
+              hx-target="#feed" hx-swap="innerHTML">📰 Original</button>
+      <button class="pill {% if article_type == 'synthetic' %}active{% endif %}"
+              hx-get="/partials/feed?page=1&article_type=synthetic{% if category %}&category={{ category }}{% endif %}{% if source %}&source={{ source }}{% endif %}"
+              hx-target="#feed" hx-swap="innerHTML">✨ Synthetic</button>
+    </div>
 
-<!-- Source filter bar -->
-<div class="filter-bar">
-  <span class="filter-label">Source:</span>
-  <button class="filter-chip {% if not source %}active{% endif %}"
-          hx-get="/partials/feed?page=1{% if article_type %}&article_type={{ article_type }}{% endif %}{% if category %}&category={{ category }}{% endif %}"
-          hx-target="#feed" hx-swap="innerHTML">All</button>
-  {% for s in sources %}
-  {% if s.enabled %}
-  <button class="filter-chip {% if source == s.id %}active{% endif %}"
-          hx-get="/partials/feed?page=1&source={{ s.id }}{% if article_type %}&article_type={{ article_type }}{% endif %}{% if category %}&category={{ category }}{% endif %}"
-          hx-target="#feed" hx-swap="innerHTML">{{ s.name }}</button>
-  {% endif %}
-  {% endfor %}
-</div>
+    <div class="toolbar-spacer"></div>
 
-{% if source or category or article_type %}
-<div class="filter-active">
-  {% if article_type %}Type: <strong>{{ article_type }}</strong>{% endif %}
-  {% if article_type and category %} · {% endif %}
-  {% if category %}Category: <strong>{{ category }}</strong>{% endif %}
-  {% if (article_type or category) and source %} · {% endif %}
-  {% if source %}Source: <strong>{{ source }}</strong>{% endif %}
-  <button class="filter-clear"
-          hx-get="/partials/feed?page=1"
-          hx-target="#feed" hx-swap="innerHTML">Clear all</button>
-</div>
-{% endif %}
-
-{% for article in articles %}
-<div class="article-card{% if article.type == 'synthetic' %} synthetic-card{% endif %}">
-  <div class="meta">
-    {% if article.type == 'synthetic' %}
-      <span class="ai-badge" style="background:linear-gradient(135deg, var(--accent), #818cf8);color:white;font-weight:600;padding:2px 8px">
-        ✨ AI Synthetic
-      </span>
-      <span class="cat-badge" style="background:rgba(99,102,241,0.1);color:var(--accent);border:1px solid var(--accent)"
-            title="Angle: {{ article.angle or 'summary' }}">
-        {{ article.angle or 'summary' }}
-      </span>
-    {% else %}
-      <span class="source source-link"
-            hx-get="/partials/feed?page=1&source={{ article.source_id }}{% if category %}&category={{ category }}{% endif %}"
-            hx-target="#feed" hx-swap="innerHTML">{{ article.source_name }}</span>
-      <span class="lang">{{ article.lang }}</span>
-    {% endif %}
-    <span class="cat-badge"
-          hx-get="/partials/feed?page=1&category={{ article.category }}{% if source %}&source={{ source }}{% endif %}"
-          hx-target="#feed" hx-swap="innerHTML">{{ article.category }}</span>
-    {% if article.type != 'synthetic' %}
-      {% if article.ai_status == 'done' %}
-        <span class="ai-badge ai-done">AI ✓</span>
-      {% elif article.ai_status == 'dedup_skipped' %}
-        <span class="ai-badge" style="background:rgba(99,102,241,0.15);color:#818cf8">AI skip</span>
-      {% elif article.ai_status == 'failed' %}
-        <span class="ai-badge" style="background:rgba(239,68,68,0.15);color:#ef4444">AI ✗</span>
-      {% else %}
-        <span class="ai-badge ai-pending">AI …</span>
-      {% endif %}
-    {% endif %}
-    <span class="time">
-      {% if article.type == 'synthetic' %}
-        <span title="Created: {{ article.created_at or article.fetched_at | fmt_dt }}">
-          🤖 {{ article.created_at or article.fetched_at | fmt_dt("%d/%m %H:%M") }}
-        </span>
-        {% if article.num_source_articles %}
-          <span style="opacity:0.7" title="Generated from {{ article.num_source_articles }} source articles">
-            · {{ article.num_source_articles }} sources
-          </span>
-        {% endif %}
-      {% else %}
-        {% if article.published_at %}
-          <span title="Published: {{ article.published_at | fmt_dt }}">
-            📰 {{ article.published_at | fmt_dt("%d/%m %H:%M") }}
-          </span>
-        {% endif %}
-        {% if article.fetched_at %}
-          {% set lag = article.fetched_at | dt_lag(article.published_at) %}
-          <span title="Fetched at: {{ article.fetched_at | fmt_dt }}" style="opacity:0.65">
-            · ⬇{{ article.fetched_at | fmt_dt("%H:%M") }}{% if lag %} <span style="opacity:0.7">({{ lag }})</span>{% endif %}
-          </span>
-        {% endif %}
-      {% endif %}
-    </span>
+    <select class="src-select" name="source"
+            hx-get="/partials/feed"
+            hx-trigger="change"
+            hx-target="#feed" hx-swap="innerHTML"
+            hx-vals='{"page": "1"{% if article_type %}, "article_type": "{{ article_type }}"{% endif %}{% if category %}, "category": "{{ category }}"{% endif %}}'>
+      <option value="">All sources ({{ sources | selectattr('enabled') | list | length }})</option>
+      {% for s in sources %}{% if s.enabled %}
+        <option value="{{ s.id }}" {% if source == s.id %}selected{% endif %}>{{ s.name }}</option>
+      {% endif %}{% endfor %}
+    </select>
   </div>
-  <div class="title">
-    {% if article.type == 'synthetic' %}
-      <a href="/article/{{ article.id }}" style="color:var(--accent)">
-        {{ article.title_en or article.title }}
-      </a>
-    {% else %}
-      <a href="{{ article.url }}" target="_blank" rel="noopener">{{ article.title }}</a>
-    {% endif %}
-  </div>
-  {% if article.type == 'synthetic' %}
-    <div class="summary" style="border-left:3px solid var(--accent);padding-left:12px">
-      🇻🇳 {{ article.content_vi }}
-    </div>
-    <div class="summary" style="margin-top:8px;opacity:0.85">
-      🇬🇧 {{ article.content_en }}
-    </div>
-  {% elif article.ai_status == 'done' and article.ai_summary_vi %}
-    <div class="summary">
-      🇻🇳 {{ article.ai_summary_vi }}
-    </div>
-  {% elif article.summary %}
-    <div class="summary">{{ article.summary[:200] }}{% if article.summary|length > 200 %}...{% endif %}</div>
-  {% endif %}
-</div>
-{% endfor %}
 
-{% if not articles %}
-<div style="text-align:center;padding:40px;color:var(--muted)">
+  <div class="toolbar-row">
+    <div class="cat-scroll">
+      <button class="chip {% if not category %}active{% endif %}"
+              hx-get="/partials/feed?page=1{% if article_type %}&article_type={{ article_type }}{% endif %}{% if source %}&source={{ source }}{% endif %}"
+              hx-target="#feed" hx-swap="innerHTML">All</button>
+      {% for c in categories %}{% if c.enabled %}
+        <button class="chip {% if category == c.id %}active{% endif %}"
+                hx-get="/partials/feed?page=1&category={{ c.id }}{% if article_type %}&article_type={{ article_type }}{% endif %}{% if source %}&source={{ source }}{% endif %}"
+                hx-target="#feed" hx-swap="innerHTML">{{ c.name }}</button>
+      {% endif %}{% endfor %}
+    </div>
+  </div>
+
   {% if source or category or article_type %}
-    No articles matching this filter.
-  {% else %}
-    No articles yet. Waiting for first crawl...
+  <div class="filter-tags">
+    {% if article_type %}<span class="ftag">type: {{ article_type }}</span>{% endif %}
+    {% if category %}<span class="ftag">category: {{ category }}</span>{% endif %}
+    {% if source %}<span class="ftag">source: {{ source }}</span>{% endif %}
+    <button class="clear-btn"
+            hx-get="/partials/feed?page=1"
+            hx-target="#feed" hx-swap="innerHTML">Clear</button>
+  </div>
   {% endif %}
 </div>
-{% endif %}
 
+{# ── Feed list ─────────────────────────────────────────────────── #}
 {% set qs_source = "&source=" ~ source if source else "" %}
 {% set qs_category = "&category=" ~ category if category else "" %}
 {% set qs_article_type = "&article_type=" ~ article_type if article_type else "" %}
 {% set qs_filters = qs_source ~ qs_category ~ qs_article_type %}
 
-{% if total_pages > 1 %}
-<nav class="pagination">
-  <span class="info">{{ total }} articles</span>
+<div class="feed-list">
+{% for article in articles %}
+  {% set is_synthetic = article.type == 'synthetic' %}
+  {% set has_ai = article.ai_status == 'done' and article.ai_summary_vi %}
+  {% set is_card = is_synthetic or has_ai %}
 
-  <button hx-get="/partials/feed?page={{ page - 1 }}{{ qs_filters }}"
+  {% if is_card %}
+    {# ── Comfortable card (synthetic / AI done) ── #}
+    <article class="card {% if is_synthetic %}synthetic{% endif %}">
+      {% if article.image_url %}
+        <div class="card-banner">
+          <img src="{{ article.image_url }}" alt="" loading="lazy"
+               referrerpolicy="no-referrer"
+               onerror="this.parentElement.style.display='none'">
+        </div>
+      {% endif %}
+      <div class="card-head">
+        {% if is_synthetic %}
+          <span class="badge badge-syn">✨ Synthetic</span>
+          {% if article.angle %}<span class="badge badge-cat" title="Angle">{{ article.angle }}</span>{% endif %}
+        {% else %}
+          <span class="src-tag"
+                hx-get="/partials/feed?page=1&source={{ article.source_id }}{{ qs_category }}{{ qs_article_type }}"
+                hx-target="#feed" hx-swap="innerHTML">{{ article.source_name }}</span>
+          <span class="lang-tag">{{ article.lang }}</span>
+        {% endif %}
+        <span class="badge badge-cat"
+              hx-get="/partials/feed?page=1&category={{ article.category }}{{ qs_source }}{{ qs_article_type }}"
+              hx-target="#feed" hx-swap="innerHTML">{{ article.category }}</span>
+        {% if not is_synthetic %}
+          <span class="ai-dot done" title="AI rewrite done"></span>
+        {% endif %}
+        <span class="toolbar-spacer"></span>
+        <span class="time"
+              title="{{ (article.published_at or article.fetched_at or article.created_at) | fmt_dt }}">
+          {{ (article.published_at or article.fetched_at or article.created_at) | rel_time }}
+        </span>
+        {% if is_synthetic and article.num_source_articles %}
+          <span class="src-count" title="Generated from {{ article.num_source_articles }} articles">
+            · {{ article.num_source_articles }} src
+          </span>
+        {% endif %}
+      </div>
+      <h3 class="card-title">
+        {% if is_synthetic %}
+          <a href="/article/{{ article.id }}"
+             hx-get="/partials/article/{{ article.id }}"
+             hx-target="#modal-container" hx-swap="innerHTML">{{ article.title_en or article.title }}</a>
+        {% else %}
+          <a href="{{ article.url }}" target="_blank" rel="noopener"
+             hx-get="/partials/article/{{ article.id }}"
+             hx-target="#modal-container" hx-swap="innerHTML">{{ article.title }}</a>
+        {% endif %}
+      </h3>
+      {% if is_synthetic %}
+        <p class="card-summary">🇻🇳 {{ article.content_vi }}</p>
+        {% if article.content_en %}<p class="card-summary">🇬🇧 {{ article.content_en }}</p>{% endif %}
+      {% else %}
+        <p class="card-summary">🇻🇳 {{ article.ai_summary_vi }}</p>
+      {% endif %}
+    </article>
+
+  {% else %}
+    {# ── Compact row (original w/o AI) ── #}
+    <article class="row {% if not article.image_url %}no-thumb{% endif %}">
+      {% if article.image_url %}
+        <div class="row-thumb">
+          <img src="{{ article.image_url }}" alt="" loading="lazy"
+               referrerpolicy="no-referrer"
+               onerror="this.parentElement.parentElement.classList.add('no-thumb');this.parentElement.remove()">
+        </div>
+      {% endif %}
+      <div>
+        <a class="row-title" href="{{ article.url }}" target="_blank" rel="noopener"
+           hx-get="/partials/article/{{ article.id }}"
+           hx-target="#modal-container" hx-swap="innerHTML">{{ article.title }}</a>
+        <div class="row-meta">
+          <span class="src-tag"
+                hx-get="/partials/feed?page=1&source={{ article.source_id }}{{ qs_category }}{{ qs_article_type }}"
+                hx-target="#feed" hx-swap="innerHTML">{{ article.source_name }}</span>
+          <span class="dot">·</span>
+          <span class="badge badge-cat"
+                hx-get="/partials/feed?page=1&category={{ article.category }}{{ qs_source }}{{ qs_article_type }}"
+                hx-target="#feed" hx-swap="innerHTML">{{ article.category }}</span>
+          <span class="lang-tag">{{ article.lang }}</span>
+        </div>
+      </div>
+      <div class="row-side">
+        {% if article.ai_status == 'pending' or not article.ai_status %}
+          <span class="ai-dot pending" title="AI pending"></span>
+        {% elif article.ai_status == 'dedup_skipped' %}
+          <span class="ai-dot skip" title="AI skipped (duplicate)"></span>
+        {% elif article.ai_status == 'failed' %}
+          <span class="ai-dot failed" title="AI failed"></span>
+        {% else %}
+          <span class="ai-dot none" title="No AI"></span>
+        {% endif %}
+        <span class="time"
+              title="{{ (article.published_at or article.fetched_at) | fmt_dt }}">
+          {{ (article.published_at or article.fetched_at) | rel_time }}
+        </span>
+      </div>
+    </article>
+  {% endif %}
+{% endfor %}
+</div>
+
+{% if not articles %}
+<div class="empty">
+  <div class="empty-icon">{% if source or category or article_type %}🔍{% else %}📭{% endif %}</div>
+  {% if source or category or article_type %}
+    No articles match this filter.
+  {% else %}
+    No articles yet. Waiting for first crawl…
+  {% endif %}
+</div>
+{% endif %}
+
+{% if total_pages > 1 %}
+<nav class="pagination" aria-label="Pagination">
+  <span class="info">{{ total }} articles · page {{ page }}/{{ total_pages }}</span>
+
+  <button class="pg-btn"
+          hx-get="/partials/feed?page={{ page - 1 }}{{ qs_filters }}"
           hx-target="#feed" hx-swap="innerHTML"
-          {% if page <= 1 %}disabled{% endif %}>
-    ← Prev
-  </button>
+          {% if page <= 1 %}disabled{% endif %}>← Prev</button>
 
   {% set window = 2 %}
   {% set start_page = [page - window, 1] | max %}
   {% set end_page = [page + window, total_pages] | min %}
 
   {% if start_page > 1 %}
-  <button class="page-btn" hx-get="/partials/feed?page=1{{ qs_filters }}"
-          hx-target="#feed" hx-swap="innerHTML">1</button>
-  {% if start_page > 2 %}<span class="ellipsis">...</span>{% endif %}
+    <button class="pg-btn" hx-get="/partials/feed?page=1{{ qs_filters }}"
+            hx-target="#feed" hx-swap="innerHTML">1</button>
+    {% if start_page > 2 %}<span class="ellipsis">…</span>{% endif %}
   {% endif %}
 
   {% for p in range(start_page, end_page + 1) %}
-  <button class="page-btn {% if p == page %}active{% endif %}"
-          hx-get="/partials/feed?page={{ p }}{{ qs_filters }}"
-          hx-target="#feed" hx-swap="innerHTML">{{ p }}</button>
+    <button class="pg-btn {% if p == page %}active{% endif %}"
+            hx-get="/partials/feed?page={{ p }}{{ qs_filters }}"
+            hx-target="#feed" hx-swap="innerHTML">{{ p }}</button>
   {% endfor %}
 
   {% if end_page < total_pages %}
-  {% if end_page < total_pages - 1 %}<span class="ellipsis">...</span>{% endif %}
-  <button class="page-btn" hx-get="/partials/feed?page={{ total_pages }}{{ qs_filters }}"
-          hx-target="#feed" hx-swap="innerHTML">{{ total_pages }}</button>
+    {% if end_page < total_pages - 1 %}<span class="ellipsis">…</span>{% endif %}
+    <button class="pg-btn" hx-get="/partials/feed?page={{ total_pages }}{{ qs_filters }}"
+            hx-target="#feed" hx-swap="innerHTML">{{ total_pages }}</button>
   {% endif %}
 
-  <button hx-get="/partials/feed?page={{ page + 1 }}{{ qs_filters }}"
+  <button class="pg-btn"
+          hx-get="/partials/feed?page={{ page + 1 }}{{ qs_filters }}"
           hx-target="#feed" hx-swap="innerHTML"
-          {% if page >= total_pages %}disabled{% endif %}>
-    Next →
-  </button>
+          {% if page >= total_pages %}disabled{% endif %}>Next →</button>
 </nav>
 {% endif %}

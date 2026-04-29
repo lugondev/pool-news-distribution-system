@@ -1,0 +1,104 @@
+{% set is_synthetic = article.type == 'synthetic' %}
+{% set ts = article.published_at or article.created_at or article.fetched_at %}
+
+<div class="modal-backdrop"
+     onclick="document.getElementById('modal-container').innerHTML=''">
+  <article class="modal {% if is_synthetic %}synthetic{% endif %}"
+           onclick="event.stopPropagation()"
+           role="dialog" aria-modal="true"
+           aria-labelledby="modal-title-{{ article.id }}">
+    <button class="modal-close" aria-label="Close"
+            onclick="document.getElementById('modal-container').innerHTML=''">×</button>
+
+    {% if article.image_url %}
+      <div class="modal-hero">
+        <img src="{{ article.image_url }}" alt="" loading="lazy"
+             referrerpolicy="no-referrer"
+             onerror="this.parentElement.style.display='none'">
+      </div>
+    {% endif %}
+
+    <div class="modal-head">
+      {% if is_synthetic %}
+        <span class="badge badge-syn">✨ Synthetic</span>
+        {% if article.angle %}<span class="badge badge-cat">{{ article.angle }}</span>{% endif %}
+      {% else %}
+        <span class="src-tag">{{ article.source_name }}</span>
+        <span class="lang-tag">{{ article.lang }}</span>
+      {% endif %}
+      <span class="badge badge-cat">{{ article.category }}</span>
+      {% if not is_synthetic %}
+        {% if article.ai_status == 'done' %}
+          <span class="ai-pill ai-pill-done">AI ✓</span>
+        {% elif article.ai_status == 'failed' %}
+          <span class="ai-pill ai-pill-fail">AI failed</span>
+        {% elif article.ai_status == 'dedup_skipped' %}
+          <span class="ai-pill ai-pill-skip">AI skipped</span>
+        {% elif article.ai_status == 'pending' or not article.ai_status %}
+          <span class="ai-pill ai-pill-pending">AI pending</span>
+        {% endif %}
+      {% endif %}
+      {% if is_synthetic and article.num_source_articles %}
+        <span class="src-count">{{ article.num_source_articles }} sources</span>
+      {% endif %}
+      <span class="modal-time" title="{{ ts | fmt_dt }}">{{ ts | rel_time }}</span>
+    </div>
+
+    <h2 class="modal-title" id="modal-title-{{ article.id }}">
+      {% if is_synthetic %}
+        {{ article.title_en or article.title_vi or 'Synthetic article' }}
+      {% else %}
+        {{ article.title }}
+      {% endif %}
+    </h2>
+    {% if is_synthetic and article.title_vi and article.title_vi != article.title_en %}
+      <p class="modal-subtitle">{{ article.title_vi }}</p>
+    {% endif %}
+
+    <div class="modal-body">
+      {% if is_synthetic %}
+        {% if article.content_vi %}
+          <p class="lang-block"><span class="flag">🇻🇳</span> {{ article.content_vi }}</p>
+        {% endif %}
+        {% if article.content_en %}
+          <p class="lang-block"><span class="flag">🇬🇧</span> {{ article.content_en }}</p>
+        {% endif %}
+        {% if article.ai_analysis %}
+          <div class="analysis-box">
+            <h4>🔍 AI Analysis</h4>
+            <p>{{ article.ai_analysis }}</p>
+          </div>
+        {% endif %}
+      {% else %}
+        {% if article.ai_summary_vi %}
+          <p class="lang-block"><span class="flag">🇻🇳</span> {{ article.ai_summary_vi }}</p>
+        {% endif %}
+        {% if article.ai_summary_en %}
+          <p class="lang-block"><span class="flag">🇬🇧</span> {{ article.ai_summary_en }}</p>
+        {% endif %}
+        {% if not article.ai_summary_vi and not article.ai_summary_en %}
+          {% if article.summary %}
+            <p class="raw-summary">{{ article.summary }}</p>
+          {% else %}
+            <p class="empty-summary">No summary available.</p>
+          {% endif %}
+        {% endif %}
+      {% endif %}
+    </div>
+
+    <div class="modal-actions">
+      {% if article.url %}
+        <a class="btn btn-primary" href="{{ article.url }}" target="_blank" rel="noopener noreferrer">
+          Open original ↗
+        </a>
+      {% endif %}
+      {% if is_synthetic %}
+        <a class="btn btn-secondary" href="/article/{{ article.id }}">
+          View full detail →
+        </a>
+      {% endif %}
+      <button class="btn btn-ghost"
+              onclick="document.getElementById('modal-container').innerHTML=''">Close</button>
+    </div>
+  </article>
+</div>

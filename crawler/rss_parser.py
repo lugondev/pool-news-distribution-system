@@ -30,6 +30,7 @@ class Article:
     category: str
     published_at: datetime
     fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    image_url: str = ""  # thumbnail/cover image extracted from RSS
     # AI output (filled later)
     ai_summary_vi: str = ""
     ai_summary_en: str = ""
@@ -63,6 +64,65 @@ def _detect_lang(text: str, fallback: str = "en") -> str:
         return detect(text[:500])
     except LangDetectException:
         return fallback
+
+
+# URL fragments that indicate tracking pixels rather than real images.
+_TRACKING_PIXEL_HINTS = ("/pixel", "1x1", "/track", "/beacon", "doubleclick", "/p.gif")
+
+
+def _is_real_image_url(url: str) -> bool:
+    if not url or not url.startswith(("http://", "https://")):
+        return False
+    lower = url.lower()
+    return not any(h in lower for h in _TRACKING_PIXEL_HINTS)
+
+
+def _extract_image(entry: Any, summary_html: str, content_html: str) -> str:
+    """Pick a thumbnail URL from an RSS entry. Priority:
+    media:thumbnail → media:content (image) → enclosures (image) → first <img>.
+    Returns "" if nothing usable is found."""
+    # 1. media:thumbnail
+    thumbs = getattr(entry, "media_thumbnail", None) or []
+    for t in thumbs:
+        url = (t or {}).get("url", "")
+        if _is_real_image_url(url):
+            return url
+
+    # 2. media:content with type=image/* or medium=image
+    media = getattr(entry, "media_content", None) or []
+    for m in media:
+        if not isinstance(m, dict):
+            continue
+        mtype = (m.get("type") or "").lower()
+        medium = (m.get("medium") or "").lower()
+        if medium == "image" or mtype.startswith("image/"):
+            url = m.get("url", "")
+            if _is_real_image_url(url):
+                return url
+
+    # 3. enclosures (RSS 2.0)
+    for enc in getattr(entry, "enclosures", None) or []:
+        if not isinstance(enc, dict):
+            continue
+        if (enc.get("type") or "").lower().startswith("image/"):
+            url = enc.get("href") or enc.get("url", "")
+            if _is_real_image_url(url):
+                return url
+
+    # 4. first <img> in summary or content HTML
+    for html in (summary_html, content_html):
+        if not html or "<img" not in html:
+            continue
+        try:
+            soup = BeautifulSoup(html, "lxml")
+            img = soup.find("img")
+            if img:
+                src = img.get("src") or img.get("data-src") or ""
+                if _is_real_image_url(src):
+                    return src
+        except Exception:
+            continue
+    return ""
 
 
 def _parse_date(entry: Any) -> datetime:
@@ -109,13 +169,15 @@ async def parse_rss_feed(
         if not url or not title:
             continue
 
-        # Extract summary/content
-        summary = ""
-        if hasattr(entry, "summary"):
-            summary = _strip_html(entry.summary)
-        content = ""
+        # Extract summary/content (keep raw HTML for image extraction first)
+        summary_html = getattr(entry, "summary", "") or ""
+        content_html = ""
         if hasattr(entry, "content") and entry.content:
-            content = _strip_html(entry.content[0].value)
+            content_html = entry.content[0].value or ""
+
+        summary = _strip_html(summary_html)
+        content = _strip_html(content_html)
+        image_url = _extract_image(entry, summary_html, content_html)
 
         text_for_detect = title + " " + (summary or content)
         detected_lang = _detect_lang(text_for_detect, fallback=source.get("lang", "en"))
@@ -132,6 +194,7 @@ async def parse_rss_feed(
             declared_lang=source.get("lang", "en"),
             category=source.get("category", "general"),
             published_at=_parse_date(entry),
+            image_url=image_url,
         )
         articles.append(article)
 
