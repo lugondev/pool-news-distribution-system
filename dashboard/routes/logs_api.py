@@ -42,18 +42,8 @@ async def scheduler_status():
     return {"jobs": get_scheduler_status()}
 
 
-# ── Health ────────────────────────────────────────────────────────────────────
-
-
-@router.get("/health")
-async def health():
-    r = get_redis()
-    try:
-        await r.ping()
-        redis_ok = True
-    except Exception:
-        redis_ok = False
-    return {"status": "ok" if redis_ok else "degraded", "redis": redis_ok}
+# Health endpoint moved to dashboard.app to keep it public (no auth gate).
+# Container healthchecks and uptime monitors must not be required to log in.
 
 
 # ── Articles ──────────────────────────────────────────────────────────────────

@@ -161,6 +161,20 @@ app.include_router(ai_providers_ui_router,    dependencies=_login)
 PAGE_SIZE = 20
 
 
+# ── Public health (no auth) ───────────────────────────────────────────────────
+# Container healthchecks and uptime monitors must reach this without a session.
+
+
+@app.get("/api/health")
+async def health():
+    r = get_redis()
+    try:
+        await r.ping()
+        return {"status": "ok", "redis": True}
+    except Exception:
+        return {"status": "degraded", "redis": False}
+
+
 # ── Page routes ───────────────────────────────────────────────────────────────
 
 
