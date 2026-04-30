@@ -156,9 +156,14 @@ class AckIn(BaseModel):
 # ── CRUD ─────────────────────────────────────────────────────────────────────
 
 
-@router.get("/channels", summary="List all channels", dependencies=_mgr)
+@router.get("/channels", summary="List all channels")
 async def list_channels():
-    """Return all configured content channels (API keys are masked)."""
+    """Return all configured content channels (API keys are masked).
+
+    Public endpoint — no auth required. Bots/services can discover available
+    channel IDs without a session. API keys themselves are never returned;
+    only an 8-char preview is included for human identification.
+    """
     channels = get_content_channels()
     # Strip api_key from listing for security
     safe = []

@@ -23,7 +23,15 @@ from tenacity import (
 )
 
 import redis.asyncio as aioredis
-from ai.rewriter import get_openai_client, TONE_PROMPTS, _load_ai_config, LANG_NAMES
+from ai.rewriter import (
+    get_openai_client,
+    TONE_PROMPTS,
+    _load_ai_config,
+    LANG_NAMES,
+    AUTO_LANG,
+    is_auto_lang,
+    audience_pick_instruction,
+)
 from storage.config_cache import cached_yaml  # noqa: F401 — available for future use
 from ai.provider_utils import (
     build_response_format,
@@ -38,18 +46,42 @@ logger = logging.getLogger(__name__)
 def _build_synth_lang_spec(
     target_languages: list[str] | str | None,
     length_guidance: str,
-) -> tuple[list[str], str]:
+) -> tuple[list[str], str, bool]:
     """Build output language list and JSON fields spec for the synthesis prompt.
 
-    Returns (output_languages, output_fields_spec).
-    output_languages: e.g. ["en"] or ["en", "zh", "vi"]
+    Returns (output_languages, output_fields_spec, auto_mode).
+    output_languages: e.g. ["en"] or ["en", "zh", "vi"]; in auto_mode it's just ["en"]
+        because the chosen target lang is decided at runtime by the AI.
     output_fields_spec: indented field lines to inject into the prompt JSON template
+    auto_mode: True when caller asked for AI-picked target language ("auto").
 
     Args:
-        target_languages: List of language codes (e.g. ["vi", "ja"]) or single string (backward compat)
+        target_languages: List of language codes, single string (backward compat), or "auto".
         length_guidance: Length instruction for content field
     """
-    # Normalize input to list
+    # Detect auto mode (string "auto" or list containing it)
+    auto_mode = False
+    if isinstance(target_languages, str) and is_auto_lang(target_languages):
+        auto_mode = True
+    elif isinstance(target_languages, list) and any(
+        is_auto_lang(t) for t in target_languages
+    ):
+        auto_mode = True
+
+    if auto_mode:
+        # In auto mode the per-summary target fields are filled by AI in the
+        # language it picks at the top-level `chosen_lang`. We always keep
+        # English as the baseline so dispatchers without target_language set
+        # still get readable content.
+        lines = [
+            '      "title_en": "English title (max 100 chars)",',
+            f'      "content_en": "English summary (3-4 sentences, {length_guidance})",',
+            '      "title_target": "title in the chosen language (max 100 chars)",',
+            f'      "content_target": "summary in the chosen language (3-4 sentences, {length_guidance})",',
+        ]
+        return ["en"], "\n".join(lines), True
+
+    # Normalize input to list (existing behaviour)
     if target_languages is None:
         langs = ["en"]
     elif isinstance(target_languages, str):
@@ -74,11 +106,13 @@ def _build_synth_lang_spec(
             f'      "content_{lang}": "{lang_name} summary (3-4 sentences, {length_guidance})",'
         )  # noqa: E501
 
-    return langs, "\n".join(lines)
+    return langs, "\n".join(lines), False
 
 
 # AI prompt: Let AI decide output count based on content diversity.
 # {output_fields_spec} is built dynamically per hook's target_language.
+# {auto_target_block} is empty in fixed-language mode; in auto mode it adds an
+# instruction telling the AI to choose one engaging target language for the batch.
 TOPIC_SYNTHESIS_PROMPT = """{tone_instruction}
 
 You are analyzing {count} news articles about {category} from the past few hours.
@@ -94,7 +128,7 @@ Your task:
    - Provide standalone value (not generic rehash)
    - Be 3-4 complete sentences in each required language (MINIMUM 50 characters per language)
    - Include a clear, descriptive title
-
+{auto_target_block}
 Decision guidelines:
 - If articles are very similar or redundant → generate FEWER summaries (minimum 1)
 - If articles cover multiple sub-topics or perspectives → generate MORE summaries (maximum 8)
@@ -105,7 +139,7 @@ Decision guidelines:
 Output format (JSON only, no other text):
 {{
   "analysis": "Brief explanation of what angles you identified and why you chose this number of summaries",
-  "num_summaries": <integer 1-8>,
+  "num_summaries": <integer 1-8>,{auto_target_field}
   "summaries": [
     {{
 {output_fields_spec}
@@ -122,6 +156,18 @@ CRITICAL LENGTH REQUIREMENTS:
 - Do NOT use fragments, bullet points, or incomplete sentences
 - Write full, coherent summaries with proper context and detail
 """
+
+
+def _auto_target_blocks() -> tuple[str, str]:
+    """Return (instruction_block, top_level_field_line) for auto-target mode."""
+    instr = (
+        "\n3. " + audience_pick_instruction() + "\n\n"
+        "Output the chosen ISO code (lowercase) at the top level under `chosen_lang`. "
+        "Then write `title_target` and `content_target` for every summary in that "
+        "language. Keep `title_en`/`content_en` as the English baseline.\n"
+    )
+    field = '\n  "chosen_lang": "<one language code from the allowed list>",'
+    return instr, field
 
 
 def _generate_synthetic_id(category: str, articles: list[dict]) -> str:
@@ -234,8 +280,11 @@ async def synthesize_topic_articles(
     # Build output language spec (en always present, plus target if configured)
     # Priority: target_languages (new) > target_language (deprecated)
     langs_input = target_languages if target_languages is not None else target_language
-    output_languages, output_fields_spec = _build_synth_lang_spec(
+    output_languages, output_fields_spec, auto_mode = _build_synth_lang_spec(
         langs_input, length_guidance
+    )
+    auto_target_block, auto_target_field = (
+        _auto_target_blocks() if auto_mode else ("", "")
     )
 
     # Prepare article metadata
@@ -269,6 +318,8 @@ async def synthesize_topic_articles(
         articles_json=articles_json,
         length_guidance=length_guidance,
         output_fields_spec=output_fields_spec,
+        auto_target_block=auto_target_block,
+        auto_target_field=auto_target_field,
     )
 
     lang_label = "+".join(output_languages)
@@ -307,9 +358,32 @@ async def synthesize_topic_articles(
         logger.warning(f"AI returned invalid summary count: {len(summaries)}")
         return []
 
+    # Auto mode: validate chosen_lang and expand title_target/content_target
+    # into title_{chosen}/content_{chosen} so downstream code is uniform.
+    auto_chosen_lang: str | None = None
+    if auto_mode:
+        raw_chosen = (result.get("chosen_lang") or "").strip().lower()
+        cleaned = "".join(c for c in raw_chosen if c.isalpha())[:2]
+        if cleaned not in LANG_NAMES:
+            logger.warning(
+                f"Auto-mode synthesis: invalid chosen_lang={raw_chosen!r}; "
+                f"falling back to en-only output"
+            )
+            cleaned = "en"
+        auto_chosen_lang = cleaned
+        if auto_chosen_lang != "en":
+            output_languages = ["en", auto_chosen_lang]
+            for s in summaries:
+                if isinstance(s, dict):
+                    if s.get("title_target") and not s.get(f"title_{auto_chosen_lang}"):
+                        s[f"title_{auto_chosen_lang}"] = s["title_target"]
+                    if s.get("content_target") and not s.get(f"content_{auto_chosen_lang}"):
+                        s[f"content_{auto_chosen_lang}"] = s["content_target"]
+
     logger.info(
         f"AI synthesis complete: {len(articles)} inputs → {len(summaries)} outputs "
-        f"({tokens_used} tokens). Analysis: {analysis[:100]}..."
+        f"({tokens_used} tokens){' [auto→' + auto_chosen_lang + ']' if auto_chosen_lang else ''}. "
+        f"Analysis: {analysis[:100]}..."
     )
 
     # Build synthetic article objects
@@ -317,12 +391,20 @@ async def synthesize_topic_articles(
     base_synth_id = _generate_synthetic_id(category, articles)
     source_article_ids = [a["id"] for a in articles]
 
-    # Target language for content_target alias (None if target == "en" or not set)
-    _target = (
-        target_language.lower()
-        if target_language and target_language.lower() != "en"
-        else None
-    )
+    # Target language for content_target alias.
+    # In auto mode: always use AI-picked chosen_lang (including "en") so content_target
+    # mirrors the chosen-language content — matching rewriter's effective_tgt_lang behavior.
+    # In fixed mode: only set when target_language differs from the English baseline.
+    if auto_chosen_lang:
+        _target: str | None = auto_chosen_lang
+    else:
+        _target = (
+            target_language.lower()
+            if target_language
+            and not is_auto_lang(target_language)
+            and target_language.lower() != "en"
+            else None
+        )
 
     for idx, summary in enumerate(summaries):
         # Validate: all required language fields must be present and non-trivial
@@ -369,6 +451,9 @@ async def synthesize_topic_articles(
         # content_target / title_target → target language content (empty if no target)
         synth["content_target"] = synth.get(f"content_{_target}", "") if _target else ""
         synth["title_target"] = synth.get(f"title_{_target}", "") if _target else ""
+        if auto_chosen_lang:
+            # Surface the AI's pick so dashboards/dispatch know which language was used
+            synth["ai_target_lang"] = auto_chosen_lang
 
         synthetic_articles.append(synth)
 

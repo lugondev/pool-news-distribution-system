@@ -225,9 +225,10 @@ function loadFilterOptions() {
         </div>
         <div class="form-row-2" id="ai-lang-row-edit-{{ ep.id }}" style="{{ 'display:none' if ep.ai_mode == 'off' else '' }}">
           <div class="form-group">
-            <label>Target Language <span class="hint">— rewrite: <code>ai_summary_target</code> · synthetic: <code>content_target</code></span></label>
+            <label>Target Language <span class="hint">— populates <code>content_target</code> + <code>title_target</code> in both rewrite/synthetic. <em>Auto-detect</em>: AI picks per article (see <code>ai_target_lang</code>)</span></label>
             <select name="target_language">
               <option value="" {{ 'selected' if not ep.target_language }}>— Origin language only —</option>
+              <option value="auto" {{ 'selected' if ep.target_language == 'auto' }}>Auto-detect (AI chooses)</option>
               <option value="en" {{ 'selected' if ep.target_language == 'en' }}>English (en)</option>
               <option value="vi" {{ 'selected' if ep.target_language == 'vi' }}>Vietnamese (vi)</option>
               <option value="ja" {{ 'selected' if ep.target_language == 'ja' }}>Japanese (ja)</option>
@@ -400,9 +401,10 @@ function loadFilterOptions() {
         </div>
         <div class="form-row-2" id="ai-lang-row-add">
           <div class="form-group">
-            <label>Target Language <span class="hint">— rewrite: <code>ai_summary_target</code> · synthetic: <code>content_target</code></span></label>
+            <label>Target Language <span class="hint">— populates <code>content_target</code> + <code>title_target</code> in both rewrite/synthetic. <em>Auto-detect</em>: AI picks per article (see <code>ai_target_lang</code>)</span></label>
             <select name="target_language">
               <option value="" selected>— Origin language only —</option>
+              <option value="auto">Auto-detect (AI chooses)</option>
               <option value="en">English (en)</option>
               <option value="vi">Vietnamese (vi)</option>
               <option value="ja">Japanese (ja)</option>

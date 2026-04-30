@@ -144,6 +144,54 @@ LANG_NAMES: dict[str, str] = {
     "it": "Italian",
 }
 
+# Sentinel value: when target_language=="auto", AI picks the most engaging
+# target language from LANG_NAMES based on content topic, source region,
+# and likely audience appeal.
+AUTO_LANG = "auto"
+
+
+def is_auto_lang(value: str | None) -> bool:
+    return bool(value) and value.lower() == AUTO_LANG
+
+
+def _auto_lang_candidates() -> str:
+    """Comma-separated lang codes the AI may choose from in auto mode."""
+    return ", ".join(f"{code} ({name})" for code, name in LANG_NAMES.items())
+
+
+def audience_pick_instruction() -> str:
+    """Audience-targeting instruction for auto language selection.
+
+    Pick OUTPUT language by who NEEDS this content as readers, not by what
+    language the input articles are in. Source language is explicitly NOT a
+    signal — wire-service / aggregator articles often arrive in English
+    regardless of the audience the story actually serves.
+    """
+    candidates = _auto_lang_candidates()
+    return f"""LANGUAGE SELECTION — pick the AUDIENCE for this content, not its translation:
+
+Ask: which readers are this story FOR? Whose lives, region, or community
+does it concern most directly? Pick that audience's primary language.
+Source-article language is NOT a signal — ignore it.
+
+Decision rules:
+1. Story anchored to a specific country, city, region, or cultural community
+   → that locale's primary language. Examples:
+     • Madrid rent crisis           → es
+     • Samsung / K-pop / Seoul news → ko
+     • Vietnam stock market         → vi
+     • Tokyo / Japanese politics    → ja
+     • Berlin election              → de
+     • French labour reform         → fr
+     • Brazilian Amazon policy      → pt
+2. Story is genuinely global/placeless (AI breakthroughs, climate, crypto,
+   pan-international macro) with no specific audience anchor → en.
+3. When borderline between en and a more specific locale, prefer the locale.
+   English speakers can usually find this content already; the locale's
+   audience often cannot. Default to en ONLY when no locale fits.
+
+Allowed codes: {candidates}"""
+
 SUMMARIZE_PROMPT = """{tone_instruction}
 
 You are writing for readers who have NOT read the original article. Deliver the complete information clearly so they understand the story without needing the source.
@@ -178,7 +226,20 @@ def _build_lang_spec(
     """Return (lang_count, lang_requirements, lang_json_format) for the prompt."""
     origin_name = LANG_NAMES.get(origin_lang, origin_lang.upper())
 
-    if target_lang and target_lang != origin_lang:
+    if is_auto_lang(target_lang):
+        count = "two summaries"
+        reqs = (
+            f"- {origin_name}: {length_guidance}\n"
+            f"- Auto-picked target language: {length_guidance}\n\n"
+            f"  {audience_pick_instruction()}\n"
+        )
+        fmt = (
+            f"Respond in JSON format:\n"
+            f'{{"{origin_lang}": "{origin_name} summary here",'
+            f' "chosen_lang": "<one of the allowed codes>",'
+            f' "target": "summary in the chosen language"}}'
+        )
+    elif target_lang and target_lang != origin_lang:
         target_name = LANG_NAMES.get(target_lang, target_lang.upper())
         count = "two summaries"
         reqs = (
@@ -285,15 +346,29 @@ async def rewrite_article(
     tokens = response.usage.total_tokens if response.usage else 0
 
     summaries: dict[str, str] = {}
-    
+
     # Validate origin language summary exists and not empty
     origin_summary = result.get(origin_lang, "").strip()
     if not origin_summary:
         raise ValueError(f"AI returned empty summary for {origin_lang}")
     summaries[origin_lang] = origin_summary
-    
-    # Validate target language summary if requested
-    if target_lang and target_lang != origin_lang:
+
+    if is_auto_lang(target_lang):
+        chosen = (result.get("chosen_lang") or "").strip().lower()[:5]
+        # Strip non-letters to be safe ("en-US" → "en", noise → "")
+        chosen = "".join(c for c in chosen if c.isalpha())[:2]
+        target_text = (result.get("target") or "").strip()
+        if not chosen or chosen not in LANG_NAMES:
+            raise ValueError(
+                f"AI auto-mode returned invalid chosen_lang={chosen!r}; "
+                f"expected one of {sorted(LANG_NAMES)}"
+            )
+        if not target_text:
+            raise ValueError(f"AI auto-mode returned empty 'target' for chosen={chosen}")
+        summaries[chosen] = target_text
+        # Tag so callers know which language was selected
+        summaries["__auto_chosen__"] = chosen
+    elif target_lang and target_lang != origin_lang:
         target_summary = result.get(target_lang, "").strip()
         if not target_summary:
             raise ValueError(f"AI returned empty summary for {target_lang}")
@@ -550,10 +625,20 @@ async def _run_ai_rewrite(
     if ws_manager:
         asyncio.create_task(ws_manager.emit_ai_success(article["id"], title, ai_duration_ms))
 
+    # Detach auto-mode metadata so it isn't persisted as a fake "ai_summary___auto_chosen__"
+    auto_chosen = summaries.pop("__auto_chosen__", None)
+    effective_tgt_lang = auto_chosen if auto_chosen else tgt_lang
+
     await update_article_ai(redis, article["id"], summaries)
     if config_id or tgt_lang:
         await update_article_ai_config(redis, article["id"], summaries, config_id or "builtin")
         await redis.hset(f"news:{article['id']}", dedup_key, "1")
+    if auto_chosen:
+        # Persist the AI's choice so dashboards/dispatch can show which language was picked
+        await redis.hset(f"news:{article['id']}", "ai_target_lang", auto_chosen)
+        logger.info(
+            f"Auto-detect: article {article['id']} → chosen lang={auto_chosen} (origin={origin_lang})"
+        )
     await log_ai_usage(article["id"], model, tokens)
     if title and perform_ai_dedup:
         await register_ai_simhash(redis, title)
@@ -562,7 +647,16 @@ async def _run_ai_rewrite(
     for lang, text in summaries.items():
         article[f"ai_summary_{lang}"] = text
     article["ai_summary_origin"] = summaries.get(origin_lang, "")
-    article["ai_summary_target"] = summaries.get(tgt_lang, "") if tgt_lang else ""
+    target_text = summaries.get(effective_tgt_lang, "") if effective_tgt_lang else ""
+    article["ai_summary_target"] = target_text
+    # Aliases so templates can use the same field names across rewrite/synthetic/debate.
+    # Only set when a target language exists — keeps `target_language=""` (origin-only)
+    # behaviour identical to before.
+    if effective_tgt_lang:
+        article["content_target"] = target_text
+        article["title_target"] = article.get("title", "")
+    if auto_chosen:
+        article["ai_target_lang"] = auto_chosen
     return article
 
 

@@ -40,8 +40,8 @@
       <code>summary</code> <code>content</code> <code>lang</code> <code>declared_lang</code>
       <code>published_at</code> <code>fetched_at</code> <code>ai_status</code><br>
       <code>ai_summary_vi</code> <code>ai_summary_en</code> <code>ai_summary_origin</code>
-      <code>ai_summary_target</code>
-      <span style="color:#6b7280;font-size:9px"> ← <code>ai_summary_target</code> only populated when <em>Target Language</em> is configured</span>
+      <code>ai_summary_target</code> <code>content_target</code> <code>title_target</code> <code>ai_target_lang</code>
+      <span style="color:#6b7280;font-size:9px"> ← <code>ai_summary_target</code> / <code>content_target</code> only populated when <em>Target Language</em> is configured (<code>content_target</code> is an alias for <code>ai_summary_target</code> in rewrite mode). With <em>Auto-detect</em>, <code>ai_target_lang</code> shows which code the AI picked.</span>
     </div>
 
     <!-- Off (raw) mode fields -->
@@ -59,9 +59,15 @@
       <code>title_vi</code> <code>title_en</code> <code>content_vi</code> <code>content_en</code>
       <code>angle</code> <code>source_article_ids</code> <code>num_source_articles</code>
       <code>ai_model</code> <code>ai_tokens</code><br>
-      <code>content_target</code> <code>title_target</code>
-      <span style="color:#6b7280;font-size:9px"> ← alias for target language content (empty if no <em>Target Language</em> set)</span>
+      <code>content_target</code> <code>title_target</code> <code>ai_target_lang</code>
+      <span style="color:#6b7280;font-size:9px"> ← alias for target language content (empty if no <em>Target Language</em> set). With <em>Auto-detect</em>, <code>ai_target_lang</code> shows which code the AI picked.</span>
       <span style="color:#6b7280;font-size:9px;display:block"><code>source_name</code>, <code>url</code>, <code>ai_summary_*</code> not available — use <code>content_en</code> / <code>content_vi</code> / <code>content_target</code></span>
+    </div>
+
+    <div style="margin-top:6px;padding:6px 8px;background:rgba(34,197,94,0.08);border-left:2px solid #22c55e;border-radius:3px">
+      <strong style="color:#22c55e">Cross-mode tip:</strong>
+      <code>content_target</code> + <code>title_target</code> + <code>ai_target_lang</code> work in
+      <em>both rewrite and synthetic</em> when <em>Target Language</em> is set — pick these fields if you want one Fields list to handle either AI mode without changes.
     </div>
 
   </div>
@@ -96,7 +102,10 @@
       <code>{{ "{{" }} ai_summary_en {{ "}}" }}</code>
       <code>{{ "{{" }} ai_summary_origin {{ "}}" }}</code>
       <code>{{ "{{" }} ai_summary_target {{ "}}" }}</code>
-      <span style="color:#6b7280;font-size:9px"> ← requires <em>Target Language</em> to be set</span>
+      <code>{{ "{{" }} content_target {{ "}}" }}</code>
+      <code>{{ "{{" }} title_target {{ "}}" }}</code>
+      <code>{{ "{{" }} ai_target_lang {{ "}}" }}</code>
+      <span style="color:#6b7280;font-size:9px"> ← requires <em>Target Language</em> to be set. <code>content_target</code> aliases <code>ai_summary_target</code> for cross-mode templates. Auto-detect: <code>ai_target_lang</code> = the code AI chose.</span>
     </div>
 
     <!-- Off (raw) mode template vars -->
@@ -131,7 +140,17 @@
     <div style="margin-top:6px">
       <strong style="color:#94a3b8">Conditionals &amp; fallbacks:</strong>
       <code>{{ "{%" }} if type == 'synthetic' {{ "%}" }}...{{ "{%" }} endif {{ "%}" }}</code>
-      <code>{{ "{{" }} content_en|default(ai_summary_en) {{ "}}" }}</code>
+      <code>{{ "{{" }} content_target|default(ai_summary_origin) {{ "}}" }}</code>
+    </div>
+
+    <div style="margin-top:6px;padding:6px 8px;background:rgba(34,197,94,0.08);border-left:2px solid #22c55e;border-radius:3px">
+      <strong style="color:#22c55e">One template for all modes:</strong> when <em>Target Language</em> is set
+      (any code or <em>Auto-detect</em>), <code>{{ "{{" }} content_target {{ "}}" }}</code> +
+      <code>{{ "{{" }} title_target {{ "}}" }}</code> are populated in <em>both rewrite and synthetic</em>.
+      Use <code>{{ "{{" }} ai_target_lang {{ "}}" }}</code> to read the language code AI chose.<br>
+      <span style="color:#6b7280;font-size:9px;display:block;margin-top:2px">Example:
+        <code>{"lang":"{{ "{{" }} ai_target_lang|default(lang) {{ "}}" }}", "body":"{{ "{{" }} content_target|default(ai_summary_origin) {{ "}}" }}"}</code>
+      </span>
     </div>
 
   </div>

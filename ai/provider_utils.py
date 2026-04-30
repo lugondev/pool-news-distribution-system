@@ -117,6 +117,8 @@ SCHEMA_TOPIC_SYNTHESIS = {
     "properties": {
         "analysis": {"type": "string"},
         "num_summaries": {"type": "integer"},
+        # chosen_lang only present in auto-target mode; harmless when fixed-language.
+        "chosen_lang": {"type": "string"},
         "summaries": {
             "type": "array",
             "items": {

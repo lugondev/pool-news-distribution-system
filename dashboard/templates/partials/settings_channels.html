@@ -378,9 +378,10 @@ function cloneChannel(id) {
         </div>
         <div class="form-row-2" id="ai-lang-row-ch-edit-{{ ch.id }}" style="{{ 'display:none' if (ch.ai_mode or 'off') == 'off' else '' }}">
           <div class="form-group">
-            <label>Target Language</label>
+            <label>Target Language <span class="hint">— empty: origin only · <em>Auto-detect</em>: AI picks per article (see <code>ai_target_lang</code>)</span></label>
             <select name="target_language">
               <option value="" {{ 'selected' if not ch.target_language }}>— Origin language only —</option>
+              <option value="auto" {{ 'selected' if ch.target_language == 'auto' }}>Auto-detect (AI chooses)</option>
               <option value="en" {{ 'selected' if ch.target_language == 'en' }}>English (en)</option>
               <option value="vi" {{ 'selected' if ch.target_language == 'vi' }}>Vietnamese (vi)</option>
               <option value="ja" {{ 'selected' if ch.target_language == 'ja' }}>Japanese (ja)</option>
@@ -604,9 +605,10 @@ function cloneChannel(id) {
         </div>
         <div class="form-row-2" id="ai-lang-row-ch-add" style="display:none">
           <div class="form-group">
-            <label>Target Language</label>
+            <label>Target Language <span class="hint">— empty: origin only · <em>Auto-detect</em>: AI picks per article (see <code>ai_target_lang</code>)</span></label>
             <select id="ch-add-target-lang" name="target_language">
               <option value="" selected>— Origin language only —</option>
+              <option value="auto">Auto-detect (AI chooses)</option>
               <option value="en">English (en)</option>
               <option value="vi">Vietnamese (vi)</option>
               <option value="ja">Japanese (ja)</option>

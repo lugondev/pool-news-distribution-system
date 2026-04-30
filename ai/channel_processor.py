@@ -16,7 +16,16 @@ from typing import Any
 
 import httpx
 from openai import APITimeoutError, RateLimitError
-from ai.rewriter import rewrite_article, LANG_NAMES, TONE_PROMPTS, _load_ai_config, get_openai_client
+from ai.rewriter import (
+    rewrite_article,
+    LANG_NAMES,
+    TONE_PROMPTS,
+    _load_ai_config,
+    get_openai_client,
+    AUTO_LANG,
+    is_auto_lang,
+    audience_pick_instruction,
+)
 from ai.provider_utils import build_response_format, parse_ai_json
 from ai.style_transform import PLATFORM_PRESETS, OUTPUT_FORMAT_INSTRUCTIONS
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -55,16 +64,42 @@ def _build_rewrite_style_prompt(
     
     # Format instruction
     format_instruction = OUTPUT_FORMAT_INSTRUCTIONS.get(output_format, OUTPUT_FORMAT_INSTRUCTIONS["summary"])
-    
-    # Language
-    lang_name = LANG_NAMES.get(target_lang, target_lang.upper())
-    
+
     # Article content
     title = article.get("title", "")
     content = article.get("content") or article.get("summary", "")
     url = article.get("url", "")
     source = article.get("source_name", "")
-    
+
+    if is_auto_lang(target_lang):
+        prompt = f"""You are rewriting this article. First, decide the OUTPUT language.
+
+{audience_pick_instruction()}
+
+TONE & STYLE: {tone_instruction}
+
+OUTPUT FORMAT: {format_instruction}
+
+CONSTRAINTS:
+- Maximum styled length: {max_length} characters
+- {"Include 1-3 relevant hashtags" if include_hashtags else "Do NOT include hashtags"}
+- {"Include the source URL at the end" if include_link else "Do NOT include any URLs"}
+
+SOURCE ARTICLE:
+Title: {title}
+Source: {source}
+URL: {url}
+Content: {content[:2000]}
+
+Respond in JSON. Use the language you picked for BOTH the rewrite and the styled output.
+
+{{"chosen_lang": "<one of the allowed codes>", "ai_summary_target": "full rewritten article in the chosen language", "styled_content": "formatted output following OUTPUT FORMAT, ≤ {max_length} chars", "hashtags": ["tag1", "tag2"], "char_count": 123}}
+
+IMPORTANT: styled_content must be at most {max_length} characters. Count carefully."""
+        return prompt
+
+    # Fixed-language mode (existing behavior)
+    lang_name = LANG_NAMES.get(target_lang, target_lang.upper())
     prompt = f"""You are rewriting this article into {lang_name}.
 
 TONE & STYLE: {tone_instruction}
@@ -90,7 +125,7 @@ Respond in JSON with TWO outputs:
 {{"ai_summary_{target_lang}": "full rewritten content here", "styled_content": "formatted output here", "hashtags": ["tag1", "tag2"], "char_count": 123}}
 
 IMPORTANT: styled_content must be at most {max_length} characters. Count carefully."""
-    
+
     return prompt
 
 
@@ -125,8 +160,9 @@ async def process_rewrite(
         Article dict with ai_summary_{lang} and styled_content
     """
     target_lang = channel.get("target_language", "en")
+    auto_target = is_auto_lang(target_lang)
     ai_config_id = channel.get("ai_config_id", "")
-    
+
     # Determine if we need style formatting
     needs_style = (
         platform != "custom"
@@ -134,12 +170,14 @@ async def process_rewrite(
         or (style_config or {}).get("custom_prompt")
         or client_style_prompt
     )
-    
-    # Cache key includes output_format if styling is needed
+
+    # Cache key. In auto mode we cache under a literal "auto" segment so that the
+    # first AI choice wins for the TTL — both deterministic and quota-friendly.
+    cache_lang_segment = AUTO_LANG if auto_target else target_lang
     if needs_style:
-        cache_key = f"channel:{channel['id']}:rewrite:{article['id']}:{target_lang}:{output_format}"
+        cache_key = f"channel:{channel['id']}:rewrite:{article['id']}:{cache_lang_segment}:{output_format}"
     else:
-        cache_key = f"channel:{channel['id']}:rewrite:{article['id']}:{target_lang}"
+        cache_key = f"channel:{channel['id']}:rewrite:{article['id']}:{cache_lang_segment}"
     
     # Check cache
     cached = await redis.get(cache_key)
@@ -177,16 +215,29 @@ async def process_rewrite(
             client_style_prompt=client_style_prompt,
             channel=channel,
         )
-        schema = {
-            "type": "object",
-            "properties": {
-                f"ai_summary_{target_lang}": {"type": "string"},
-                "styled_content": {"type": "string"},
-                "hashtags": {"type": "array", "items": {"type": "string"}},
-                "char_count": {"type": "integer"},
-            },
-            "required": [f"ai_summary_{target_lang}", "styled_content"],
-        }
+        if auto_target:
+            schema = {
+                "type": "object",
+                "properties": {
+                    "chosen_lang": {"type": "string"},
+                    "ai_summary_target": {"type": "string"},
+                    "styled_content": {"type": "string"},
+                    "hashtags": {"type": "array", "items": {"type": "string"}},
+                    "char_count": {"type": "integer"},
+                },
+                "required": ["chosen_lang", "ai_summary_target", "styled_content"],
+            }
+        else:
+            schema = {
+                "type": "object",
+                "properties": {
+                    f"ai_summary_{target_lang}": {"type": "string"},
+                    "styled_content": {"type": "string"},
+                    "hashtags": {"type": "array", "items": {"type": "string"}},
+                    "char_count": {"type": "integer"},
+                },
+                "required": [f"ai_summary_{target_lang}", "styled_content"],
+            }
     else:
         # Simple rewrite without styling
         result = await rewrite_article(
@@ -221,30 +272,51 @@ async def process_rewrite(
         
         result = parse_ai_json(content)
         tokens = response.usage.total_tokens if response.usage else 0
-        
-        # Enrich article
-        article[f"ai_summary_{target_lang}"] = result.get(f"ai_summary_{target_lang}", "")
+
+        if auto_target:
+            raw_chosen = (result.get("chosen_lang") or "").strip().lower()
+            chosen = "".join(c for c in raw_chosen if c.isalpha())[:2]
+            if chosen not in LANG_NAMES:
+                raise ValueError(
+                    f"AI auto-mode returned invalid chosen_lang={raw_chosen!r}; "
+                    f"expected one of {sorted(LANG_NAMES)}"
+                )
+            effective_lang = chosen
+            ai_summary_text = result.get("ai_summary_target", "")
+            article["ai_target_lang"] = chosen
+            logger.info(
+                f"Channel {channel['id']}: auto-detect picked '{chosen}' for {article['id']}"
+            )
+        else:
+            effective_lang = target_lang
+            ai_summary_text = result.get(f"ai_summary_{target_lang}", "")
+
+        # Enrich article (always store under the effective language code)
+        article[f"ai_summary_{effective_lang}"] = ai_summary_text
         article["styled_content"] = result.get("styled_content", "")
         article["styled_hashtags"] = result.get("hashtags", [])
         article["styled_char_count"] = result.get("char_count", 0)
         article["ai_status"] = "done"
         article["styled_tokens"] = tokens
-        
+
         # Backward compatibility aliases
         article["content_target"] = article["styled_content"]  # For old templates
-        article[f"title_target"] = article.get("title", "")  # For completeness
-        
-        # Cache result (1 hour TTL)
+        article["title_target"] = article.get("title", "")  # For completeness
+
+        # Cache result (1 hour TTL). For auto mode the chosen lang is also stored
+        # so cache hits restore article["ai_target_lang"].
         import json
         cache_data = {
-            f"ai_summary_{target_lang}": article[f"ai_summary_{target_lang}"],
+            f"ai_summary_{effective_lang}": ai_summary_text,
             "styled_content": article["styled_content"],
             "styled_hashtags": article["styled_hashtags"],
             "styled_char_count": article["styled_char_count"],
             "content_target": article["styled_content"],  # Backward compat alias
         }
+        if auto_target:
+            cache_data["ai_target_lang"] = effective_lang
         await redis.setex(cache_key, 3600, json.dumps(cache_data))
-        
+
         logger.info(f"Channel {channel['id']}: rewrite+style done for {article['id']} ({tokens} tokens)")
         return article
         
