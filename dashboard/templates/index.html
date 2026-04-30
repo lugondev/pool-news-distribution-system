@@ -401,6 +401,33 @@
 
   <div id="modal-container"></div>
   <script>
+    window.copyArticleLink = function(btn) {
+      var url = btn.getAttribute('data-copy-url') || '';
+      if (!url) return;
+      if (url.charAt(0) === '/') url = window.location.origin + url;
+      var orig = btn.dataset.origText || btn.textContent;
+      btn.dataset.origText = orig;
+      var done = function(text) {
+        btn.textContent = text;
+        btn.disabled = true;
+        setTimeout(function() {
+          btn.textContent = orig; btn.disabled = false;
+        }, 1500);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(
+          function() { done('✓ Copied'); },
+          function() { done('✗ Failed'); }
+        );
+      } else {
+        var ta = document.createElement('textarea');
+        ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); done('✓ Copied'); }
+        catch (_) { done('✗ Failed'); }
+        document.body.removeChild(ta);
+      }
+    };
     window.closeArticleModal = function() {
       if (window.__modalXhr) { try { window.__modalXhr.abort(); } catch (_) {} }
       var c = document.getElementById('modal-container');

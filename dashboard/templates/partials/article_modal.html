@@ -98,6 +98,13 @@
           Open original ↗
         </a>
       {% endif %}
+      {% if article.url or is_synthetic %}
+        <button class="btn btn-secondary" type="button"
+                data-copy-url="{% if is_synthetic %}/article/{{ article.id }}{% else %}{{ article.url }}{% endif %}"
+                onclick="window.copyArticleLink(this)">
+          📋 Copy link
+        </button>
+      {% endif %}
       {% if is_synthetic %}
         <a class="btn btn-secondary" href="/article/{{ article.id }}">
           View full detail →
