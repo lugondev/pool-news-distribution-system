@@ -17,6 +17,7 @@ Redis keys:
 import hashlib
 import json
 import logging
+import math
 import secrets
 import time
 from datetime import datetime, timezone
@@ -27,7 +28,7 @@ from pydantic import BaseModel, Field
 from auth import require_role
 from dashboard.config_io import get_channels_config, get_content_channels, read_settings, save_content_channels
 from dashboard.redis_state import get_redis
-from storage.redis_store import get_articles_batch
+from storage.redis_store import get_articles_batch, get_latest_articles
 from storage.sqlite_stats import log_channel_request
 from webhook.filters import passes_filter
 from webhook.payload import build_payload
@@ -582,6 +583,135 @@ async def channel_feed(
             channel_id=ch_id,
             client_id=client_id,
             endpoint="/feed",
+            method="GET",
+            status_code=500,
+            auth_method=auth_method,
+            items_count=0,
+            duration_ms=duration_ms,
+            error_msg=str(e),
+        )
+        raise
+
+
+# ── News endpoint (page-based browse, no AI) ───────────────────────────────
+
+
+@router.get("/channels/{ch_id}/news", summary="Browse channel articles (page-based, no AI)")
+async def channel_news(
+    ch_id: str,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
+    source: str | None = Query(default=None, description="Filter by source ID"),
+    category: str | None = Query(default=None, description="Filter by category"),
+    lang: str | None = Query(default=None, description="Filter by language (ISO 639-1)"),
+    article_type: str | None = Query(default=None, description="original | synthetic"),
+    x_api_key: str = Header(alias="X-API-Key", default=""),
+    x_client_id: str = Header(alias="X-Client-ID", default=""),
+):
+    """
+    Browse articles via this channel — page-based pagination, no AI processing.
+
+    Mirrors `/api/news` query params but authenticates via channel API key
+    instead of session login. No cursor / delivered tracking.
+
+    Channel filter config (filter_categories, filter_sources,
+    filter_article_types) is enforced as a guard rail — query params can
+    only narrow within the channel scope.
+    """
+    start_time = time.time()
+    client_id = x_client_id.strip()  # optional, for log attribution only
+    auth_method = "unknown"
+    try:
+        ch, auth_method = _auth_channel(ch_id, x_api_key)
+        redis = get_redis()
+
+        has_channel_filter = (
+            (ch.get("filter_categories_mode", "all") != "all" and ch.get("filter_categories"))
+            or (ch.get("filter_sources_mode", "all") != "all" and ch.get("filter_sources"))
+            or (ch.get("filter_article_types_mode", "all") != "all" and ch.get("filter_article_types"))
+        )
+        needs_scan = bool(lang or has_channel_filter)
+
+        if not needs_scan:
+            offset = (page - 1) * limit
+            articles, total = await get_latest_articles(
+                redis,
+                limit=limit,
+                offset=offset,
+                source_id=source or None,
+                category=category or None,
+                article_type=article_type or None,
+            )
+        else:
+            FILTER_SCAN_LIMIT = 500
+            articles_all, _ = await get_latest_articles(
+                redis,
+                limit=FILTER_SCAN_LIMIT,
+                offset=0,
+                source_id=source or None,
+                category=category or None,
+                article_type=article_type or None,
+            )
+            if lang:
+                articles_all = [a for a in articles_all if a.get("lang") == lang]
+            if has_channel_filter:
+                articles_all = [a for a in articles_all if passes_filter(a, ch)]
+            total = len(articles_all)
+            slice_start = (page - 1) * limit
+            articles = articles_all[slice_start: slice_start + limit]
+
+        total_pages = max(1, math.ceil(total / limit)) if total else 1
+        response_data = {
+            "articles": articles,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total,
+                "total_pages": total_pages,
+                "has_prev": page > 1,
+                "has_next": page < total_pages,
+            },
+            "filters": {
+                "source": source,
+                "category": category,
+                "lang": lang,
+                "article_type": article_type,
+            },
+        }
+
+        duration_ms = int((time.time() - start_time) * 1000)
+        await log_channel_request(
+            channel_id=ch_id,
+            client_id=client_id,
+            endpoint="/news",
+            method="GET",
+            status_code=200,
+            auth_method=auth_method,
+            items_count=len(articles),
+            duration_ms=duration_ms,
+            response_body=_serialize_response(response_data),
+        )
+        return response_data
+    except HTTPException as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        await log_channel_request(
+            channel_id=ch_id,
+            client_id=client_id,
+            endpoint="/news",
+            method="GET",
+            status_code=e.status_code,
+            auth_method=auth_method,
+            items_count=0,
+            duration_ms=duration_ms,
+            error_msg=e.detail if hasattr(e, "detail") else str(e),
+        )
+        raise
+    except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        await log_channel_request(
+            channel_id=ch_id,
+            client_id=client_id,
+            endpoint="/news",
             method="GET",
             status_code=500,
             auth_method=auth_method,
