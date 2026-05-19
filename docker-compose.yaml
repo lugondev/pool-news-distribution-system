@@ -10,7 +10,7 @@
 #
 # Backup strategy:
 #   - SQLite       → Litestream (continuous, runs inside `app` container)
-#   - Redis RDB    → `redis-backup` sidecar (cron BGSAVE + s3 sync)
+#   - Redis RDB    → in-volume snapshots (save 900/300/60 tiers) + AOF
 #   - config/      → committed to Git (Settings UI changes show up as diffs)
 
 services:
@@ -81,30 +81,6 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
-
-  # ─── Redis backup sidecar (BGSAVE + S3 sync) ───────────────────────────────
-  # Runs a tiny shell loop. See scripts/backup-redis.sh for the policy.
-  redis-backup:
-    image: amazon/aws-cli:2.15.30
-    restart: unless-stopped
-    depends_on:
-      redis:
-        condition: service_healthy
-    entrypoint: ["/bin/sh", "/scripts/backup-redis.sh"]
-    environment:
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      BACKUP_INTERVAL_SECONDS: ${REDIS_BACKUP_INTERVAL_SECONDS:-3600}
-      BACKUP_RETENTION_DAYS: ${REDIS_BACKUP_RETENTION_DAYS:-7}
-      S3_BUCKET: ${LITESTREAM_BUCKET:-}
-      S3_PREFIX: ${REDIS_BACKUP_PREFIX:-news-aggregator/redis}
-      S3_ENDPOINT: ${LITESTREAM_ENDPOINT:-}
-      AWS_ACCESS_KEY_ID: ${LITESTREAM_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${LITESTREAM_SECRET_ACCESS_KEY:-}
-      AWS_DEFAULT_REGION: ${LITESTREAM_REGION:-auto}
-    volumes:
-      - redis-data:/data:ro
-      - ./scripts:/scripts:ro
 
   # ─── Weaviate (vector DB for RAG features) — OPTIONAL ──────────────────────
   # Heavy: ~300MB RAM idle. Enable with: `docker compose --profile rag up -d`
