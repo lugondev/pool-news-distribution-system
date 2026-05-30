@@ -6,12 +6,14 @@ Automated multilingual news aggregation pipeline with AI-powered summaries and a
 
 ## Features
 
-- **Multi-source RSS crawling** — 10+ feeds across English, Vietnamese, Japanese, and Korean
+- **Multi-source RSS crawling** — hundreds of feeds across English, Vietnamese, Japanese, and Korean, with per-domain rate limiting and anti-ban measures
 - **SimHash deduplication** — filters near-duplicate articles using Hamming distance
-- **AI summaries** — bilingual (Vietnamese + English) summaries via OpenAI-compatible API
-- **Real-time dashboard** — HTMX-powered UI with auto-refresh, source/category management
-- **Webhook dispatch** — pushes processed articles to external endpoints with retry
-- **JSON API** — `/api/articles`, `/api/stats`, `/api/sources`, `/api/categories`
+- **AI processing** — one-to-one rewrites, multi-article topic synthesis, and 4-agent debate, via any OpenAI-compatible API
+- **Content channels** — pull-based API for bots/publishers with per-client cursors, on-demand AI, and platform presets (Twitter/Facebook/blog/Telegram)
+- **Dispatch** — webhooks (with retry), Telegram, and cron-based scheduled delivery
+- **Long-form & social** — social-article generator (2000–3000 words) and persona-driven social posts
+- **Real-time dashboard** — HTMX-powered UI with auto-refresh, source/category/webhook management
+- **JSON API** — articles, stats, sources, categories, channels, logs, and crawl tracing
 
 ## Quick Start
 
@@ -30,17 +32,30 @@ pip install -r requirements.txt
 
 # Configure environment
 cp .env.example .env
-# Edit .env with your API keys
+# Edit .env (Redis URL, ports, optional backup/Supabase settings)
+
+# Configure app data from the bundled examples
+cp config/settings.yaml.example   config/settings.yaml
+cp config/sources.yaml.example    config/sources.yaml
+cp config/social_agents.yaml.example config/social_agents.yaml
+cp config/sim_personas.yaml.example  config/sim_personas.yaml
 ```
+
+> **AI credentials are NOT environment variables.** API key, base URL, and
+> model are configured in the dashboard (Settings → AI providers) and stored in
+> `config/settings.yaml`. Start the app first, then add a provider in the UI.
 
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `OPENAI_API_KEY` | API key for OpenAI-compatible endpoint | — |
-| `OPENAI_BASE_URL` | API base URL | `https://api.openai.com/v1` |
 | `REDIS_URL` | Redis connection URL | `redis://localhost:6379/0` |
 | `SQLITE_PATH` | Path to SQLite stats DB | `./data/stats.db` |
+| `APP_PORT` | Dashboard port | `8000` |
+| `CORS_ALLOW_ORIGINS` | Comma-separated origins for a split frontend | _(empty)_ |
+| `CONFIG_BACKEND` | Config storage: `yaml` (default) or `db` (Supabase) | `yaml` |
+
+See `.env.example` for the full list (Litestream backup, Supabase, Weaviate).
 
 ### Run
 
@@ -55,7 +70,7 @@ Dashboard available at [http://localhost:8000](http://localhost:8000).
 ```
 ┌─────────────┐    ┌──────────┐    ┌───────┐    ┌──────────┐    ┌──────────┐
 │  RSS Feeds  │───▶│  Parser  │───▶│ Dedup │───▶│  Redis   │───▶│ AI Batch │
-│  (11 feeds) │    │ + detect │    │SimHash│    │ 24h TTL  │    │ Rewriter │
+│  (many)     │    │ + detect │    │SimHash│    │ 24h TTL  │    │ Rewriter │
 └─────────────┘    └──────────┘    └───────┘    └───────┘──┘    └────┬─────┘
                                                      │               │
                                                      ▼               ▼
@@ -65,12 +80,17 @@ Dashboard available at [http://localhost:8000](http://localhost:8000).
                                                 └─────────┘    └──────────┘
 ```
 
-**Scheduler jobs** (APScheduler, async):
+**Scheduler jobs** (APScheduler, async — defaults, all tunable in `settings.yaml`):
 
 | Job | Interval | Description |
 |-----|----------|-------------|
-| Crawl | 10 min | Fetch all enabled RSS sources concurrently (semaphore=20) |
-| AI Rewrite | 5 min | Process up to 5 pending articles, generate summaries, dispatch webhooks |
+| Crawl | 3 min | Fetch enabled RSS sources in staggered groups, per-domain rate-limited |
+| AI Rewrite | 2 min | Process pending articles → summaries → dispatch webhooks/Telegram |
+| Topic synthesis | 10 min | Group by category → AI synthesizes multi-angle summaries (optional) |
+| Debate | 30 min | 4-agent debate (optimist/pessimist/analyst/skeptic) on big stories (optional) |
+| Scheduled webhook | 1 min | Execute cron-based webhook schedules from SQLite |
+| Social article | 6 h | Generate long-form articles with image prompts (optional) |
+| Log cleanup | 5 h | Trim log tables older than 5h once they exceed 200 rows |
 
 **Storage:**
 
@@ -81,10 +101,12 @@ Dashboard available at [http://localhost:8000](http://localhost:8000).
 
 ```
 ├── main.py                  # Entry point, lifespan, dependency wiring
-├── scheduler.py             # APScheduler job definitions
+├── jobs/
+│   └── scheduler.py         # APScheduler job definitions
 ├── config/
-│   ├── settings.yaml        # Tunable parameters (intervals, model, webhooks)
-│   └── sources.yaml         # RSS source definitions
+│   ├── *.yaml.example       # Bundled samples — copy to *.yaml on first run
+│   ├── settings.yaml        # Tunable parameters (gitignored; from example)
+│   └── sources.yaml         # RSS source definitions (gitignored; from example)
 ├── crawler/
 │   ├── fetcher.py           # Async concurrent RSS fetching
 │   ├── rss_parser.py        # RSS parsing + language detection
@@ -159,6 +181,12 @@ redis-cli SCARD news:dedup:simhashes
 | Retry | tenacity (exponential backoff) |
 | Language detection | langdetect |
 
+## Contributing
+
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for
+development setup and guidelines, and [SECURITY.md](SECURITY.md) for reporting
+vulnerabilities.
+
 ## License
 
-Private project.
+Released under the [MIT License](LICENSE).
