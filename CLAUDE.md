@@ -76,13 +76,15 @@ The system is a pipeline: **RSS feeds → SimHash dedup → Redis → AI batch �
   - **API**: Full CRUD via `/api/social-article/*` endpoints
 - **Webhook scheduling**: Cron-based scheduled webhook triggers managed via UI. SQLite stores schedules, APScheduler executes every minute. Scheduled webhooks respect ai_mode filters.
 - **Synthesis trigger modes**: `interval` (process all categories on schedule) vs `on_demand` (only categories with enabled synthetic hooks). On-demand mode prevents wasting API quota on unused categories.
-- **Age-based skip**: Articles older than category-specific thresholds (busy: 15min, moderate: 20min, quiet: 30min) are skipped during AI processing to save API quota. Configurable via `settings.yaml`. See `docs/AGE_SKIP_EXPLAINED.md` for details.
+- **Age-based skip**: Articles older than category-specific thresholds (busy: 15min, moderate: 20min, quiet: 30min) are skipped during AI processing to save API quota. Configurable via `settings.yaml`.
 - **Language handling**: `langdetect` auto-detects article language; falls back to source-declared language
 
 ## Configuration
 
 - `config/settings.yaml` — all tunable parameters (AI providers, crawl interval, batch sizes, webhook URLs, timeouts, debate config)
-- `config/sources.yaml` — RSS source definitions (39 feeds: EN, VI, JA, KO across US/EU/ME/Asia)
+- `config/sources.yaml` — RSS source definitions (hundreds of feeds: EN, VI, JA, KO across US/EU/ME/Asia)
+
+**Config files are gitignored.** The repo ships `config/*.yaml.example`; copy each to `config/*.yaml` on first run (`settings`, `sources`, `social_agents`, `sim_personas`). Real configs live in the volume (or Supabase when `CONFIG_BACKEND=db`), never in git.
 
 To add a new RSS source, add an entry to `config/sources.yaml` and restart.
 
