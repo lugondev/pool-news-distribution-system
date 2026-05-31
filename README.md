@@ -1,7 +1,7 @@
 # News Aggregator
 
-[![Docker Pulls](https://img.shields.io/docker/pulls/lugon/pool-news-distribution-system?logo=docker&label=docker%20pulls)](https://hub.docker.com/r/lugon/pool-news-distribution-system)
-[![Docker Image Size](https://img.shields.io/docker/image-size/lugon/pool-news-distribution-system/latest?logo=docker&label=image%20size)](https://hub.docker.com/r/lugon/pool-news-distribution-system)
+[![Docker Pulls](https://img.shields.io/docker/pulls/lugon/pool-news-distribution-system?logo=docker&label=docker%20pulls&v=1)](https://hub.docker.com/r/lugon/pool-news-distribution-system)
+[![Docker Image Size](https://img.shields.io/docker/image-size/lugon/pool-news-distribution-system/latest?logo=docker&label=image%20size&v=1)](https://hub.docker.com/r/lugon/pool-news-distribution-system)
 [![Build & Publish](https://github.com/lugondev/pool-news-distribution-system/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/lugondev/pool-news-distribution-system/actions/workflows/docker-publish.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
