@@ -1,5 +1,11 @@
 # News Aggregator
 
+[![Docker Pulls](https://img.shields.io/docker/pulls/lugon/pool-news-distribution-system?logo=docker&label=docker%20pulls)](https://hub.docker.com/r/lugon/pool-news-distribution-system)
+[![Docker Image Size](https://img.shields.io/docker/image-size/lugon/pool-news-distribution-system/latest?logo=docker&label=image%20size)](https://hub.docker.com/r/lugon/pool-news-distribution-system)
+[![Build & Publish](https://github.com/lugondev/pool-news-distribution-system/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/lugondev/pool-news-distribution-system/actions/workflows/docker-publish.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
 Automated multilingual news aggregation pipeline with AI-powered summaries and a real-time dashboard.
 
 **Pipeline:** RSS feeds → SimHash dedup → Redis → AI summarization → Webhooks
@@ -64,6 +70,35 @@ python main.py
 ```
 
 Dashboard available at [http://localhost:8000](http://localhost:8000).
+
+### Run with Docker
+
+Pre-built multi-arch images (`linux/amd64`, `linux/arm64`) are published on every
+push to `main` and every `v*.*.*` tag, to both registries:
+
+| Registry | Image |
+|----------|-------|
+| Docker Hub | `lugon/pool-news-distribution-system` |
+| GHCR | `ghcr.io/lugondev/pool-news-distribution-system` |
+
+```bash
+# Pull the latest image
+docker pull lugon/pool-news-distribution-system:latest
+
+# Run (Redis must be reachable; mount config + data so they persist)
+docker run -d --name news-aggregator \
+  -p 8000:8000 \
+  -e REDIS_URL=redis://host.docker.internal:6379/0 \
+  -v "$PWD/config:/app/config" \
+  -v "$PWD/data:/app/data" \
+  lugon/pool-news-distribution-system:latest
+```
+
+Or bring up the full stack (app + Redis) with Compose:
+
+```bash
+docker compose up -d
+```
 
 ## Architecture
 
