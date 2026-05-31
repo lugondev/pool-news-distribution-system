@@ -72,10 +72,9 @@ jobs:
             type=sha,format=short
 
       # --- Build & push ------------------------------------------------------
-      # Docker Hub is the badge target — it must succeed. GHCR is best-effort
-      # (continue-on-error) so an unrelated GHCR package-permission issue does
-      # not block the Docker Hub publish. Both reuse the GHA build cache, so the
+      # Push to each registry separately. Both reuse the GHA build cache, so the
       # multi-arch build runs once and the second push reuses cached layers.
+      # The Docker Hub step is gated on DOCKERHUB_USERNAME so forks skip it.
       - name: Build and push to Docker Hub
         if: ${{ vars.DOCKERHUB_USERNAME != '' }}
         uses: docker/build-push-action@v6
@@ -89,7 +88,6 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build and push to GHCR
-        continue-on-error: true
         uses: docker/build-push-action@v6
         with:
           context: .
