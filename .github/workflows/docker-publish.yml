@@ -45,14 +45,25 @@ jobs:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # --- Tag/label metadata ------------------------------------------------
-      - name: Extract metadata
-        id: meta
+      # --- Tag/label metadata (one per registry) -----------------------------
+      - name: Extract metadata (Docker Hub)
+        id: meta-dockerhub
+        if: ${{ vars.DOCKERHUB_USERNAME != '' }}
         uses: docker/metadata-action@v5
         with:
-          images: |
-            ${{ env.GHCR_IMAGE }}
-            ${{ vars.DOCKERHUB_USERNAME != '' && format('docker.io/{0}/{1}', vars.DOCKERHUB_USERNAME, github.event.repository.name) || '' }}
+          images: docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short
+
+      - name: Extract metadata (GHCR)
+        id: meta-ghcr
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.GHCR_IMAGE }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -61,13 +72,29 @@ jobs:
             type=sha,format=short
 
       # --- Build & push ------------------------------------------------------
-      - name: Build and push
+      # Docker Hub is the badge target — it must succeed. GHCR is best-effort
+      # (continue-on-error) so an unrelated GHCR package-permission issue does
+      # not block the Docker Hub publish. Both reuse the GHA build cache, so the
+      # multi-arch build runs once and the second push reuses cached layers.
+      - name: Build and push to Docker Hub
+        if: ${{ vars.DOCKERHUB_USERNAME != '' }}
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta-dockerhub.outputs.tags }}
+          labels: ${{ steps.meta-dockerhub.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Build and push to GHCR
+        continue-on-error: true
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta-ghcr.outputs.tags }}
+          labels: ${{ steps.meta-ghcr.outputs.labels }}
+          cache-from: type=gha
