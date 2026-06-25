@@ -42,7 +42,11 @@ The system is a pipeline: **RSS feeds → SimHash dedup → Redis → AI batch �
    - `ai_mode: synthetic` — only dispatch synthetic articles (type="synthetic")
    - `ai_mode: debate` — only dispatch debate articles (type="debate")
 6. **Social article job** (default every 6 hours, optional): generates long-form articles (2000-3000 words) from recent news → AI creates structured content with multiple sections → generates detailed image prompts for thumbnails and illustrations → saves to Redis. **Only runs when social_article.enabled=true and social_article.auto_generate=true.**
-7. **Log cleanup job** (default every 5 hours): deletes logs older than 5h from all log tables (`crawl_logs`, `webhook_logs`, `ai_logs`, `telegram_logs`, `system_logs`, `api_logs`, `channel_logs`) **only if table has ≥200 rows**. Prevents unbounded SQLite growth while preserving small datasets.
+7. **Log cleanup job** (configurable, default every 5 hours): deletes logs older than configured age from all log tables (`crawl_logs`, `webhook_logs`, `ai_logs`, `telegram_logs`, `system_logs`, `api_logs`, `channel_logs`) **only if table has ≥threshold rows**. Prevents unbounded SQLite growth. **Configurable via `log_retention` in settings.yaml:**
+   - `max_age_hours: 5` — delete logs older than N hours (default: 5)
+   - `cleanup_interval_hours: 5` — run cleanup every N hours (default: 5)
+   - `min_rows_threshold: 200` — only cleanup if table has ≥N rows (default: 200)
+   - `enabled: true` — toggle cleanup on/off
 
 **Anti-ban measures** (`crawler/fetcher.py`): per-domain locks (same-domain feeds serialized), random delays (1-3s), User-Agent rotation, 429 retry with Retry-After, request order shuffling.
 
@@ -127,7 +131,69 @@ sqlite3 data/stats.db "SELECT * FROM channel_logs ORDER BY requested_at DESC LIM
 sqlite3 data/stats.db "SELECT auth_method, COUNT(*) FROM channel_logs GROUP BY auth_method;"
 sqlite3 data/stats.db "SELECT client_id, endpoint, COUNT(*) FROM channel_logs GROUP BY client_id, endpoint;"
 sqlite3 data/stats.db "SELECT endpoint, AVG(duration_ms) FROM channel_logs GROUP BY endpoint;"
+
+# Analyze stats.db size and get cleanup recommendations
+python scripts/analyze_stats_db.py
+python scripts/analyze_stats_db.py --db-path /custom/path/stats.db
 ```
+
+## Managing stats.db Size
+
+**Problem:** `stats.db` grows unbounded in production → can reach GB sizes.
+
+**What is stats.db?** SQLite database storing all logging/analytics data (7 tables):
+- `crawl_logs` — every RSS fetch attempt
+- `webhook_logs` — every webhook dispatch
+- `ai_logs` — every AI API call
+- `telegram_logs` — every Telegram message
+- `system_logs` — scheduler job events
+- `api_logs` — HTTP API requests
+- `channel_logs` — pull-based channel API calls
+
+**Safe to delete?** ✅ YES! Deleting `stats.db` is 100% safe:
+- Article data lives in **Redis** (not SQLite)
+- Config lives in **YAML files** (not SQLite)
+- Only loses historical logs (regenerated after restart)
+
+**Quick fix (production):**
+```bash
+# Zero-downtime deletion
+mv /path/to/data/stats.db /tmp/stats.db.old
+systemctl restart your-service  # or docker-compose restart
+rm /tmp/stats.db.old
+
+# With backup
+cp data/stats.db data/stats.db.$(date +%Y%m%d_%H%M%S).bak
+rm data/stats.db
+systemctl restart your-service
+```
+
+**Long-term solution:** Configure log retention policy in `config/settings.yaml`:
+```yaml
+log_retention:
+  enabled: true
+  max_age_hours: 24             # Keep logs for 24h (instead of 5h)
+  cleanup_interval_hours: 2     # Run cleanup every 2h (instead of 5h)
+  min_rows_threshold: 100       # Lower threshold (instead of 200)
+```
+
+**Analyze before cleanup:**
+```bash
+# Get detailed breakdown + recommendations
+python scripts/analyze_stats_db.py
+
+# Shows:
+# - File size (MB)
+# - Per-table row counts & age distribution
+# - Cleanup impact estimates
+# - Recommended retention settings
+```
+
+**Recommended retention policies by environment:**
+- **Development**: 1-5 hours retention (default: 5h)
+- **Staging**: 12-24 hours retention
+- **Production (light traffic)**: 24-48 hours retention
+- **Production (heavy traffic)**: 3-12 hours retention, cleanup every 1-2h
 
 ## Module Map
 

@@ -49,6 +49,12 @@ storage:
   redis_feed_key: news:feed
   redis_dedup_key: news:dedup:simhashes
 
+log_retention:
+  enabled: true
+  max_age_hours: 5                # Keep logs for N hours (default: 5h)
+  cleanup_interval_hours: 5       # Run cleanup every N hours (default: 5h)
+  min_rows_threshold: 200         # Only cleanup if table has >= N rows (default: 200)
+
 ai:
   enabled: true
   api_key: YOUR_OPENAI_COMPATIBLE_API_KEY   # e.g. sk-or-v1-... (OpenRouter) or sk-... (OpenAI)
