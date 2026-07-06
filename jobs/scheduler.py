@@ -1520,16 +1520,19 @@ def get_scheduler(redis: aioredis.Redis) -> AsyncIOScheduler:
             coalesce=True,
         )
 
-    # Log cleanup (runs every 5h, deletes logs older than 5h if ≥200 rows)
-    scheduler.add_job(
-        cleanup_logs_job,
-        "interval",
-        hours=5,
-        id="log_cleanup",
-        args=[redis],
-        max_instances=1,
-        coalesce=True,
-    )
+    # Log cleanup (configurable via log_retention in settings.yaml)
+    log_retention_cfg = cfg.get("log_retention", {})
+    if log_retention_cfg.get("enabled", True):
+        cleanup_interval = log_retention_cfg.get("cleanup_interval_hours", 5)
+        scheduler.add_job(
+            cleanup_logs_job,
+            "interval",
+            hours=cleanup_interval,
+            id="log_cleanup",
+            args=[redis],
+            max_instances=1,
+            coalesce=True,
+        )
 
     _scheduler = scheduler
     return scheduler

@@ -1,10 +1,18 @@
 """
-Log cleanup job — deletes logs older than 5h if table has ≥200 rows.
-Runs every 5h to prevent unbounded SQLite growth.
+Log cleanup job — deletes logs older than configured age if table has >= threshold rows.
+Runs on configured interval to prevent unbounded SQLite growth.
+
+Default: Delete logs >5h if table has ≥200 rows, runs every 5h.
+Configurable via settings.yaml:
+  log_retention:
+    enabled: true
+    max_age_hours: 5
+    cleanup_interval_hours: 5
+    min_rows_threshold: 200
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import redis.asyncio as aioredis
 
@@ -23,14 +31,32 @@ LOG_TABLES = {
     "channel_logs": "requested_at",
 }
 
-MIN_ROWS_THRESHOLD = 200
+# Default values (overridden by settings.yaml)
+DEFAULT_MAX_AGE_HOURS = 5
+DEFAULT_MIN_ROWS_THRESHOLD = 200
+
+
+def _load_config() -> dict:
+    """Load retention config from settings.yaml."""
+    from dashboard.config_io import read_settings
+    settings = read_settings()
+    return settings.get("log_retention", {})
 
 
 async def cleanup_logs_job(redis: aioredis.Redis) -> None:
-    """Delete logs older than 5h from all log tables if they have ≥200 rows."""
+    """Delete logs older than configured age from all log tables if they have >= threshold rows."""
     started = datetime.now(timezone.utc)
-    from datetime import timedelta
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
+
+    # Load config
+    config = _load_config()
+    if not config.get("enabled", True):
+        logger.info("[log_cleanup] Disabled via config, skipping")
+        return
+
+    max_age_hours = config.get("max_age_hours", DEFAULT_MAX_AGE_HOURS)
+    min_rows_threshold = config.get("min_rows_threshold", DEFAULT_MIN_ROWS_THRESHOLD)
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).isoformat()
 
     total_deleted = 0
     results = {}
@@ -44,9 +70,9 @@ async def cleanup_logs_job(redis: aioredis.Redis) -> None:
                 )
                 total_rows = count_result[0]["cnt"] if count_result else 0
 
-                if total_rows < MIN_ROWS_THRESHOLD:
+                if total_rows < min_rows_threshold:
                     logger.debug(
-                        f"[log_cleanup] {table}: {total_rows} rows < {MIN_ROWS_THRESHOLD}, skipping"
+                        f"[log_cleanup] {table}: {total_rows} rows < {min_rows_threshold}, skipping"
                     )
                     results[table] = {"skipped": True, "total_rows": total_rows}
                     continue
@@ -69,6 +95,13 @@ async def cleanup_logs_job(redis: aioredis.Redis) -> None:
 
             await db.commit()
 
+            # Reclaim freed pages back to the OS. Plain DELETE only marks
+            # pages free internally (auto_vacuum=INCREMENTAL still requires
+            # this call to actually shrink the file) — without it the file
+            # stays at its historical peak size forever.
+            await db.execute("PRAGMA incremental_vacuum")
+            await db.commit()
+
         # Sweep expired Personal Access Tokens (separate transaction).
         try:
             from auth.store import get_auth_store
@@ -87,12 +120,14 @@ async def cleanup_logs_job(redis: aioredis.Redis) -> None:
             metadata={
                 "total_deleted": total_deleted,
                 "cutoff": cutoff,
+                "max_age_hours": max_age_hours,
+                "min_rows_threshold": min_rows_threshold,
                 "results": results,
             },
         )
 
         logger.info(
-            f"Log cleanup job: deleted {total_deleted} rows across {len(results)} tables"
+            f"[log_cleanup] Deleted {total_deleted} rows (age >{max_age_hours}h, threshold >={min_rows_threshold})"
         )
 
     except Exception as exc:
