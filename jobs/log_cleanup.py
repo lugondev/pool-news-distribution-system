@@ -95,6 +95,13 @@ async def cleanup_logs_job(redis: aioredis.Redis) -> None:
 
             await db.commit()
 
+            # Reclaim freed pages back to the OS. Plain DELETE only marks
+            # pages free internally (auto_vacuum=INCREMENTAL still requires
+            # this call to actually shrink the file) — without it the file
+            # stays at its historical peak size forever.
+            await db.execute("PRAGMA incremental_vacuum")
+            await db.commit()
+
         # Sweep expired Personal Access Tokens (separate transaction).
         try:
             from auth.store import get_auth_store

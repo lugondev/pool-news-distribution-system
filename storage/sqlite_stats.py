@@ -39,6 +39,14 @@ async def init_db() -> None:
         await db.execute("PRAGMA journal_mode=WAL")
         await db.execute("PRAGMA synchronous=NORMAL")
 
+        # auto_vacuum chỉ có thể set qua VACUUM một lần (persistent sau đó).
+        # Không có auto_vacuum, DELETE không bao giờ trả page trống về OS —
+        # file .db chỉ tăng theo peak lịch sử chứ không bao giờ co lại.
+        row = await db.execute_fetchall("PRAGMA auto_vacuum")
+        if row[0][0] != 2:  # 2 = INCREMENTAL
+            await db.execute("PRAGMA auto_vacuum=INCREMENTAL")
+            await db.execute("VACUUM")
+
         # Import and initialize webhook schedules table
         from storage.webhook_schedules import init_schedules_db
 
