@@ -19,6 +19,15 @@ def _db_path() -> str:
     return DB_PATH
 
 
+def _logging_enabled() -> bool:
+    """Whether write-path logging (crawl/webhook/ai/telegram/channel/system/api)
+    is active. Default off — stats.db only grows once explicitly enabled via
+    settings.yaml `logging.enabled`. Reads go through read_settings()'s own
+    mtime/TTL cache, so this is cheap to call on every log_* invocation."""
+    from dashboard.config_io import read_settings
+    return read_settings().get("logging", {}).get("enabled", False)
+
+
 @asynccontextmanager
 async def _db():
     """Open SQLite connection với WAL-friendly settings.
@@ -39,13 +48,13 @@ async def init_db() -> None:
         await db.execute("PRAGMA journal_mode=WAL")
         await db.execute("PRAGMA synchronous=NORMAL")
 
-        # auto_vacuum chỉ có thể set qua VACUUM một lần (persistent sau đó).
-        # Không có auto_vacuum, DELETE không bao giờ trả page trống về OS —
-        # file .db chỉ tăng theo peak lịch sử chứ không bao giờ co lại.
+        # auto_vacuum=INCREMENTAL shrinks file page-by-page (not full VACUUM).
+        # Set once, persists. Don't VACUUM at startup — requires ~100GB free
+        # space if DB is 100GB, causing crashes on full disks.
+        # WAL checkpoint happens naturally on cleanup job after each DELETE.
         row = await db.execute_fetchall("PRAGMA auto_vacuum")
         if row[0][0] != 2:  # 2 = INCREMENTAL
             await db.execute("PRAGMA auto_vacuum=INCREMENTAL")
-            await db.execute("VACUUM")
 
         # Import and initialize webhook schedules table
         from storage.webhook_schedules import init_schedules_db
@@ -192,6 +201,8 @@ async def init_db() -> None:
 
 
 async def log_crawl_result(source_id: str, stats: dict, started_at: datetime) -> None:
+    if not _logging_enabled():
+        return
     finished_at = datetime.now(timezone.utc)
     duration_ms = int((finished_at - started_at).total_seconds() * 1000)
     async with _db() as db:
@@ -225,6 +236,8 @@ async def log_webhook(
     error_msg: str = None,
     webhook_id: str = None,
 ) -> None:
+    if not _logging_enabled():
+        return
     async with _db() as db:
         await db.execute(
             """INSERT INTO webhook_logs (article_id, webhook_id, webhook_url, sent_at, status_code, success, error_msg)
@@ -250,6 +263,8 @@ async def log_telegram(
     success: bool,
     error_msg: str | None = None,
 ) -> None:
+    if not _logging_enabled():
+        return
     async with _db() as db:
         await db.execute(
             """INSERT INTO telegram_logs
@@ -281,6 +296,8 @@ async def log_channel_request(
     response_body: str | None = None,
 ) -> None:
     """Log channel API request with client tracking, auth method, and response body."""
+    if not _logging_enabled():
+        return
     async with _db() as db:
         await db.execute(
             """INSERT INTO channel_logs
@@ -305,6 +322,8 @@ async def log_channel_request(
 
 
 async def log_ai_usage(article_id: str, model: str, tokens_used: int) -> None:
+    if not _logging_enabled():
+        return
     async with _db() as db:
         await db.execute(
             "INSERT INTO ai_logs (article_id, model, tokens_used) VALUES (?, ?, ?)",
@@ -580,6 +599,8 @@ async def log_system_event(
     metadata: dict | None = None,
     error_msg: str | None = None,
 ) -> None:
+    if not _logging_enabled():
+        return
     finished_at = datetime.now(timezone.utc)
     duration_ms = int((finished_at - started_at).total_seconds() * 1000)
     async with _db() as db:
@@ -608,6 +629,8 @@ async def log_api_request(
     requested_at: datetime,
     error_msg: str | None = None,
 ) -> None:
+    if not _logging_enabled():
+        return
     async with _db() as db:
         await db.execute(
             """INSERT INTO api_logs (method, path, status_code, duration_ms, requested_at, error_msg)

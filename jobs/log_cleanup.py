@@ -95,12 +95,29 @@ async def cleanup_logs_job(redis: aioredis.Redis) -> None:
 
             await db.commit()
 
-            # Reclaim freed pages back to the OS. Plain DELETE only marks
-            # pages free internally (auto_vacuum=INCREMENTAL still requires
-            # this call to actually shrink the file) — without it the file
-            # stays at its historical peak size forever.
-            await db.execute("PRAGMA incremental_vacuum")
+            # WAL checkpoint to let auto_vacuum=INCREMENTAL actually shrink
+            # the file back to the OS. Without checkpoint, freed pages stay
+            # internal and file doesn't physically shrink on disk.
+            # RESTART = checkpoint + reset WAL. Safe, doesn't block readers.
+            await db.execute("PRAGMA wal_checkpoint(RESTART)")
             await db.commit()
+
+            # One-time VACUUM recovery for bloated legacy DBs (auto_vacuum wasn't
+            # set due to past startup failures). This is optional, expensive (~100GB
+            # free space for 100GB DB), and skipped if disk is full or disabled.
+            try:
+                if config.get("enable_vacuum_recovery", False):
+                    logger.info("[log_cleanup] Attempting VACUUM recovery (expensive)...")
+                    await db.execute("VACUUM")
+                    await db.commit()
+                    logger.info("[log_cleanup] VACUUM succeeded")
+                    results["vacuum"] = {"status": "success"}
+            except Exception as e:
+                # Disk full, DB locked, etc. — skip and rely on incremental cleanup.
+                logger.info(
+                    f"[log_cleanup] VACUUM skipped (expected on disk-full): {e}"
+                )
+                results["vacuum"] = {"status": "skipped", "reason": str(e)}
 
         # Sweep expired Personal Access Tokens (separate transaction).
         try:
