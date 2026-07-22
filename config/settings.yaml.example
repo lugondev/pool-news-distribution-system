@@ -49,6 +49,11 @@ storage:
   redis_feed_key: news:feed
   redis_dedup_key: news:dedup:simhashes
 
+logging:
+  enabled: false                  # Write crawl/webhook/ai/telegram/channel/system/api logs to stats.db.
+                                   # Off by default so stats.db stays empty/small on fresh installs.
+                                   # Turn on for the /logs dashboard, debugging, or analytics.
+
 log_retention:
   enabled: true
   max_age_hours: 5                # Keep logs for N hours (default: 5h)
